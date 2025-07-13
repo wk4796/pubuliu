@@ -12,15 +12,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
 
     <style>
-        /* 核心改动1: 让body成为一个撑满视窗的flex容器 */
-        body { 
-            font-family: 'Inter', 'Noto Sans SC', sans-serif; 
-            background-color: #f0fdf4; 
-            color: #14532d;
-            display: flex;
-            flex-direction: column;
-            min-height: 100vh;
-        }
+        body { font-family: 'Inter', 'Noto Sans SC', sans-serif; background-color: #f0fdf4; color: #14532d; display: flex; flex-direction: column; min-height: 100vh; }
         body.lightbox-open { overflow: hidden; }
         .filter-btn { padding: 0.5rem 1rem; border-radius: 9999px; font-weight: 500; transition: all 0.2s ease; border: 1px solid transparent; cursor: pointer; }
         .filter-btn:hover { background-color: #dcfce7; }
@@ -81,10 +73,25 @@
     <script>
         document.addEventListener('DOMContentLoaded', function () {
             
+            // =================================================================
+            // 数据中心：在这里管理您的所有图片
+            // =================================================================
             const imageData = [
-                { src: 'https://tu.665410.xyz/5VK3U8DR9Q1V.jpg', category: '风景' }, { src: 'https://tu.665410.xyz/DY8Y4VG0HQ1V.png', category: '二次元' }, { src: 'https://tu.665410.xyz/T3T0QM05HQ1V.jpg', category: '风景' }, { src: 'https://tu.665410.xyz/7ZX4548R9Q1V.jpg', category: '二次元' }, { src: 'https://tu.665410.xyz/DJUP64A4HQ1V.jpg', category: '风景' }, { src: 'https://tu.665410.xyz/HU8A1PQ23Q1V.png', category: '二次元' }, { src: 'https://tu.665410.xyz/5VK3U8DR9Q1V.jpg', category: '风景' }, { src: 'https://tu.665410.xyz/DY8Y4VG0HQ1V.png', category: '二次元' }, { src: 'https://tu.665410.xyz/T3T0QM05HQ1V.jpg', category: '风景' }, { src: 'https://tu.665410.xyz/7ZX4548R9Q1V.jpg', category: '二次元' }, { src: 'https://tu.665410.xyz/DJUP64A4HQ1V.jpg', category: '风景' }, { src: 'https://tu.665410.xyz/HU8A1PQ23Q1V.png', category: '二次元' },
+                { src: 'https://tu.665410.xyz/5VK3U8DR9Q1V.jpg', category: '风景' },
+                { src: 'https://tu.665410.xyz/DY8Y4VG0HQ1V.png', category: '二次元' },
+                { src: 'https://tu.665410.xyz/T3T0QM05HQ1V.jpg', category: '风景' },
+                { src: 'https://tu.665410.xyz/7ZX4548R9Q1V.jpg', category: '二次元' },
+                { src: 'https://tu.665410.xyz/DJUP64A4HQ1V.jpg', category: '风景' },
+                { src: 'https://tu.665410.xyz/HU8A1PQ23Q1V.png', category: '二次元' },
+                { src: 'https://tu.665410.xyz/5VK3U8DR9Q1V.jpg', category: '风景' },
+                { src: 'https://tu.665410.xyz/DY8Y4VG0HQ1V.png', category: '二次元' },
+                { src: 'https://tu.665410.xyz/T3T0QM05HQ1V.jpg', category: '风景' },
+                { src: 'https://tu.665410.xyz/7ZX4548R9Q1V.jpg', category: '二次元' },
+                { src: 'https://tu.665410.xyz/DJUP64A4HQ1V.jpg', category: '风景' },
+                { src: 'https://tu.665410.xyz/HU8A1PQ23Q1V.png', category: '二次元' },
             ];
 
+            // --- 全局变量 ---
             const galleryContainer = document.getElementById('gallery-container');
             const loader = document.getElementById('loader');
             const itemsPerLoad = 6;
