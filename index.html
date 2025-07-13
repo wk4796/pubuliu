@@ -12,11 +12,39 @@
     <script src="https://cdn.tailwindcss.com"></script>
 
     <style>
-        /* CSS部分与上一版完全相同，无需修改 */
         body { font-family: 'Inter', 'Noto Sans SC', sans-serif; background-color: #f0fdf4; color: #14532d; }
         body.lightbox-open { overflow: hidden; }
-        .grid-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); grid-auto-rows: 10px; gap: 1rem; }
-        .grid-item { position: relative; border-radius: 0.5rem; overflow: hidden; background-color: #e4e4e7; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1); opacity: 0; transform: translateY(20px); transition: opacity 0.5s ease-out, transform 0.5s ease-out, box-shadow 0.3s ease; }
+
+        .grid-gallery {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+            grid-auto-rows: 10px;
+            gap: 1rem;
+        }
+
+        .grid-item {
+            position: relative;
+            border-radius: 0.5rem;
+            overflow: hidden;
+            background-color: #e4e4e7;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            opacity: 0;
+            transform: translateY(20px);
+            transition: opacity 0.5s ease-out, transform 0.5s ease-out, box-shadow 0.3s ease;
+        }
+
+        /* 关键点1: 为需要加宽的图片项准备一个样式 */
+        .grid-item-wide {
+            grid-column: span 2;
+        }
+
+        /* 当屏幕过窄，不足以容纳2列时，取消加宽效果，防止布局错乱 */
+        @media (max-width: 400px) {
+            .grid-item-wide {
+                grid-column: span 1;
+            }
+        }
+        
         .grid-item.is-visible { opacity: 1; transform: translateY(0); }
         .grid-item img { cursor: pointer; width: 100%; height: 100%; object-fit: cover; display: block; transition: transform 0.4s ease; }
         .grid-item:hover img { transform: scale(1.05); }
@@ -36,7 +64,6 @@
     </header>
 
     <main class="container mx-auto px-6 py-8 md:py-10">
-        
         <div class="max-w-7xl mx-auto grid-gallery">
             <div class="grid-item"><img src="https://tu.665410.xyz/5VK3U8DR9Q1V.jpg" alt="新发现咖啡馆 (横屏)" loading="lazy"><div class="grid-caption">新发现的咖啡馆</div></div>
             <div class="grid-item"><img src="https://tu.665410.xyz/DY8Y4VG0HQ1V.png" alt="樱花林 (竖屏)" loading="lazy"><div class="grid-caption">偶遇一片樱花林</div></div>
@@ -56,7 +83,7 @@
             
             const gallery = document.querySelector('.grid-gallery');
 
-            function resizeGridItems() {
+            function resizeAllGridItems() {
                 const items = document.querySelectorAll('.grid-item');
                 if (!items.length) return;
 
@@ -66,46 +93,54 @@
                 items.forEach(item => {
                     const img = item.querySelector('img');
                     
-                    const setSpan = () => {
-                        // --- 这里是核心修正 ---
-                        // 1. 获取图片在当前列宽下的实际渲染宽度
-                        const clientWidth = img.clientWidth;
+                    const processItem = () => {
+                        // 关键点2: 混合布局的核心逻辑
+                        // 步骤一: 判断是否为宽图，并应用样式
+                        const ratio = img.naturalWidth / img.naturalHeight;
+                        if (ratio > 1.2) { // 宽高比大于1.2的认为是宽图
+                            item.classList.add('grid-item-wide');
+                        } else {
+                            item.classList.remove('grid-item-wide');
+                        }
 
-                        // 2. 确保能取到宽度和图片的原始尺寸
+                        // 步骤二: 基于当前(可能已加宽的)宽度，精确计算高度
+                        const clientWidth = img.clientWidth;
                         if (clientWidth > 0 && img.naturalWidth > 0) {
-                            // 3. 根据原始宽高比，计算出图片应该有的高度
                             const scaledHeight = clientWidth * (img.naturalHeight / img.naturalWidth);
-                            
-                            // 4. 用计算出的精确高度来决定跨越的行数
                             const rowSpan = Math.ceil((scaledHeight + rowGap) / (rowHeight + rowGap));
                             item.style.gridRowEnd = 'span ' + rowSpan;
                         }
                     };
 
-                    // 确保图片加载完成后再计算
+                    // 确保图片加载完成后再执行布局计算
                     if (img.complete) {
-                        setSpan();
+                        processItem();
                     } else {
-                        img.addEventListener('load', setSpan);
+                        img.addEventListener('load', processItem);
                     }
                 });
             }
             
-            resizeGridItems();
-            window.addEventListener('resize', resizeGridItems);
-
-            const galleryItems = document.querySelectorAll('.grid-item');
-            const observer = new IntersectionObserver((entries, observer) => {
-                entries.forEach(entry => {
-                    if (entry.isIntersecting) {
-                        entry.target.classList.add('is-visible');
-                        observer.unobserve(entry.target);
-                    }
-                });
-            }, { root: null, rootMargin: '0px', threshold: 0.1 });
-            galleryItems.forEach(item => { observer.observe(item); });
-
-            // Lightbox功能保持不变
+            // 使用更可靠的方式来确保在图片加载和窗口大小调整后都重新计算布局
+            // 使用 window.onload 能更好地确保所有资源（包括图片）都已加载
+            window.onload = function() {
+                resizeAllGridItems();
+                // 动画效果的观察者也在这里启动更可靠
+                const galleryItems = document.querySelectorAll('.grid-item');
+                const observer = new IntersectionObserver((entries, observer) => {
+                    entries.forEach(entry => {
+                        if (entry.isIntersecting) {
+                            entry.target.classList.add('is-visible');
+                            observer.unobserve(entry.target);
+                        }
+                    });
+                }, { root: null, rootMargin: '0px', threshold: 0.1 });
+                galleryItems.forEach(item => { observer.observe(item); });
+            };
+            
+            window.addEventListener('resize', resizeAllGridItems);
+            
+            // Lightbox 功能保持不变
             function setupAdvancedLightbox() {
                 const galleryImages = document.querySelectorAll('.grid-item img');
                 let lightbox = document.querySelector('.lightbox');
