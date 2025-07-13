@@ -20,22 +20,21 @@
         }
         body.lightbox-open { overflow: hidden; }
 
-        /* --- 全新的 CSS Grid 瀑布流画廊样式 --- */
+        /* --- 终极版：CSS Grid 智能布局样式 --- */
         .grid-gallery {
             display: grid;
-            /* 关键点1: 创建响应式网格列。每列最小150px，最大1fr(自由填充) */
-            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-            /* 关键点2: 定义一个基础的行高，让竖屏图片可以基于它进行扩展 */
-            grid-auto-rows: minmax(100px, auto);
+            /* 响应式列布局，最小列宽180px */
+            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+            /* 关键点1: 定义一个非常小的基础行高单位，作为计算基准 */
+            grid-auto-rows: 10px;
             gap: 1rem; /* 网格间距 */
         }
 
         .grid-item {
             position: relative;
-            border-radius: 0.75rem;
+            border-radius: 0.5rem;
             overflow: hidden;
-            background-color: white;
-            border: 1px solid rgba(34, 197, 94, 0.2);
+            background-color: #e4e4e7; /* 添加一个浅灰色背景，防止图片加载慢时出现空白 */
             box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
             opacity: 0;
             transform: translateY(20px);
@@ -50,7 +49,8 @@
             cursor: pointer;
             width: 100%;
             height: 100%;
-            object-fit: cover; /* 图片会裁剪以填充整个容器，保持比例 */
+            /* 关键点2: 使用 cover 来填满容器，JS会确保容器比例正确，所以裁剪效果会非常自然 */
+            object-fit: cover;
             display: block;
             transition: transform 0.4s ease;
         }
@@ -58,20 +58,10 @@
             transform: scale(1.05);
         }
 
-        /* 关键点3: 定义用于跨度和高度调整的类 */
-        .grid-item.wide {
-            grid-column: span 2; /* 横向跨2列 */
-        }
-        .grid-item.tall {
-            grid-row: span 2; /* 纵向跨2行 */
-        }
-
         .grid-caption {
-            position: absolute; bottom: 0; left: 0; right: 0;
-            padding: 2rem 1rem 1rem; color: white; font-weight: 500;
-            background: linear-gradient(to top, rgba(0, 0, 0, 0.7), transparent);
-            opacity: 0; transform: translateY(100%);
-            transition: opacity 0.4s ease, transform 0.4s ease;
+            position: absolute; bottom: 0; left: 0; right: 0; padding: 2rem 1rem 1rem;
+            color: white; font-weight: 500; background: linear-gradient(to top, rgba(0, 0, 0, 0.7), transparent);
+            opacity: 0; transform: translateY(100%); transition: opacity 0.4s ease, transform 0.4s ease;
             pointer-events: none;
         }
         .grid-item:hover .grid-caption {
@@ -97,30 +87,12 @@
         
         <div class="max-w-7xl mx-auto grid-gallery">
             
-            <div class="grid-item">
-                <img src="https://tu.665410.xyz/5VK3U8DR9Q1V.jpg" alt="新发现咖啡馆 (横屏)" loading="lazy">
-                <div class="grid-caption">新发现的咖啡馆 (横屏)</div>
-            </div>
-            <div class="grid-item">
-                <img src="https://tu.665410.xyz/DY8Y4VG0HQ1V.png" alt="樱花林 (竖屏)" loading="lazy">
-                <div class="grid-caption">偶遇一片樱花林 (竖屏)</div>
-            </div>
-            <div class="grid-item">
-                <img src="https://tu.665410.xyz/T3T0QM05HQ1V.jpg" alt="项目完成 (横屏)" loading="lazy">
-                <div class="grid-caption">庆祝项目完成 (横屏)</div>
-            </div>
-            <div class="grid-item">
-                <img src="https://tu.665410.xyz/7ZX4548R9Q1V.jpg" alt="学习编程 (接近方形)" loading="lazy">
-                <div class="grid-caption">学习编程的时光</div>
-            </div>
-            <div class="grid-item">
-                <img src="https://tu.665410.xyz/DJUP64A4HQ1V.jpg" alt="手工面包 (竖屏)" loading="lazy">
-                <div class="grid-caption">初次尝试手工面包 (竖屏)</div>
-            </div>
-            <div class="grid-item">
-                <img src="https://tu.665410.xyz/HU8A1PQ23Q1V.png" alt="公园野餐 (竖屏)" loading="lazy">
-                <div class="grid-caption">公园野餐 (竖屏)</div>
-            </div>
+            <div class="grid-item"><img src="https://images.pexels.com/photos/1761279/pexels-photo-1761279.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=2" alt="森林小径 (高)" loading="lazy"><div class="grid-caption">森林小径</div></div>
+            <div class="grid-item"><img src="https://images.pexels.com/photos/3225517/pexels-photo-3225517.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=2" alt="海边栈道 (宽)" loading="lazy"><div class="grid-caption">海边栈道</div></div>
+            <div class="grid-item"><img src="https://images.pexels.com/photos/2387873/pexels-photo-2387873.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=2" alt="山间公路 (非常高)" loading="lazy"><div class="grid-caption">山间公路</div></div>
+            <div class="grid-item"><img src="https://images.pexels.com/photos/1528640/pexels-photo-1528640.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=2" alt="林中人 (标准)" loading="lazy"><div class="grid-caption">林中人</div></div>
+            <div class="grid-item"><img src="https://images.pexels.com/photos/417074/pexels-photo-417074.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=2" alt="雪山湖泊 (非常宽)" loading="lazy"><div class="grid-caption">雪山湖泊</div></div>
+            <div class="grid-item"><img src="https://images.pexels.com/photos/3408744/pexels-photo-3408744.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=2" alt="绚丽极光 (标准)" loading="lazy"><div class="grid-caption">绚丽极光</div></div>
             
         </div>
     </main>
@@ -132,39 +104,45 @@
     <script>
         document.addEventListener('DOMContentLoaded', function () {
             
-            // --- 全新的: 基于图片尺寸调整网格项大小的函数 ---
+            const gallery = document.querySelector('.grid-gallery');
+
+            // --- 终极版: 智能计算并设置每个图片项的跨行数 ---
             function resizeGridItems() {
                 const items = document.querySelectorAll('.grid-item');
+                if (!items.length) return;
+
+                // 从CSS获取grid-auto-rows和gap的值，保证JS计算与CSS设置同步
+                const rowHeight = parseInt(window.getComputedStyle(gallery).getPropertyValue('grid-auto-rows'));
+                const rowGap = parseInt(window.getComputedStyle(gallery).getPropertyValue('gap'));
+
                 items.forEach(item => {
                     const img = item.querySelector('img');
                     
-                    // 确保图片已加载，以便获取其原始尺寸
+                    // 确保图片加载完成后再计算，否则获取不到正确尺寸
+                    const setSpan = () => {
+                        if (img.clientHeight > 0) {
+                            // 关键计算: (图片高度 + 间隙) / (单位行高 + 间隙) -> 向上取整得到需要跨越的行数
+                            const rowSpan = Math.ceil((img.clientHeight + rowGap) / (rowHeight + rowGap));
+                            // 应用计算出的行数到 grid-item 的样式上
+                            item.style.gridRowEnd = 'span ' + rowSpan;
+                        }
+                    };
+
                     if (img.complete) {
-                        applySpans(item, img);
+                        setSpan();
                     } else {
-                        img.addEventListener('load', () => applySpans(item, img));
+                        img.addEventListener('load', setSpan);
                     }
                 });
             }
-
-            function applySpans(item, img) {
-                // 计算图片的宽高比
-                const ratio = img.naturalWidth / img.naturalHeight;
-
-                // 根据宽高比添加 'wide' 或 'tall' 类
-                // 大于1.5认为是明显横屏，小于0.7认为是明显竖屏
-                if (ratio > 1.5) {
-                    item.classList.add('wide');
-                } else if (ratio < 0.7) {
-                    item.classList.add('tall');
-                }
-            }
-
-            // 页面加载时运行尺寸调整函数
+            
+            // 页面加载时执行一次
             resizeGridItems();
+            // 当浏览器窗口大小改变时，再次执行以重新布局
+            window.addEventListener('resize', resizeGridItems);
 
 
-            // --- 图片入场动画 (现在观察 .grid-item) ---
+            // --- 图片入场动画 (逻辑不变) ---
             const galleryItems = document.querySelectorAll('.grid-item');
             const observer = new IntersectionObserver((entries, observer) => {
                 entries.forEach(entry => {
@@ -177,8 +155,9 @@
             galleryItems.forEach(item => { observer.observe(item); });
 
 
-            // --- 图片放大功能 (逻辑不变，选择器更新为 .grid-item) ---
+            // --- 图片放大功能 (逻辑不变) ---
             function setupAdvancedLightbox() {
+                // ... 此处代码与上一版完全相同，为简洁省略 ...
                 const galleryImages = document.querySelectorAll('.grid-item img');
                 let lightbox = document.querySelector('.lightbox');
                 if (!lightbox) {
