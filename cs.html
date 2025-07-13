@@ -22,7 +22,8 @@
         .grid-item-wide { grid-column: span 2; }
         @media (max-width: 400px) { .grid-item-wide { grid-column: span 1; } }
         .grid-item.is-visible { opacity: 1; transform: translateY(0); }
-        .grid-item img { cursor: pointer; width: 100%; height: 100%; object-fit: cover; display: block; }
+        .grid-item img { cursor: pointer; width: 100%; height: 100%; object-fit: cover; display: block; transition: transform 0.4s ease; }
+        .grid-item:hover img { transform: scale(1.05); }
         .lightbox { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.9); display: flex; justify-content: center; align-items: center; z-index: 1000; opacity: 0; visibility: hidden; transition: opacity 0.3s ease; }
         .lightbox.active { opacity: 1; visibility: visible; }
         .lightbox-image { max-width: 85%; max-height: 85%; display: block; object-fit: contain; }
@@ -72,21 +73,14 @@
     <script>
         document.addEventListener('DOMContentLoaded', function () {
             
+            // =================================================================
+            // 数据中心：在这里管理您的所有图片
+            // =================================================================
             const imageData = [
-                { src: 'https://tu.665410.xyz/5VK3U8DR9Q1V.jpg', alt: '咖啡馆', category: '风景' },
-                { src: 'https://tu.665410.xyz/DY8Y4VG0HQ1V.png', alt: '樱花林', category: '二次元' },
-                { src: 'https://tu.665410.xyz/T3T0QM05HQ1V.jpg', alt: '项目完成', category: '风景' },
-                { src: 'https://tu.665410.xyz/7ZX4548R9Q1V.jpg', alt: '学习编程', category: '二次元' },
-                { src: 'https://tu.665410.xyz/DJUP64A4HQ1V.jpg', alt: '手工面包', category: '风景' },
-                { src: 'https://tu.665410.xyz/HU8A1PQ23Q1V.png', alt: '公园野餐', category: '二次元' },
-                { src: 'https://tu.665410.xyz/5VK3U8DR9Q1V.jpg', alt: '咖啡馆-2', category: '风景' },
-                { src: 'https://tu.665410.xyz/DY8Y4VG0HQ1V.png', alt: '樱花林-2', category: '二次元' },
-                { src: 'https://tu.665410.xyz/T3T0QM05HQ1V.jpg', alt: '项目完成-2', category: '风景' },
-                { src: 'https://tu.665410.xyz/7ZX4548R9Q1V.jpg', alt: '学习编程-2', category: '二次元' },
-                { src: 'https://tu.665410.xyz/DJUP64A4HQ1V.jpg', alt: '手工面包-2', category: '风景' },
-                { src: 'https://tu.665410.xyz/HU8A1PQ23Q1V.png', alt: '公园野餐-2', category: '二次元' },
+                { src: 'https://tu.665410.xyz/5VK3U8DR9Q1V.jpg', alt: '咖啡馆', category: '风景' }, { src: 'https://tu.665410.xyz/DY8Y4VG0HQ1V.png', alt: '樱花林', category: '二次元' }, { src: 'https://tu.665410.xyz/T3T0QM05HQ1V.jpg', alt: '项目完成', category: '风景' }, { src: 'https://tu.665410.xyz/7ZX4548R9Q1V.jpg', alt: '学习编程', category: '二次元' }, { src: 'https://tu.665410.xyz/DJUP64A4HQ1V.jpg', alt: '手工面包', category: '风景' }, { src: 'https://tu.665410.xyz/HU8A1PQ23Q1V.png', alt: '公园野餐', category: '二次元' }, { src: 'https://tu.665410.xyz/5VK3U8DR9Q1V.jpg', alt: '咖啡馆-2', category: '风景' }, { src: 'https://tu.665410.xyz/DY8Y4VG0HQ1V.png', alt: '樱花林-2', category: '二次元' }, { src: 'https://tu.665410.xyz/T3T0QM05HQ1V.jpg', alt: '项目完成-2', category: '风景' }, { src: 'https://tu.665410.xyz/7ZX4548R9Q1V.jpg', alt: '学习编程-2', category: '二次元' }, { src: 'https://tu.665410.xyz/DJUP64A4HQ1V.jpg', alt: '手工面包-2', category: '风景' }, { src: 'https://tu.665410.xyz/HU8A1PQ23Q1V.png', alt: '公园野餐-2', category: '二次元' },
             ];
 
+            // --- 全局变量 ---
             const galleryContainer = document.getElementById('gallery-container');
             const loader = document.getElementById('loader');
             const itemsPerLoad = 6;
@@ -95,6 +89,9 @@
             let itemsLoaded = 0;
             let isRendering = false;
 
+            /**
+             * 渲染一批图片到页面
+             */
             function renderItems() {
                 if (isRendering || itemsLoaded >= filteredData.length) {
                     loader.classList.add('hidden');
@@ -102,47 +99,70 @@
                 }
                 isRendering = true;
                 loader.classList.remove('hidden');
+
                 const itemsToRender = filteredData.slice(itemsLoaded, itemsLoaded + itemsPerLoad);
                 let imagesToLoad = itemsToRender.length;
+
                 if (imagesToLoad === 0) {
                     isRendering = false;
                     loader.classList.add('hidden');
                     return;
                 }
+                
                 itemsToRender.forEach((data, index) => {
                     const item = document.createElement('div');
                     item.className = 'grid-item';
                     item.dataset.category = data.category;
                     item.dataset.index = itemsLoaded + index;
+                    
                     const img = document.createElement('img');
                     img.src = data.src;
                     img.alt = data.alt;
+                    
                     img.onload = () => {
                         item.classList.add('is-visible');
                         resizeSingleGridItem(item);
                         imagesToLoad--;
-                        if (imagesToLoad === 0) { isRendering = false; loader.classList.add('hidden'); }
+                        if (imagesToLoad === 0) {
+                            isRendering = false;
+                            loader.classList.add('hidden');
+                        }
                     };
                     img.onerror = () => {
                         console.error('图片加载失败:', img.src);
-                        item.remove();
+                        item.remove(); // 移除加载失败的项
                         imagesToLoad--;
-                        if (imagesToLoad === 0) { isRendering = false; loader.classList.add('hidden'); }
+                        if (imagesToLoad === 0) {
+                            isRendering = false;
+                            loader.classList.add('hidden');
+                        }
                     };
+                    
                     item.appendChild(img);
                     galleryContainer.appendChild(item);
                 });
+                
                 itemsLoaded += itemsToRender.length;
             }
 
+            /**
+             * 计算单个图片项的布局
+             * @param {HTMLElement} item 
+             */
             function resizeSingleGridItem(item) {
                 const img = item.querySelector('img');
-                if (!img) return;
+                if (!img || !img.complete || img.naturalHeight === 0) return;
+
                 const rowHeight = 10;
                 const rowGap = 16;
                 const ratio = img.naturalWidth / img.naturalHeight;
-                if (ratio > 1.2) { item.classList.add('grid-item-wide'); } 
-                else { item.classList.remove('grid-item-wide'); }
+
+                if (ratio > 1.2) {
+                    item.classList.add('grid-item-wide');
+                } else {
+                    item.classList.remove('grid-item-wide');
+                }
+
                 const clientWidth = img.clientWidth;
                 if (clientWidth > 0) {
                     const scaledHeight = clientWidth / ratio;
@@ -150,12 +170,18 @@
                     item.style.gridRowEnd = `span ${rowSpan}`;
                 }
             }
-
+            
+            /**
+             * 重新计算所有当前可见项的布局
+             */
             function resizeAllGridItems() {
                 const items = galleryContainer.querySelectorAll('.grid-item');
                 items.forEach(resizeSingleGridItem);
             }
+
+            // --- 事件监听器 ---
             window.addEventListener('resize', resizeAllGridItems);
+
             window.addEventListener('scroll', () => {
                 if (isRendering) return;
                 if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 500) {
@@ -168,16 +194,16 @@
                 button.addEventListener('click', () => {
                     if (isRendering) return;
                     currentFilter = button.dataset.filter;
+                    
                     filterButtons.forEach(btn => btn.classList.remove('active'));
                     button.classList.add('active');
+                    
                     galleryContainer.innerHTML = '';
                     itemsLoaded = 0;
                     
-                    // 核心改动2: 在JS中处理 "random" 筛选逻辑
                     if (currentFilter === 'all') {
                         filteredData = imageData;
                     } else if (currentFilter === 'random') {
-                        // 创建一个原数组的副本并进行随机排序（洗牌）
                         const shuffled = [...imageData];
                         for (let i = shuffled.length - 1; i > 0; i--) {
                             const j = Math.floor(Math.random() * (i + 1));
@@ -188,15 +214,83 @@
                         filteredData = imageData.filter(item => item.category === currentFilter);
                     }
                     
-                    renderItems();
+                    setTimeout(() => {
+                        renderItems();
+                    }, 0);
                 });
             });
 
-            // --- 灯箱 + 返回顶部 + 初始化 ---
+            // --- 灯箱 ---
             const lightbox = document.querySelector('.lightbox');
             const backToTopBtn = document.querySelector('.back-to-top');
-            const lightboxImage = lightbox.querySelector('.lightbox-image'); const lbCounter = lightbox.querySelector('.lb-counter'); const lbPrev = lightbox.querySelector('.lb-prev'); const lbNext = lightbox.querySelector('.lb-next'); const lbClose = lightbox.querySelector('.lb-close'); let currentImageIndex = 0; galleryContainer.addEventListener('click', (e) => { const item = e.target.closest('.grid-item'); if (item) { currentImageIndex = parseInt(item.dataset.index); updateLightbox(); lightbox.classList.add('active'); document.body.classList.add('lightbox-open'); } }); function updateLightbox() { const currentItem = filteredData[currentImageIndex]; lightboxImage.src = currentItem.src; lbCounter.textContent = `${currentImageIndex + 1} / ${filteredData.length}`; } function showPrevImage() { currentImageIndex = (currentImageIndex - 1 + filteredData.length) % filteredData.length; updateLightbox(); } function showNextImage() { currentImageIndex = (currentImageIndex + 1) % filteredData.length; updateLightbox(); } function closeLightbox() { lightbox.classList.remove('active'); document.body.classList.remove('lightbox-open'); } lbPrev.addEventListener('click', showPrevImage); lbNext.addEventListener('click', showNextImage); lbClose.addEventListener('click', closeLightbox); lightbox.addEventListener('click', (e) => { if (e.target === lightbox) closeLightbox(); }); document.addEventListener('keydown', (e) => { if (!lightbox.classList.contains('active')) return; if (e.key === 'ArrowLeft') showPrevImage(); if (e.key === 'ArrowRight') showNextImage(); if (e.key === 'Escape') closeLightbox(); }); window.addEventListener('scroll', () => { if (window.scrollY > 300) { backToTopBtn.classList.add('visible'); } else { backToTopBtn.classList.remove('visible'); } }); backToTopBtn.addEventListener('click', () => { window.scrollTo({ top: 0, behavior: 'smooth' }); });
+            const lightboxImage = lightbox.querySelector('.lightbox-image');
+            const lbCounter = lightbox.querySelector('.lb-counter');
+            const lbPrev = lightbox.querySelector('.lb-prev');
+            const lbNext = lightbox.querySelector('.lb-next');
+            const lbClose = lightbox.querySelector('.lb-close');
+            let currentImageIndex = 0;
+            
+            galleryContainer.addEventListener('click', (e) => {
+                const item = e.target.closest('.grid-item');
+                if (item) {
+                    currentImageIndex = parseInt(item.dataset.index);
+                    updateLightbox();
+                    lightbox.classList.add('active');
+                    document.body.classList.add('lightbox-open');
+                }
+            });
 
+            function updateLightbox() {
+                const currentItem = filteredData[currentImageIndex];
+                if (!currentItem) return;
+                lightboxImage.src = currentItem.src;
+                lbCounter.textContent = `${currentImageIndex + 1} / ${filteredData.length}`;
+            }
+
+            function showPrevImage() {
+                currentImageIndex = (currentImageIndex - 1 + filteredData.length) % filteredData.length;
+                updateLightbox();
+            }
+
+            function showNextImage() {
+                currentImageIndex = (currentImageIndex + 1) % filteredData.length;
+                updateLightbox();
+            }
+
+            function closeLightbox() {
+                lightbox.classList.remove('active');
+                document.body.classList.remove('lightbox-open');
+            }
+
+            lbPrev.addEventListener('click', showPrevImage);
+            lbNext.addEventListener('click', showNextImage);
+            lbClose.addEventListener('click', closeLightbox);
+            lightbox.addEventListener('click', (e) => {
+                if (e.target === lightbox) {
+                    closeLightbox();
+                }
+            });
+            
+            document.addEventListener('keydown', (e) => {
+                if (!lightbox.classList.contains('active')) return;
+                if (e.key === 'ArrowLeft') showPrevImage();
+                if (e.key === 'ArrowRight') showNextImage();
+                if (e.key === 'Escape') closeLightbox();
+            });
+
+            // --- 返回顶部 ---
+            window.addEventListener('scroll', () => {
+                if (window.scrollY > 300) {
+                    backToTopBtn.classList.add('visible');
+                } else {
+                    backToTopBtn.classList.remove('visible');
+                }
+            });
+            backToTopBtn.addEventListener('click', () => {
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            });
+
+            // --- 初始化 ---
             function initialize() {
                 filteredData = imageData;
                 renderItems();
