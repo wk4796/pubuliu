@@ -33,13 +33,32 @@
         .lb-next { right: 1rem; }
         .lb-close { top: 1rem; right: 1rem; font-size: 2rem; }
         .lb-counter { position: absolute; top: 1.5rem; left: 50%; transform: translateX(-50%); color: white; font-size: 1rem; background-color: rgba(0,0,0,0.3); padding: 0.25rem 0.75rem; border-radius: 9999px; }
+        /* 新增下载按钮样式 */
+        .lb-download {
+            position: absolute;
+            bottom: 1rem;
+            right: 1rem;
+            background-color: rgba(34, 197, 94, 0.7); /* 绿色背景 */
+            color: white;
+            border: none;
+            font-size: 1rem;
+            cursor: pointer;
+            padding: 0.5rem 1rem;
+            border-radius: 0.5rem;
+            transition: background-color 0.2s;
+            text-decoration: none; /* 移除下划线 */
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .lb-download:hover { background-color: rgba(34, 197, 94, 0.9); }
         .back-to-top { position: fixed; bottom: 2rem; right: 2rem; background-color: #22c55e; color: white; width: 3rem; height: 3rem; border-radius: 9999px; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 8px rgba(0,0,0,0.2); cursor: pointer; opacity: 0; visibility: hidden; transform: translateY(20px); transition: all 0.3s ease; }
         .back-to-top.visible { opacity: 1; visibility: visible; transform: translateY(0); }
     </style>
 </head>
 <body class="antialiased">
 
-    <header class="text-center py-8 md:py-12 bg-white/80 backdrop-blur-md shadow-sm sticky top-0 z-40">
+    <header class="text-center py-8 md:py-12 bg-white/80 backdrop-blur-md shadow-sm z-40">
         <h1 class="text-4xl md:text-5xl font-bold text-green-900 mb-4">图片画廊</h1>
         <div id="filter-buttons" class="flex justify-center space-x-2">
             <button class="filter-btn active" data-filter="all">全部</button>
@@ -49,8 +68,7 @@
         </div>
     </header>
 
-    <main class="container mx-auto px-6 py-8 md:py-10 flex-grow">
-        <div id="gallery-container" class="max-w-7xl mx-auto grid-gallery"></div>
+    <main class="container mx-auto px-6 py-8 md:py-10 flex-grow pt-24 md:pt-32"> <div id="gallery-container" class="max-w-7xl mx-auto grid-gallery"></div>
         <div id="loader" class="text-center py-8 text-green-700 hidden">正在加载更多...</div>
     </main>
     
@@ -64,6 +82,10 @@
         <button class="lightbox-btn lb-prev">&lsaquo;</button>
         <img class="lightbox-image">
         <button class="lightbox-btn lb-next">&rsaquo;</button>
+        <a class="lb-download" download>
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+            下载
+        </a>
     </div>
 
     <a class="back-to-top" title="返回顶部">
@@ -181,7 +203,83 @@
                 });
             });
 
-            const lightbox = document.querySelector('.lightbox'); const backToTopBtn = document.querySelector('.back-to-top'); const lightboxImage = lightbox.querySelector('.lightbox-image'); const lbCounter = lightbox.querySelector('.lb-counter'); const lbPrev = lightbox.querySelector('.lb-prev'); const lbNext = lightbox.querySelector('.lb-next'); const lbClose = lightbox.querySelector('.lb-close'); let currentImageIndex = 0; galleryContainer.addEventListener('click', (e) => { const item = e.target.closest('.grid-item'); if (item) { currentImageIndex = parseInt(item.dataset.index); updateLightbox(); lightbox.classList.add('active'); document.body.classList.add('lightbox-open'); } }); function updateLightbox() { const currentItem = filteredData[currentImageIndex]; if (!currentItem) return; lightboxImage.src = currentItem.src; lbCounter.textContent = `${currentImageIndex + 1} / ${filteredData.length}`; } function showPrevImage() { currentImageIndex = (currentImageIndex - 1 + filteredData.length) % filteredData.length; updateLightbox(); } function showNextImage() { currentImageIndex = (currentImageIndex + 1) % filteredData.length; updateLightbox(); } function closeLightbox() { lightbox.classList.remove('active'); document.body.classList.remove('lightbox-open'); } lbPrev.addEventListener('click', showPrevImage); lbNext.addEventListener('click', showNextImage); lbClose.addEventListener('click', closeLightbox); lightbox.addEventListener('click', (e) => { if (e.target === lightbox) closeLightbox(); }); document.addEventListener('keydown', (e) => { if (!lightbox.classList.contains('active')) return; if (e.key === 'ArrowLeft') showPrevImage(); if (e.key === 'ArrowRight') showNextImage(); if (e.key === 'Escape') closeLightbox(); }); window.addEventListener('scroll', () => { if (window.scrollY > 300) { backToTopBtn.classList.add('visible'); } else { backToTopBtn.classList.remove('visible'); } }); backToTopBtn.addEventListener('click', () => { window.scrollTo({ top: 0, behavior: 'smooth' }); });
+            const lightbox = document.querySelector('.lightbox');
+            const backToTopBtn = document.querySelector('.back-to-top');
+            const lightboxImage = lightbox.querySelector('.lightbox-image');
+            const lbCounter = lightbox.querySelector('.lb-counter');
+            const lbPrev = lightbox.querySelector('.lb-prev');
+            const lbNext = lightbox.querySelector('.lb-next');
+            const lbClose = lightbox.querySelector('.lb-close');
+            // 获取下载按钮元素
+            const lbDownload = lightbox.querySelector('.lb-download'); 
+            let currentImageIndex = 0;
+
+            galleryContainer.addEventListener('click', (e) => {
+                const item = e.target.closest('.grid-item');
+                if (item) {
+                    currentImageIndex = parseInt(item.dataset.index);
+                    updateLightbox();
+                    lightbox.classList.add('active');
+                    document.body.classList.add('lightbox-open');
+                }
+            });
+
+            function updateLightbox() {
+                const currentItem = filteredData[currentImageIndex];
+                if (!currentItem) return;
+                lightboxImage.src = currentItem.src;
+                lbCounter.textContent = `${currentImageIndex + 1} / ${filteredData.length}`;
+                // 设置下载按钮的 href 和 download 属性
+                lbDownload.href = currentItem.src;
+                // 从 URL 中提取文件名作为下载文件名，如果URL没有文件名，可以设置一个默认名
+                const fileName = currentItem.src.substring(currentItem.src.lastIndexOf('/') + 1);
+                lbDownload.download = fileName || 'image.jpg';
+            }
+
+            function showPrevImage() {
+                currentImageIndex = (currentImageIndex - 1 + filteredData.length) % filteredData.length;
+                updateLightbox();
+            }
+
+            function showNextImage() {
+                currentImageIndex = (currentImageIndex + 1) % filteredData.length;
+                updateLightbox();
+            }
+
+            function closeLightbox() {
+                lightbox.classList.remove('active');
+                document.body.classList.remove('lightbox-open');
+            }
+
+            lbPrev.addEventListener('click', showPrevImage);
+            lbNext.addEventListener('click', showNextImage);
+            lbClose.addEventListener('click', closeLightbox);
+            
+            lightbox.addEventListener('click', (e) => {
+                // 如果点击的是背景而不是图片或按钮，则关闭 lightbox
+                if (e.target === lightbox) {
+                    closeLightbox();
+                }
+            });
+
+            document.addEventListener('keydown', (e) => {
+                if (!lightbox.classList.contains('active')) return;
+                if (e.key === 'ArrowLeft') showPrevImage();
+                if (e.key === 'ArrowRight') showNextImage();
+                if (e.key === 'Escape') closeLightbox();
+            });
+
+            window.addEventListener('scroll', () => {
+                if (window.scrollY > 300) {
+                    backToTopBtn.classList.add('visible');
+                } else {
+                    backToTopBtn.classList.remove('visible');
+                }
+            });
+
+            backToTopBtn.addEventListener('click', () => {
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            });
 
             function initialize() {
                 filteredData = imageData;
