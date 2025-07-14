@@ -1,10 +1,10 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v12.0 终极版)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v13.0 完美布局版)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
-#   功能: 实现“等高列瀑布流”布局，是功能、性能、体验的最终交付版本。
+#   功能: 实现“最优分箱”布局算法，达到极致视觉平衡。
 # =================================================================
 
 # --- 配置 ---
@@ -36,8 +36,8 @@ EOF
 cat << 'EOF' > package.json
 {
   "name": "image-gallery-pro",
-  "version": "5.0.0",
-  "description": "A high-performance, full-stack image gallery application with a balanced column layout engine.",
+  "version": "5.1.0",
+  "description": "A high-performance, full-stack image gallery application with an optimal packing layout engine.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
@@ -196,7 +196,9 @@ apiAdminRouter.post('/upload', upload.single('image'), async (req, res) => {
         const newImage = { 
             id: uuidv4(), src: `/uploads/${req.file.filename}`, 
             category: req.body.category || UNCATEGORIZED, 
-            description: req.body.description || '', filename: req.file.filename, 
+            description: req.body.description || '', 
+            originalFilename: req.file.originalname,
+            filename: req.file.filename, 
             size: req.file.size, uploadedAt: new Date().toISOString(),
             width: metadata.width, height: metadata.height
         };
@@ -208,7 +210,6 @@ apiAdminRouter.post('/upload', upload.single('image'), async (req, res) => {
         res.status(500).json({message: '上传失败，处理图片信息时出错。'})
     }
 });
-
 apiAdminRouter.delete('/images/:id', async (req, res) => {
     let images = await readDB(dbPath);
     const imageToDelete = images.find(img => img.id === req.params.id);
@@ -221,23 +222,13 @@ apiAdminRouter.delete('/images/:id', async (req, res) => {
 });
 apiAdminRouter.put('/images/:id', async (req, res) => {
     let images = await readDB(dbPath);
-    const { category, description, filename } = req.body;
+    const { category, description, originalFilename } = req.body;
     const imageIndex = images.findIndex(img => img.id === req.params.id);
     if (imageIndex === -1) return res.status(404).json({ message: '图片未找到' });
     const imageToUpdate = { ...images[imageIndex] };
-    if (filename && filename !== imageToUpdate.filename) {
-        const oldPath = path.join(uploadsDir, imageToUpdate.filename);
-        const newPath = path.join(uploadsDir, filename);
-        try {
-            await fs.access(newPath);
-            return res.status(400).json({ message: '新文件名已存在。' });
-        } catch (error) {
-            try { await fs.rename(oldPath, newPath); imageToUpdate.filename = filename; imageToUpdate.src = `/uploads/${filename}`; } 
-            catch (renameError) { return res.status(500).json({ message: '文件重命名失败。' }); }
-        }
-    }
     imageToUpdate.category = category || imageToUpdate.category;
     imageToUpdate.description = description === undefined ? imageToUpdate.description : description;
+    imageToUpdate.originalFilename = originalFilename || imageToUpdate.originalFilename;
     images[imageIndex] = imageToUpdate;
     await writeDB(dbPath, images);
     res.json({ message: '更新成功', image: imageToUpdate });
@@ -285,7 +276,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 })();
 EOF
 
-    echo "--> 正在生成主画廊 public/index.html (全新等高列布局引擎)..."
+    echo "--> 正在生成主画廊 public/index.html (全新最优分箱布局引擎)..."
 cat << 'EOF' > public/index.html
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -302,10 +293,10 @@ cat << 'EOF' > public/index.html
         .filter-btn:hover { background-color: #dcfce7; }
         .filter-btn.active { background-color: #22c55e; color: white; border-color: #16a34a; }
         .gallery-container { display: flex; gap: 10px; }
-        .gallery-column { display: flex; flex-direction: column; gap: 10px; flex-grow: 1; flex-basis: 0; }
+        .gallery-column { display: flex; flex-direction: column; gap: 10px; flex-basis: 0; flex-grow: 1; }
         .gallery-item { display: block; position: relative; overflow: hidden; border-radius: 0.5rem; background-color: #e4e4e7; line-height: 0; }
-        .gallery-item img { width: 100%; height: auto; object-fit: cover; transition: transform 0.3s ease; }
-        .gallery-item:hover img { transform: scale(1.05); }
+        .gallery-item img { width: 100%; height: auto; object-fit: cover; transition: transform 0.3s ease, filter 0.3s ease; }
+        .gallery-item:hover img { transform: scale(1.05); filter: brightness(0.85); }
         .lightbox { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.9); display: none; justify-content: center; align-items: center; z-index: 1000; opacity: 0; transition: opacity 0.3s ease; }
         .lightbox.active { display: flex; opacity: 1; }
         .lightbox-image { max-width: 85%; max-height: 85%; display: block; object-fit: contain; }
@@ -352,9 +343,9 @@ cat << 'EOF' > public/index.html
             gap: 10,
             getColumnsCount() {
                 const width = window.innerWidth;
-                if (width >= 1280) return 4; // 2xl
-                if (width >= 1024) return 3; // lg
-                if (width >= 768) return 2;  // md
+                if (width >= 1280) return 4;
+                if (width >= 1024) return 3;
+                if (width >= 768) return 2;
                 return 1;
             },
             render(images) {
@@ -367,9 +358,18 @@ cat << 'EOF' > public/index.html
                 loader.classList.add('hidden');
 
                 const numColumns = this.getColumnsCount();
-                const columns = Array.from({ length: numColumns }, () => ({ items: [], height: 0 }));
+                const columns = Array.from({ length: numColumns }, () => ({ element: document.createElement('div'), items: [], height: 0 }));
+                
+                columns.forEach(col => {
+                    col.element.className = 'gallery-column';
+                    this.container.appendChild(col.element);
+                });
 
-                images.forEach(image => {
+                // Re-ordering algorithm for optimal packing
+                // Sort images from largest to smallest for better packing
+                const sortedImages = [...images].sort((a, b) => (b.height/b.width) - (a.height/a.width));
+
+                sortedImages.forEach(image => {
                     let shortestColumn = columns[0];
                     for (let i = 1; i < columns.length; i++) {
                         if (columns[i].height < shortestColumn.height) {
@@ -378,12 +378,10 @@ cat << 'EOF' > public/index.html
                     }
                     shortestColumn.items.push(image);
                     const imageAspect = image.height / image.width;
-                    shortestColumn.height += imageAspect; // Simplified height metric
+                    shortestColumn.height += imageAspect;
                 });
 
                 columns.forEach(col => {
-                    const columnDiv = document.createElement('div');
-                    columnDiv.className = 'gallery-column';
                     col.items.forEach(image => {
                         const item = document.createElement('a');
                         item.className = 'gallery-item';
@@ -400,9 +398,8 @@ cat << 'EOF' > public/index.html
                                 <img src="/image-proxy/${image.filename}?w=400" alt="${image.description}" loading="lazy">
                             </picture>
                         `;
-                        columnDiv.appendChild(item);
+                        col.element.appendChild(item);
                     });
-                    this.container.appendChild(columnDiv);
                 });
             }
         };
@@ -427,7 +424,7 @@ cat << 'EOF' > public/index.html
             let dataToProcess = [...allImageData];
             if (currentSearch) {
                 const searchTerm = currentSearch.toLowerCase();
-                dataToProcess = dataToProcess.filter(item => (item.description && item.description.toLowerCase().includes(searchTerm)) || (item.filename && item.filename.toLowerCase().includes(searchTerm)));
+                dataToProcess = dataToProcess.filter(item => (item.description && item.description.toLowerCase().includes(searchTerm)) || (item.originalFilename && item.originalFilename.toLowerCase().includes(searchTerm)));
             }
             if (currentFilter === 'all') {
                 filteredData = dataToProcess;
@@ -448,7 +445,6 @@ cat << 'EOF' > public/index.html
             } catch (error) { console.error('获取图片数据失败:', error); loader.textContent = '加载失败，请刷新页面。'; }
         }
 
-        // --- Lightbox ---
         const lightbox = document.querySelector('.lightbox'); const lightboxImage = lightbox.querySelector('.lightbox-image'); const lbCounter = lightbox.querySelector('.lb-counter'); const lbDownloadLink = document.getElementById('lightbox-download-link');
         let currentImageIndexInFiltered = 0;
         galleryContainer.addEventListener('click', (e) => {
@@ -461,29 +457,20 @@ cat << 'EOF' > public/index.html
                 lightbox.classList.add('active'); document.body.classList.add('lightbox-open');
             }
         });
-        function updateLightbox() { const currentItem = filteredData[currentImageIndexInFiltered]; if (!currentItem) return; lightboxImage.src = currentItem.src; lightboxImage.alt = currentItem.description; lbCounter.textContent = `${currentImageIndexInFiltered + 1} / ${filteredData.length}`; lbDownloadLink.href = currentItem.src; lbDownloadLink.download = currentItem.filename; }
+        function updateLightbox() { const currentItem = filteredData[currentImageIndexInFiltered]; if (!currentItem) return; lightboxImage.src = currentItem.src; lightboxImage.alt = currentItem.description; lbCounter.textContent = `${currentImageIndexInFiltered + 1} / ${filteredData.length}`; lbDownloadLink.href = currentItem.src; lbDownloadLink.download = currentItem.originalFilename; }
         function showPrevImage() { currentImageIndexInFiltered = (currentImageIndexInFiltered - 1 + filteredData.length) % filteredData.length; updateLightbox(); }
         function showNextImage() { currentImageIndexInFiltered = (currentImageIndexInFiltered + 1) % filteredData.length; updateLightbox(); }
         function closeLightbox() { lightbox.classList.remove('active'); document.body.classList.remove('lightbox-open'); }
         lightbox.addEventListener('click', (e) => { const target = e.target; if (target.matches('.lb-next')) showNextImage(); else if (target.matches('.lb-prev')) showPrevImage(); else if (target.matches('.lb-close') || target === lightbox) closeLightbox(); });
         document.addEventListener('keydown', (e) => { if (lightbox.classList.contains('active')) { if (e.key === 'ArrowLeft') showPrevImage(); if (e.key === 'ArrowRight') showNextImage(); if (e.key === 'Escape') closeLightbox(); } });
         
-        // --- Other Listeners ---
-        filterButtonsContainer.addEventListener('click', (e) => {
-            const target = e.target.closest('.filter-btn');
-            if (!target) return;
-            currentFilter = target.dataset.filter;
-            document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
-            target.classList.add('active');
-            applyFiltersAndRender();
-        });
+        filterButtonsContainer.addEventListener('click', (e) => { const target = e.target.closest('.filter-btn'); if (!target) return; currentFilter = target.dataset.filter; document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active')); target.classList.add('active'); applyFiltersAndRender(); });
         searchInput.addEventListener('input', () => { clearTimeout(debounceTimer); debounceTimer = setTimeout(() => { currentSearch = searchInput.value; applyFiltersAndRender(); }, 300); });
         const backToTopBtn = document.querySelector('.back-to-top'); 
         backToTopBtn.addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
         window.addEventListener('scroll', () => { backToTopBtn.classList.toggle('visible', window.scrollY > 300); });
         window.addEventListener('resize', () => { clearTimeout(debounceTimer); debounceTimer = setTimeout(applyFiltersAndRender, 200); });
 
-        // --- Init ---
         (async function init() { await createFilterButtons(); await initializeGallery(); })();
     });
     </script>
@@ -528,7 +515,7 @@ cat << 'EOF' > public/admin.html
         </section>
     </main>
     <div id="generic-modal" class="modal fixed inset-0 bg-black bg-opacity-50 items-center justify-center z-30 p-4"><div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-sm"><h3 id="modal-title" class="text-lg font-bold mb-4"></h3><div id="modal-body" class="mb-4 text-slate-600"></div><div id="modal-footer" class="flex justify-end space-x-2"></div></div></div>
-    <div id="edit-image-modal" class="modal fixed inset-0 bg-black bg-opacity-50 items-center justify-center z-30 p-4"><div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-md"><h3 class="text-lg font-bold mb-4">编辑图片信息</h3><form id="edit-image-form"><input type="hidden" id="edit-id"><div class="mb-4"><label for="edit-filename" class="block text-sm font-medium mb-1">文件名</label><input type="text" id="edit-filename" class="w-full border rounded px-3 py-2"></div><div class="mb-4"><label for="edit-category-select" class="block text-sm font-medium mb-1">分类</label><select id="edit-category-select" class="w-full border rounded px-3 py-2"></select></div><div class="mb-4"><label for="edit-description" class="block text-sm font-medium mb-1">描述</label><textarea id="edit-description" rows="3" class="w-full border rounded px-3 py-2"></textarea></div><div class="flex justify-end space-x-2 mt-6"><button type="button" class="modal-cancel-btn bg-gray-300 hover:bg-gray-400 text-black py-2 px-4 rounded">取消</button><button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded">保存更改</button></div></form></div></div>
+    <div id="edit-image-modal" class="modal fixed inset-0 bg-black bg-opacity-50 items-center justify-center z-30 p-4"><div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-md"><h3 class="text-lg font-bold mb-4">编辑图片信息</h3><form id="edit-image-form"><input type="hidden" id="edit-id"><div class="mb-4"><label for="edit-originalFilename" class="block text-sm font-medium mb-1">原始文件名</label><input type="text" id="edit-originalFilename" class="w-full border rounded px-3 py-2"></div><div class="mb-4"><label for="edit-category-select" class="block text-sm font-medium mb-1">分类</label><select id="edit-category-select" class="w-full border rounded px-3 py-2"></select></div><div class="mb-4"><label for="edit-description" class="block text-sm font-medium mb-1">描述</label><textarea id="edit-description" rows="3" class="w-full border rounded px-3 py-2"></textarea></div><div class="flex justify-end space-x-2 mt-6"><button type="button" class="modal-cancel-btn bg-gray-300 hover:bg-gray-400 text-black py-2 px-4 rounded">取消</button><button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded">保存更改</button></div></form></div></div>
     <div id="admin-lightbox" class="lightbox"><button class="lightbox-btn lb-close">&times;</button><button class="lightbox-btn lb-prev">&lsaquo;</button><img class="lightbox-image" alt="Lightbox preview"><button class="lightbox-btn lb-next">&rsaquo;</button><a href="#" id="admin-lightbox-download-link" download class="lb-download">下载</a></div>
     <div id="toast" class="toast max-w-xs bg-gray-800 text-white text-sm rounded-lg shadow-lg p-3" role="alert"><div class="flex items-center"><div id="toast-icon" class="mr-2"></div><span id="toast-message"></span></div></div>
     <script>
@@ -544,10 +531,10 @@ cat << 'EOF' > public/admin.html
         const hideModal = (modal) => modal.classList.remove('active');
         DOMElements.genericModal.addEventListener('click', e => { if (e.target === DOMElements.genericModal || e.target.closest('.modal-cancel-btn')) hideModal(DOMElements.genericModal); });
         DOMElements.editImageModal.addEventListener('click', e => { if (e.target === DOMElements.editImageModal || e.target.closest('.modal-cancel-btn')) hideModal(DOMElements.editImageModal); });
-        const handleFileSelection = (fileList) => { const imageFiles = Array.from(fileList).filter(f => f.type.startsWith('image/')); filesToUpload = imageFiles.map(file => ({ file, description: DOMElements.unifiedDescription.value, userHasTyped: DOMElements.unifiedDescription.value !== '' })); DOMElements.uploadBtn.disabled = filesToUpload.length === 0; renderFilePreviews(); };
+        const handleFileSelection = (fileList) => { const imageFiles = Array.from(fileList).filter(f => f.type.startsWith('image/')); const newFiles = imageFiles.map(file => ({ file, description: DOMElements.unifiedDescription.value, userHasTyped: DOMElements.unifiedDescription.value !== '' })); filesToUpload = filesToUpload.concat(newFiles); DOMElements.uploadBtn.disabled = filesToUpload.length === 0; renderFilePreviews(); };
         const renderFilePreviews = () => { if (filesToUpload.length === 0) { DOMElements.filePreviewContainer.classList.add('hidden'); return; } DOMElements.filePreviewList.innerHTML = ''; let totalSize = 0; filesToUpload.forEach((item, index) => { totalSize += item.file.size; const listItem = document.createElement('div'); listItem.className = 'file-preview-item text-slate-600 border rounded p-2'; listItem.dataset.fileIndex = index; listItem.innerHTML = `<div class="flex justify-between items-center text-xs mb-2"> <p class="truncate pr-2 font-medium">${item.file.name}</p> <p>${formatBytes(item.file.size)}</p> <span class="status-icon flex-shrink-0"></span></div><input type="text" data-index="${index}" class="w-full text-xs border rounded px-2 py-1 description-input" placeholder="添加独立描述..." value="${item.description}">`; DOMElements.filePreviewList.appendChild(listItem); }); DOMElements.uploadSummary.textContent = `已选择 ${filesToUpload.length} 个文件，总大小: ${formatBytes(totalSize)}`; DOMElements.filePreviewContainer.classList.remove('hidden'); };
         const dz = DOMElements.dropZone; dz.addEventListener('dragover', (e) => { e.preventDefault(); dz.classList.add('bg-green-50', 'border-green-400'); }); dz.addEventListener('dragleave', (e) => dz.classList.remove('bg-green-50', 'border-green-400')); dz.addEventListener('drop', (e) => { e.preventDefault(); dz.classList.remove('bg-green-50', 'border-green-400'); handleFileSelection(e.dataTransfer.files); });
-        DOMElements.imageInput.addEventListener('change', (e) => handleFileSelection(e.target.files));
+        DOMElements.imageInput.addEventListener('change', (e) => { handleFileSelection(e.target.files); e.target.value = ''; });
         DOMElements.unifiedDescription.addEventListener('input', e => { const unifiedText = e.target.value; document.querySelectorAll('.file-preview-item').forEach(item => { const index = parseInt(item.dataset.fileIndex); if (filesToUpload[index] && !filesToUpload[index].userHasTyped) { item.querySelector('.description-input').value = unifiedText; filesToUpload[index].description = unifiedText; } }); });
         DOMElements.filePreviewList.addEventListener('input', e => { if (e.target.classList.contains('description-input')) { const index = parseInt(e.target.dataset.index); if(filesToUpload[index]) { filesToUpload[index].description = e.target.value; filesToUpload[index].userHasTyped = true; } } });
         DOMElements.uploadForm.addEventListener('submit', async (e) => { e.preventDefault(); if (filesToUpload.length === 0) return; DOMElements.uploadBtn.disabled = true; DOMElements.uploadBtn.textContent = '正在上传... (0/' + filesToUpload.length + ')'; const category = DOMElements.categorySelect.value; for (const [index, item] of filesToUpload.entries()) { DOMElements.uploadBtn.textContent = `正在上传... (${index + 1}/${filesToUpload.length})`; const previewItem = document.querySelector(`.file-preview-item[data-file-index="${index}"]`); const statusIcon = previewItem.querySelector('.status-icon'); statusIcon.innerHTML = `<svg class="animate-spin h-4 w-4 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>`; const formData = new FormData(); formData.append('image', item.file); formData.append('category', category); formData.append('description', item.description); try { const response = await apiRequest('/api/admin/upload', { method: 'POST', body: formData }); const result = await response.json(); if (response.ok) { previewItem.classList.add('upload-success'); statusIcon.innerHTML = '✅'; } else { throw new Error(result.message || '上传失败'); } } catch (err) { previewItem.classList.add('upload-error'); statusIcon.innerHTML = `❌`; } } showToast(`上传队列处理完成。`); DOMElements.uploadBtn.textContent = '上传文件'; filesToUpload = []; DOMElements.imageInput.value = ''; DOMElements.unifiedDescription.value = ''; setTimeout(() => { DOMElements.filePreviewContainer.classList.add('hidden'); DOMElements.uploadBtn.disabled = true; }, 2000); await loadImages(); });
@@ -570,10 +557,10 @@ cat << 'EOF' > public/admin.html
         function renderImageCard(image) {
             const card = document.createElement('div');
             card.className = 'border rounded-lg shadow-sm bg-white overflow-hidden flex flex-col';
-            card.innerHTML = `<a class="preview-btn h-40 bg-slate-100 flex items-center justify-center cursor-pointer" data-id="${image.id}"><img src="/image-proxy/${image.filename}?w=400" alt="${image.description}" class="max-h-full max-w-full object-contain"></a><div class="p-3 flex-grow flex flex-col"><p class="font-bold text-sm truncate" title="${image.filename}">${image.filename}</p><p class="text-xs text-slate-500 -mt-1 mb-2">${formatBytes(image.size)}</p><p class="text-xs text-slate-500 mb-2">${image.category}</p><p class="text-xs text-slate-600 flex-grow mb-3 break-words">${image.description || '无描述'}</p></div><div class="bg-slate-50 p-2 flex justify-center space-x-2"><button data-id="${image.id}" class="preview-btn text-sm bg-gray-500 hover:bg-gray-600 text-white font-bold py-1 px-3 rounded transition-colors">预览</button><a href="${image.src}" download="${image.filename}" class="download-btn text-sm bg-green-600 hover:bg-green-700 text-white font-bold py-1 px-3 rounded transition-colors inline-block" title="下载">下载</a><button data-image='${JSON.stringify(image)}' class="edit-btn text-sm bg-blue-500 hover:bg-blue-600 text-white font-bold py-1 px-3 rounded">编辑</button><button data-id="${image.id}" class="delete-btn text-sm bg-red-500 hover:bg-red-600 text-white font-bold py-1 px-3 rounded">删除</button></div>`;
+            card.innerHTML = `<a class="preview-btn h-40 bg-slate-100 flex items-center justify-center cursor-pointer" data-id="${image.id}"><img src="/image-proxy/${image.filename}?w=400" alt="${image.description}" class="max-h-full max-w-full object-contain"></a><div class="p-3 flex-grow flex flex-col"><p class="font-bold text-sm truncate" title="${image.originalFilename}">${image.originalFilename}</p><p class="text-xs text-slate-500 -mt-1 mb-2">${formatBytes(image.size)}</p><p class="text-xs text-slate-500 mb-2">${image.category}</p><p class="text-xs text-slate-600 flex-grow mb-3 break-words">${image.description || '无描述'}</p></div><div class="bg-slate-50 p-2 flex justify-center items-center space-x-2"><button data-id="${image.id}" class="preview-btn text-sm bg-gray-500 hover:bg-gray-600 text-white font-bold py-1 px-3 rounded transition-colors whitespace-nowrap">预览</button><a href="${image.src}" download="${image.originalFilename}" class="download-btn text-sm bg-green-600 hover:bg-green-700 text-white font-bold py-1 px-3 rounded transition-colors inline-block whitespace-nowrap" title="下载">下载</a><button data-image='${JSON.stringify(image)}' class="edit-btn text-sm bg-blue-500 hover:bg-blue-600 text-white font-bold py-1 px-3 rounded whitespace-nowrap">编辑</button><button data-id="${image.id}" class="delete-btn text-sm bg-red-500 hover:bg-red-600 text-white font-bold py-1 px-3 rounded whitespace-nowrap">删除</button></div>`;
             DOMElements.imageList.appendChild(card);
         }
-        function updateAdminLightbox() { const item = adminLoadedImages[currentAdminLightboxIndex]; if (!item) return; const lightbox = DOMElements.adminLightbox; lightbox.querySelector('.lightbox-image').src = item.src; lightbox.querySelector('#admin-lightbox-download-link').href = item.src; lightbox.querySelector('#admin-lightbox-download-link').download = item.filename; }
+        function updateAdminLightbox() { const item = adminLoadedImages[currentAdminLightboxIndex]; if (!item) return; const lightbox = DOMElements.adminLightbox; lightbox.querySelector('.lightbox-image').src = item.src; lightbox.querySelector('#admin-lightbox-download-link').href = item.src; lightbox.querySelector('#admin-lightbox-download-link').download = item.originalFilename; }
         function showNextAdminImage() { currentAdminLightboxIndex = (currentAdminLightboxIndex + 1) % adminLoadedImages.length; updateAdminLightbox(); }
         function showPrevAdminImage() { currentAdminLightboxIndex = (currentAdminLightboxIndex - 1 + adminLoadedImages.length) % adminLoadedImages.length; updateAdminLightbox(); }
         function closeAdminLightbox() { DOMElements.adminLightbox.classList.remove('active'); document.body.classList.remove('lightbox-open'); }
@@ -602,7 +589,7 @@ cat << 'EOF' > public/admin.html
             if (target.matches('.preview-btn')) { const imageId = target.dataset.id; currentAdminLightboxIndex = adminLoadedImages.findIndex(img => img.id === imageId); if (currentAdminLightboxIndex === -1) return; updateAdminLightbox(); DOMElements.adminLightbox.classList.add('active'); document.body.classList.add('lightbox-open');
             } else if (target.matches('.edit-btn')) {
                 const image = JSON.parse(target.dataset.image); await loadAndPopulateCategories(image.category);
-                document.getElementById('edit-id').value = image.id; document.getElementById('edit-filename').value = image.filename; document.getElementById('edit-description').value = image.description;
+                document.getElementById('edit-id').value = image.id; document.getElementById('edit-originalFilename').value = image.originalFilename; document.getElementById('edit-description').value = image.description;
                 DOMElements.editImageModal.classList.add('active');
             } else if (target.matches('.delete-btn')) {
                 const imageId = target.dataset.id;
@@ -612,7 +599,7 @@ cat << 'EOF' > public/admin.html
         });
         DOMElements.editImageForm.addEventListener('submit', async (e) => {
             e.preventDefault(); const id = document.getElementById('edit-id').value;
-            const body = JSON.stringify({ filename: document.getElementById('edit-filename').value, category: DOMElements.editCategorySelect.value, description: document.getElementById('edit-description').value });
+            const body = JSON.stringify({ originalFilename: document.getElementById('edit-originalFilename').value, category: DOMElements.editCategorySelect.value, description: document.getElementById('edit-description').value });
             try { const response = await apiRequest(`/api/admin/images/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body }); if (!response.ok) throw new Error((await response.json()).message); hideModal(DOMElements.editImageModal); showToast('更新成功'); const activeCatItem = document.querySelector('.category-item.active .category-name'); const activeCat = activeCatItem ? activeCatItem.textContent : '全部图片'; await loadImages(activeCat === '全部图片' ? 'all' : activeCat, activeCat); } catch (error) { showToast(`更新失败: ${error.message}`, 'error'); }
         });
         async function init() { await Promise.all([ refreshCategories(), loadImages('all', '全部图片') ]); }
@@ -688,7 +675,7 @@ uninstall_app() {
 }
 show_menu() {
     clear
-    echo -e "${YELLOW}======================================================${NC}"; echo -e "${YELLOW}     图片画廊 - 一体化部署与管理脚本 (v12.0)     ${NC}"; echo -e "${YELLOW}======================================================${NC}"
+    echo -e "${YELLOW}======================================================${NC}"; echo -e "${YELLOW}     图片画廊 - 一体化部署与管理脚本 (v13.0)     ${NC}"; echo -e "${YELLOW}======================================================${NC}"
     echo -e " 应用名称: ${GREEN}${APP_NAME}${NC}"; echo -e " 安装路径: ${GREEN}${INSTALL_DIR}${NC}"
     if [ -d "${INSTALL_DIR}" ] && [ -f "${INSTALL_DIR}/.env" ]; then
         local SERVER_IP; SERVER_IP=$(hostname -I | awk '{print $1}')
