@@ -154,9 +154,19 @@
             const loader = document.getElementById('loader');
             const itemsPerLoad = 6;
             let currentFilter = 'all';
-            let filteredData = [];
+            let filteredData = []; // This will hold the currently displayed images based on filter
             let itemsLoaded = 0;
             let isRendering = false;
+
+            // --- Lightbox Variables ---
+            const lightbox = document.querySelector('.lightbox'); 
+            const lightboxImage = lightbox.querySelector('.lightbox-image'); 
+            const lbCounter = lightbox.querySelector('.lb-counter'); 
+            const lbPrev = lightbox.querySelector('.lb-prev'); 
+            const lbNext = lightbox.querySelector('.lb-next'); 
+            const lbClose = lightbox.querySelector('.lb-close'); 
+            const lbDownload = lightbox.querySelector('.lb-download'); 
+            let currentLightboxIndex = 0; // Use a dedicated index for lightbox, referring to filteredData
 
             function renderItems() {
                 if (isRendering || itemsLoaded >= filteredData.length) { loader.classList.add('hidden'); return; }
@@ -168,8 +178,8 @@
                 itemsToRender.forEach((data, index) => {
                     const item = document.createElement('div');
                     item.className = 'grid-item';
-                    item.dataset.category = data.category;
-                    item.dataset.index = itemsLoaded + index;
+                    item.dataset.category = data.category; 
+                    
                     const img = document.createElement('img');
                     img.src = data.src;
                     img.onload = () => {
@@ -212,7 +222,8 @@
             window.addEventListener('resize', resizeAllGridItems);
             window.addEventListener('scroll', () => { 
                 if (isRendering) return; 
-                if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 500) { 
+                // Load more when scrolled near bottom, and there are more items to load in the filteredData
+                if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 500 && itemsLoaded < filteredData.length) { 
                     renderItems(); 
                 } 
             });
@@ -226,6 +237,8 @@
                     button.classList.add('active');
                     galleryContainer.innerHTML = '';
                     itemsLoaded = 0;
+                    currentLightboxIndex = 0; // 重置 lightbox 索引
+
                     if (currentFilter === 'all') {
                         filteredData = imageData;
                     } else if (currentFilter === 'random') {
@@ -238,46 +251,61 @@
                     } else {
                         filteredData = imageData.filter(item => item.category === currentFilter);
                     }
+                    // 确保在重新渲染前，所有 lightbox 相关的状态都被正确重置
+                    closeLightbox(); 
                     setTimeout(() => {
                         renderItems();
                     }, 0);
                 });
             });
 
-            const lightbox = document.querySelector('.lightbox'); 
             const backToTopBtn = document.querySelector('.back-to-top'); 
-            const lightboxImage = lightbox.querySelector('.lightbox-image'); 
-            const lbCounter = lightbox.querySelector('.lb-counter'); 
-            const lbPrev = lightbox.querySelector('.lb-prev'); 
-            const lbNext = lightbox.querySelector('.lb-next'); 
-            const lbClose = lightbox.querySelector('.lb-close'); 
-            const lbDownload = lightbox.querySelector('.lb-download'); 
-            let currentImageIndex = 0; 
-
+            
             galleryContainer.addEventListener('click', (e) => { 
                 const item = e.target.closest('.grid-item'); 
                 if (item) { 
-                    currentImageIndex = parseInt(item.dataset.index); 
-                    updateLightbox(); 
-                    lightbox.classList.add('active'); 
-                    document.body.classList.add('lightbox-open'); 
+                    // 获取当前点击图片在 filteredData 中的实际索引
+                    // 使用 data.src 来找到在 filteredData 中的索引更可靠
+                    const clickedImgSrc = item.querySelector('img').src;
+                    currentLightboxIndex = filteredData.findIndex(data => data.src === clickedImgSrc);
+
+                    if (currentLightboxIndex !== -1) { // 确保找到了图片
+                        updateLightbox(); 
+                        lightbox.classList.add('active'); 
+                        document.body.classList.add('lightbox-open'); 
+                    } else {
+                        console.warn("点击的图片未在 filteredData 中找到，Lightbox无法打开。");
+                    }
                 } 
             }); 
 
             function updateLightbox() { 
-                const currentItem = filteredData[currentImageIndex]; 
-                if (!currentItem) return; 
+                // 确保 currentLightboxIndex 在有效范围内
+                if (filteredData.length === 0) {
+                    closeLightbox();
+                    return;
+                }
+                currentLightboxIndex = (currentLightboxIndex + filteredData.length) % filteredData.length;
+
+                const currentItem = filteredData[currentLightboxIndex]; 
+                if (!currentItem) { // 额外的安全检查
+                    console.error("无法获取当前 lightbox 图片数据，索引:", currentLightboxIndex);
+                    closeLightbox();
+                    return;
+                }
                 lightboxImage.src = currentItem.src; 
-                lbCounter.textContent = `${currentImageIndex + 1} / ${filteredData.length}`; 
+                lbCounter.textContent = `${currentLightboxIndex + 1} / ${filteredData.length}`; 
             } 
 
             function showPrevImage() { 
-                currentImageIndex = (currentImageIndex - 1 + filteredData.length) % filteredData.length; 
+                if (filteredData.length === 0) return;
+                currentLightboxIndex = (currentLightboxIndex - 1 + filteredData.length) % filteredData.length; 
                 updateLightbox(); 
             } 
 
             function showNextImage() { 
-                currentImageIndex = (currentImageIndex + 1) % filteredData.length; 
+                if (filteredData.length === 0) return;
+                currentLightboxIndex = (currentLightboxIndex + 1) % filteredData.length; 
                 updateLightbox(); 
             } 
 
@@ -290,14 +318,21 @@
             lbNext.addEventListener('click', showNextImage); 
             lbClose.addEventListener('click', closeLightbox); 
             lbDownload.addEventListener('click', () => { 
-                const currentItem = filteredData[currentImageIndex];
+                const currentItem = filteredData[currentLightboxIndex];
                 if (currentItem && currentItem.src) {
-                    window.open(currentItem.src, '_blank'); 
+                    // 使用 download 属性强制下载，文件名可以从 URL 推断或自定义
+                    const a = document.createElement('a');
+                    a.href = currentItem.src;
+                    a.download = currentItem.src.split('/').pop(); // 从URL获取文件名
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
                 }
             });
 
             lightbox.addEventListener('click', (e) => { 
-                if (e.target === lightbox) closeLightbox(); 
+                // 确保点击的是背景而不是图片或按钮
+                if (e.target === lightbox || e.target === lightboxImage) closeLightbox(); 
             }); 
 
             document.addEventListener('keydown', (e) => { 
@@ -334,7 +369,7 @@
             });
 
             function initialize() {
-                filteredData = imageData;
+                filteredData = imageData; // Initialize filteredData with all images
                 renderItems();
             }
             initialize();
