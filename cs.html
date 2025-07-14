@@ -38,11 +38,7 @@
         .lb-download { position: absolute; bottom: 1rem; right: 1rem; background-color: #22c55e; color: white; border: none; padding: 0.5rem 1rem; border-radius: 0.5rem; cursor: pointer; transition: background-color 0.2s; font-size: 1rem; }
         .lb-download:hover { background-color: #16a34a; }
 
-        /* ===============================================================
-           诊断修复版 CSS
-           =============================================================== */
-
-        /* 状态 0: 默认状态 (在页面顶部) */
+        /* 独占式状态机 CSS */
         .header-sticky {
             padding-top: 1rem;
             padding-bottom: 1rem;
@@ -57,11 +53,9 @@
         .header-sticky h1 {
             opacity: 1;
             margin-bottom: 0.75rem;
-            /* 关键修改：不再对 height 进行过渡 */
             transition: opacity 0.3s ease-in-out, margin-bottom 0.3s ease-in-out;
         }
 
-        /* 状态 1: 部分滚动 (0 < scrollY <= 50) */
         .header-sticky.state-scrolled-partially {
             padding-top: 0.75rem;
             padding-bottom: 0.75rem;
@@ -69,7 +63,6 @@
             backdrop-filter: blur(8px);
         }
 
-        /* 状态 2: 完全滚动 (scrollY > 50) */
         .header-sticky.state-scrolled-fully {
             padding-top: 0.5rem;
             padding-bottom: 0.5rem;
@@ -80,7 +73,6 @@
         .header-sticky.state-scrolled-fully h1 {
             opacity: 0;
             margin-bottom: 0;
-            /* 关键修改：让高度和溢出立即变化，不参与动画 */
             height: 0;
             overflow: hidden;
             pointer-events: none;
@@ -130,19 +122,20 @@
     <script>
         document.addEventListener('DOMContentLoaded', function () {
             
+            // 数据中心：已为每张图片添加 description 字段用于 alt 文本
             const imageData = [
-                { src: 'https://tu.665410.xyz/5VK3U8DR9Q1V.jpg', category: '风景' },
-                { src: 'https://tu.665410.xyz/DY8Y4VG0HQ1V.png', category: '二次元' },
-                { src: 'https://tu.665410.xyz/T3T0QM05HQ1V.jpg', category: '风景' },
-                { src: 'https://tu.665410.xyz/7ZX4548R9Q1V.jpg', category: '二次元' },
-                { src: 'https://tu.665410.xyz/DJUP64A4HQ1V.jpg', category: '风景' },
-                { src: 'https://tu.665410.xyz/HU8A1PQ23Q1V.png', category: '二次元' },
-                { src: 'https://tu.665410.xyz/5VK3U8DR9Q1V.jpg', category: '风景' },
-                { src: 'https://tu.665410.xyz/DY8Y4VG0HQ1V.png', category: '二次元' },
-                { src: 'https://tu.665410.xyz/T3T0QM05HQ1V.jpg', category: '风景' },
-                { src: 'https://tu.665410.xyz/7ZX4548R9Q1V.jpg', category: '二次元' },
-                { src: 'https://tu.665410.xyz/DJUP64A4HQ1V.jpg', category: '风景' },
-                { src: 'https://tu.665410.xyz/HU8A1PQ23Q1V.png', category: '二次元' },
+                { src: 'https://tu.665410.xyz/5VK3U8DR9Q1V.jpg', category: '风景', description: '广阔的绿色山谷和连绵的群山' },
+                { src: 'https://tu.665410.xyz/DY8Y4VG0HQ1V.png', category: '二次元', description: '一位金发动漫少女回头凝视' },
+                { src: 'https://tu.665410.xyz/T3T0QM05HQ1V.jpg', category: '风景', description: '白雪覆盖的山峰和清澈的湖泊' },
+                { src: 'https://tu.665410.xyz/7ZX4548R9Q1V.jpg', category: '二次元', description: '一位戴着巨大帽子的动漫魔女' },
+                { src: 'https://tu.665410.xyz/DJUP64A4HQ1V.jpg', category: '风景', description: '一条通往山区的蜿蜒公路' },
+                { src: 'https://tu.665410.xyz/HU8A1PQ23Q1V.png', category: '二次元', description: '一位穿着和服的黑发动漫少女' },
+                { src: 'https://tu.665410.xyz/5VK3U8DR9Q1V.jpg', category: '风景', description: '广阔的绿色山谷和连绵的群山' },
+                { src: 'https://tu.665410.xyz/DY8Y4VG0HQ1V.png', category: '二次元', description: '一位金发动漫少女回头凝视' },
+                { src: 'https://tu.665410.xyz/T3T0QM05HQ1V.jpg', category: '风景', description: '白雪覆盖的山峰和清澈的湖泊' },
+                { src: 'https://tu.665410.xyz/7ZX4548R9Q1V.jpg', category: '二次元', description: '一位戴着巨大帽子的动漫魔女' },
+                { src: 'https://tu.665410.xyz/DJUP64A4HQ1V.jpg', category: '风景', description: '一条通往山区的蜿蜒公路' },
+                { src: 'https://tu.665410.xyz/HU8A1PQ23Q1V.png', category: '二次元', description: '一位穿着和服的黑发动漫少女' },
             ];
 
             const galleryContainer = document.getElementById('gallery-container');
@@ -152,6 +145,7 @@
             let filteredData = [];
             let itemsLoaded = 0;
             let isRendering = false;
+            let lastFocusedElement; // 用于无障碍访问，记录焦点
 
             function renderItems() {
                 if (isRendering || itemsLoaded >= filteredData.length) { loader.classList.add('hidden'); return; }
@@ -165,25 +159,46 @@
                     item.className = 'grid-item';
                     item.dataset.category = data.category;
                     item.dataset.index = itemsLoaded + index;
+
                     const img = document.createElement('img');
-                    img.src = data.src;
-                    img.onload = () => {
-                        item.classList.add('is-visible');
-                        resizeSingleGridItem(item);
-                        imagesToLoad--;
-                        if (imagesToLoad === 0) { isRendering = false; loader.classList.add('hidden'); }
-                    };
+                    // 懒加载：src 指向一个透明的1x1像素图片作为占位符
+                    img.src = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+                    img.dataset.src = data.src; // 真实地址存储在 data-src
+                    img.alt = data.description; // 无障碍访问：设置 alt 文本
+                    
                     img.onerror = () => {
-                        console.error('图片加载失败:', img.src);
+                        console.error('图片加载失败:', img.dataset.src);
                         item.remove();
                         imagesToLoad--;
                         if (imagesToLoad === 0) { isRendering = false; loader.classList.add('hidden'); }
                     };
+
                     item.appendChild(img);
                     galleryContainer.appendChild(item);
+
+                    // 开始观察新创建的元素
+                    imageObserver.observe(item);
                 });
                 itemsLoaded += itemsToRender.length;
             }
+            
+            // 懒加载观察者
+            const imageObserver = new IntersectionObserver((entries, observer) => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting) {
+                        const item = entry.target;
+                        const img = item.querySelector('img');
+                        img.src = img.dataset.src;
+                        img.onload = () => {
+                            item.style.backgroundColor = 'transparent';
+                            item.classList.add('is-visible');
+                            resizeSingleGridItem(item);
+                        };
+                        observer.unobserve(item);
+                    }
+                });
+            }, { rootMargin: '0px 0px 200px 0px' });
+
 
             function resizeSingleGridItem(item) {
                 const img = item.querySelector('img');
@@ -201,18 +216,11 @@
             }
 
             function resizeAllGridItems() {
-                const items = galleryContainer.querySelectorAll('.grid-item');
+                const items = galleryContainer.querySelectorAll('.grid-item.is-visible'); // 只调整已显示的项目
                 items.forEach(resizeSingleGridItem);
             }
             window.addEventListener('resize', resizeAllGridItems);
             
-            function handleInfiniteScroll() {
-                if (isRendering) return;
-                if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 500) { 
-                    renderItems(); 
-                } 
-            }
-
             const filterButtons = document.querySelectorAll('.filter-btn');
             filterButtons.forEach(button => {
                 button.addEventListener('click', () => {
@@ -240,6 +248,7 @@
                 });
             });
 
+            // 灯箱(Lightbox) 与无障碍访问逻辑
             const lightbox = document.querySelector('.lightbox'); 
             const backToTopBtn = document.querySelector('.back-to-top'); 
             const lightboxImage = lightbox.querySelector('.lightbox-image'); 
@@ -253,17 +262,21 @@
             galleryContainer.addEventListener('click', (e) => { 
                 const item = e.target.closest('.grid-item'); 
                 if (item) { 
+                    lastFocusedElement = document.activeElement; 
                     currentImageIndex = parseInt(item.dataset.index); 
                     updateLightbox(); 
                     lightbox.classList.add('active'); 
                     document.body.classList.add('lightbox-open'); 
+                    lbClose.focus();
+                    document.addEventListener('keydown', trapFocus);
                 } 
             }); 
 
             function updateLightbox() { 
                 const currentItem = filteredData[currentImageIndex]; 
                 if (!currentItem) return; 
-                lightboxImage.src = currentItem.src; 
+                lightboxImage.src = currentItem.src;
+                lightboxImage.alt = currentItem.description; // 同时更新灯箱内图片的alt
                 lbCounter.textContent = `${currentImageIndex + 1} / ${filteredData.length}`; 
             } 
 
@@ -280,7 +293,31 @@
             function closeLightbox() { 
                 lightbox.classList.remove('active'); 
                 document.body.classList.remove('lightbox-open'); 
-            } 
+                document.removeEventListener('keydown', trapFocus);
+                if (lastFocusedElement) {
+                    lastFocusedElement.focus();
+                }
+            }
+            
+            const focusableElementsString = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+            function trapFocus(e) {
+                if (!lightbox.classList.contains('active')) return;
+                const focusableContent = lightbox.querySelectorAll(focusableElementsString);
+                const firstFocusableElement = focusableContent[0];
+                const lastFocusableElement = focusableContent[focusableContent.length - 1];
+                if (e.key !== 'Tab') return;
+                if (e.shiftKey) {
+                    if (document.activeElement === firstFocusableElement) {
+                        lastFocusableElement.focus();
+                        e.preventDefault();
+                    }
+                } else {
+                    if (document.activeElement === lastFocusableElement) {
+                        firstFocusableElement.focus();
+                        e.preventDefault();
+                    }
+                }
+            }
 
             lbPrev.addEventListener('click', showPrevImage); 
             lbNext.addEventListener('click', showNextImage); 
@@ -307,19 +344,16 @@
                 window.scrollTo({ top: 0, behavior: 'smooth' }); 
             });
             
-            // JavaScript部分保持不变，它已经是最高效的了
             const header = document.querySelector('.header-sticky');
             let ticking = false;
 
             function handleScroll() {
                 const currentScrollY = window.scrollY;
-
                 if (currentScrollY > 300) { 
                     backToTopBtn.classList.add('visible'); 
                 } else { 
                     backToTopBtn.classList.remove('visible'); 
                 } 
-
                 if (currentScrollY > 50) {
                     header.classList.add('state-scrolled-fully');
                     header.classList.remove('state-scrolled-partially');
@@ -329,8 +363,10 @@
                 } else {
                     header.classList.remove('state-scrolled-fully', 'state-scrolled-partially');
                 }
-                
-                handleInfiniteScroll();
+                if (isRendering) return;
+                if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 500) { 
+                    renderItems(); 
+                } 
             }
 
             window.addEventListener('scroll', () => { 
