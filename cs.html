@@ -328,12 +328,13 @@
             });
 
             // =================================================================
-            // 修复：分类栏闪烁问题
+            // 修复：分类栏闪烁问题（进一步优化）
             // =================================================================
             let lastScrollY = 0;
+            let headerHidden = false; // 跟踪头部是否处于隐藏状态
             const header = document.querySelector('.header-sticky');
             const scrollThresholdForHide = 50; // 向下滚动多少像素后开始隐藏标题
-            const scrollThresholdForShow = 10; // 向上滚动多少像素后开始显示标题 (减少闪烁)
+            const scrollThresholdForShow = 10; // 向上滚动多少像素后开始显示标题
 
             window.addEventListener('scroll', () => {
                 const scrollY = window.scrollY;
@@ -353,15 +354,21 @@
                 }
 
                 // header的scrolled-down类，用于隐藏标题
-                // 只有当滚动方向改变或超过特定阈值时才改变状态，减少闪烁
+                // 只有当滚动方向改变且满足阈值时才改变状态
                 if (scrollY > lastScrollY && scrollY > scrollThresholdForHide) { // 向下滚动
-                    header.classList.add('scrolled-down');
-                } else if (scrollY < lastScrollY && scrollY < (lastScrollY - scrollThresholdForShow)) { // 向上滚动，且滚动距离足够
+                    if (!headerHidden) {
+                        header.classList.add('scrolled-down');
+                        headerHidden = true;
+                    }
+                } else if (scrollY < lastScrollY && (lastScrollY - scrollY) > scrollThresholdForShow) { // 向上滚动，且滚动距离足够
+                    if (headerHidden) {
+                        header.classList.remove('scrolled-down');
+                        headerHidden = false;
+                    }
+                } else if (scrollY === 0 && headerHidden) { // 滚动到顶部时强制显示标题
                     header.classList.remove('scrolled-down');
-                } else if (scrollY === 0) { // 滚动到顶部时始终显示标题
-                    header.classList.remove('scrolled-down');
+                    headerHidden = false;
                 }
-
 
                 lastScrollY = scrollY;
             });
@@ -504,7 +511,7 @@
             }
 
             // =================================================================
-            // 修复：图片缩放后，操作按钮不被覆盖
+            // 修复：图片缩放后，操作按钮不被覆盖（更精确的计算）
             // =================================================================
             function limitPan() {
                 if (currentScale <= 1) {
@@ -516,35 +523,51 @@
                 const imgRect = lightboxImage.getBoundingClientRect();
                 const lightboxRect = lightbox.getBoundingClientRect();
 
-                // 图片在Lightbox内的实际渲染宽度和高度（考虑object-fit: contain）
-                const imgRenderedWidth = imgRect.width;
-                const imgRenderedHeight = imgRect.height;
+                // 获取Lightbox内部的按钮元素，以计算它们的宽度和高度
+                // 确保这些元素已经被正确地获取到
+                const lbPrevBtn = document.querySelector('.lb-prev');
+                const lbNextBtn = document.querySelector('.lb-next');
+                const lbCloseBtn = document.querySelector('.lb-close');
+                const lbDownloadBtn = document.querySelector('.lb-download');
 
-                // 计算图片在当前缩放比例下的实际尺寸
-                const scaledImgWidth = imgRenderedWidth * currentScale;
-                const scaledImgHeight = imgRenderedHeight * currentScale;
+                // 假设按钮的尺寸和位置是固定的，并且有一些外边距
+                // 这里的值可以根据您的CSS实际情况进行调整
+                // prev/next 按钮的宽度/高度，以及它们的左右边距
+                const horizontalBtnWidth = lbPrevBtn ? lbPrevBtn.offsetWidth : 0;
+                const horizontalBtnMargin = 16; // 假设左右按钮的 margin-left/right 是 1rem (16px)
 
-                // 计算Lightbox内部的可用空间（减去padding/margin如果有的话，这里假设没有）
-                const viewportWidth = lightboxRect.width;
-                const viewportHeight = lightboxRect.height;
+                // close/download 按钮的高度/宽度，以及它们的上下边距
+                const verticalBtnHeight = lbCloseBtn ? lbCloseBtn.offsetHeight : 0;
+                const verticalBtnMargin = 16; // 假设上下按钮的 margin-top/bottom 是 1rem (16px)
 
-                // 计算图片相对于Lightbox中心点的理论偏移量
-                // 注意：由于图片设置了 object-fit: contain，它可能比 lightbox 本身小
-                // 所以我们计算的是图片内容相对于 lightbox 内部的边界，而不是 lightbox 自身的边界
-                const offsetLeft = (viewportWidth - imgRenderedWidth) / 2;
-                const offsetTop = (viewportHeight - imgRenderedHeight) / 2;
+                // 计算图片在当前缩放比例下的实际渲染尺寸
+                const scaledImgWidth = imgRect.width * currentScale;
+                const scaledImgHeight = imgRect.height * currentScale;
 
+                // 计算Lightbox的可用视口区域，减去按钮可能占据的空间
+                // 左右边缘留出的安全空间
+                const safeHorizontalSpace = (horizontalBtnWidth + horizontalBtnMargin) * 2;
+                // 上下边缘留出的安全空间 (考虑顶部关闭按钮和底部下载按钮)
+                const safeVerticalSpace = (verticalBtnHeight + verticalBtnMargin) * 2; // 顶部和底部各一个按钮
 
-                // 计算最大可拖动范围 (以图片在Lightbox内的原始中心为参考点)
-                // maxPanX/Y 是从图片原始中心到其放大后边缘的距离，超过这个距离就会超出Lightbox的可见区域
-                const maxPanX = Math.max(0, (scaledImgWidth - imgRenderedWidth) / 2);
-                const maxPanY = Math.max(0, (scaledImgHeight - imgRenderedHeight) / 2);
+                const safeViewportWidth = lightboxRect.width - safeHorizontalSpace;
+                const safeViewportHeight = lightboxRect.height - safeVerticalSpace;
+
+                // 计算最大可拖动范围 (以Lightbox内部的图片渲染区域中心为参考点)
+                // 图片在Lightbox内原始居中时，其宽度是 imgRect.width，现在它放大了
+                // 所以我们计算的是放大后图片超出原始渲染区域的宽度/高度的一半
+                const maxPanX = Math.max(0, (scaledImgWidth - imgRect.width) / 2);
+                const maxPanY = Math.max(0, (scaledImgHeight - imgRect.height) / 2);
+
+                // 同时，我们还需要确保图片不会拖动到 Lightbox 边界以外的按钮区域
+                // 结合两者，取更严格的限制
+                const effectiveMaxPanX = Math.min(maxPanX, (safeViewportWidth - imgRect.width) / 2);
+                const effectiveMaxPanY = Math.min(maxPanY, (safeViewportHeight - imgRect.height) / 2);
+
 
                 // 应用限制到 currentX 和 currentY
-                // currentX 的范围是 [-maxPanX, maxPanX]
-                // currentY 的范围是 [-maxPanY, maxPanY]
-                currentX = Math.max(-maxPanX, Math.min(currentX, maxPanX));
-                currentY = Math.max(-maxPanY, Math.min(currentY, maxPanY));
+                currentX = Math.max(-effectiveMaxPanX, Math.min(currentX, effectiveMaxPanX));
+                currentY = Math.max(-effectiveMaxPanY, Math.min(currentY, effectiveMaxPanY));
             }
 
 
