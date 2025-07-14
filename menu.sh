@@ -1,16 +1,16 @@
 #!/bin/bash
 
 # =================================================================
-#      图片画廊 专业版 - 一体化部署与管理脚本
+#      图片画廊 专业版 - 一体化部署与管理脚本 (v3.0 全自动化版)
 #
-#   说明: 此脚本包含了所有项目文件。运行安装选项后，
-#         它会自动创建 server.js, package.json, HTML 文件等。
+#   说明: 此脚本包含了所有项目文件，能自动修复环境、自动启动并显示访问信息。
 # =================================================================
 
 # 定义颜色
 GREEN='\033[0;32m'
 RED='\033[0;31m'
 YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # 应用在PM2中的名称
@@ -19,7 +19,7 @@ APP_NAME="image-gallery"
 INSTALL_DIR=$(pwd)/image-gallery-app
 
 # --- 文件生成函数 ---
-# 这个函数的核心作用是创建项目所需的所有文件和目录
+# (此部分内容未改变，保持不变)
 generate_files() {
     echo -e "${YELLOW}--> 正在创建项目目录结构: ${INSTALL_DIR}${NC}"
     mkdir -p "${INSTALL_DIR}/public/uploads"
@@ -734,45 +734,75 @@ EOF
 }
 
 # --- 管理菜单功能 ---
-check_root() {
-    if [ "$(id -u)" != "0" ]; then
-        echo -e "${RED}错误: 此脚本需要以 root 权限运行。请使用 'sudo ./menu.sh'${NC}"
-        exit 1
+
+# ===============================================================
+#  >>>>> 核心修改与新增功能 <<<<<
+# ===============================================================
+
+# 【新增】显示访问信息函数
+display_access_info() {
+    # 切换到安装目录以读取 .env 文件
+    cd "${INSTALL_DIR}" || return
+    
+    # 自动获取服务器的公网IP地址
+    local SERVER_IP
+    SERVER_IP=$(hostname -I | awk '{print $1}')
+    
+    # 从 .env 文件读取配置
+    if [ -f ".env" ]; then
+        local PORT
+        PORT=$(grep 'PORT=' .env | cut -d '=' -f2)
+        local USER
+        USER=$(grep 'ADMIN_USERNAME=' .env | cut -d '=' -f2)
+        local PASS
+        PASS=$(grep 'ADMIN_PASSWORD=' .env | cut -d '=' -f2)
+
+        # 格式化输出
+        echo -e "${YELLOW}======================================================${NC}"
+        echo -e "${YELLOW}            应用已就绪！请使用以下信息访问            ${NC}"
+        echo -e "${YELLOW}======================================================${NC}"
+        echo -e "前台画廊地址: ${GREEN}http://${SERVER_IP}:${PORT}${NC}"
+        echo -e "后台管理地址: ${GREEN}http://${SERVER_IP}:${PORT}/admin${NC}"
+        echo -e "后台登录用户: ${BLUE}${USER}${NC}"
+        echo -e "后台登录密码: ${BLUE}${PASS}${NC}"
+        echo -e "${YELLOW}======================================================${NC}"
     fi
 }
 
+# 【修改】安装函数
 install_app() {
     echo -e "${GREEN}--- 1. 开始安装应用 ---${NC}"
-    # 调用文件生成函数
+    
+    echo "--> 正在检查系统环境..."
+    if ! command -v node > /dev/null || ! command -v npm > /dev/null; then
+        echo -e "${YELLOW}--> 检测到 Node.js 或 npm 未完全安装，现在开始自动修复...${NC}"
+        apt-get update -y
+        apt-get install -y nodejs npm
+        echo -e "${GREEN}--> 环境修复完成！${NC}"
+    else
+        echo -e "${GREEN}--> Node.js 和 npm 环境已存在。${NC}"
+    fi
+
     generate_files
     
-    echo "--> 正在更新系统软件包列表..."
-    apt-get update -y
-    
-    if ! command -v node > /dev/null; then
-        echo "--> 正在安装 Node.js 和 npm..."
-        apt-get install -y nodejs npm
-    else
-        echo -e "${YELLOW}--> Node.js 已安装。${NC}"
-    fi
-    
-    if ! command -v pm2 > /dev/null; then
-        echo "--> 正在全局安装 PM2..."
-        npm install -g pm2
-    else
-        echo -e "${YELLOW}--> PM2 已安装。${NC}"
-    fi
+    echo "--> 正在全局安装 PM2..."
+    npm install -g pm2
     
     echo "--> 正在安装项目依赖 (npm install)..."
     npm install
     
-    echo -e "${GREEN}--- 安装完成！---${NC}"
-    echo -e "${YELLOW}请使用菜单选项 '2' 来首次启动应用。${NC}"
+    echo -e "${GREEN}--- 安装完成！正在自动启动应用... ---${NC}"
+    # 自动启动
+    start_app
+    
+    # 自动显示访问信息
+    display_access_info
 }
 
+# 【修改】启动函数 (增加信息提示)
 start_app() {
     cd "${INSTALL_DIR}" || exit
-    echo -e "${GREEN}--- 2. 正在使用 PM2 启动应用... ---${NC}"
+    echo -e "${GREEN}--- 正在使用 PM2 启动应用... ---${NC}"
     if [ ! -f ".env" ]; then
         echo -e "${YELLOW}警告: .env 文件不存在。将创建默认配置文件。${NC}"
         (
@@ -780,50 +810,68 @@ start_app() {
         echo "ADMIN_USERNAME=admin"
         echo "ADMIN_PASSWORD=password123"
         ) > .env
-        echo "默认用户名: admin, 默认密码: password123. 请务必使用菜单中的选项 '6' 修改密码！"
+        echo "默认用户名: admin, 默认密码: password123"
     fi
     pm2 start server.js --name "$APP_NAME"
     pm2 startup
     pm2 save
-    echo -e "${GREEN}--- 应用已启动！请访问 http://<你的IP>:3000 ---${NC}"
+    echo -e "${GREEN}--- 应用已启动！---${NC}"
 }
 
+# 【修改】管理登录凭据函数 (原change_password)
+manage_credentials() {
+    cd "${INSTALL_DIR}" || exit
+    echo -e "${YELLOW}--- 修改后台用户名和密码 ---${NC}"
+    if [ ! -f ".env" ]; then
+        echo -e "${RED}错误: .env 文件不存在。请先安装并启动一次应用。${NC}"
+        return
+    fi
+
+    local CURRENT_USER
+    CURRENT_USER=$(grep 'ADMIN_USERNAME=' .env | cut -d '=' -f2)
+    echo "当前用户名: ${CURRENT_USER}"
+    read -p "请输入新的用户名 (留空则不修改): " new_username
+
+    read -p "请输入新的密码 (必须填写): " new_password
+    if [ -z "$new_password" ]; then
+        echo -e "${RED}密码不能为空！操作取消。${NC}"
+        return
+    fi
+    
+    # 如果用户输入了新用户名，则更新
+    if [ -n "$new_username" ]; then
+        sed -i "/^ADMIN_USERNAME=/c\\ADMIN_USERNAME=${new_username}" .env
+        echo -e "${GREEN}用户名已更新为: ${new_username}${NC}"
+    fi
+
+    # 更新密码
+    sed -i "/^ADMIN_PASSWORD=/c\\ADMIN_PASSWORD=${new_password}" .env
+    echo -e "${GREEN}密码已更新。${NC}"
+
+    echo -e "${YELLOW}正在重启应用以使新凭据生效...${NC}"
+    restart_app
+}
+
+
 stop_app() {
-    echo -e "${YELLOW}--- 3. 正在停止应用... ---${NC}"
+    echo -e "${YELLOW}--- 停止应用... ---${NC}"
     pm2 stop "$APP_NAME"
     echo -e "${GREEN}--- 应用已停止！---${NC}"
 }
 
 restart_app() {
-    echo -e "${GREEN}--- 4. 正在重启应用... ---${NC}"
+    echo -e "${GREEN}--- 重启应用... ---${NC}"
     pm2 restart "$APP_NAME"
     echo -e "${GREEN}--- 应用已重启！---${NC}"
 }
 
 view_logs() {
-    echo -e "${YELLOW}--- 5. 正在显示应用日志 (按 Ctrl+C 退出)... ---${NC}"
+    echo -e "${YELLOW}--- 显示应用日志 (按 Ctrl+C 退出)... ---${NC}"
     pm2 logs "$APP_NAME"
 }
 
-change_password() {
-    cd "${INSTALL_DIR}" || exit
-    echo -e "${YELLOW}--- 6. 修改管理员密码 ---${NC}"
-    if [ ! -f ".env" ]; then
-        echo -e "${RED}错误: .env 文件不存在。请先启动一次应用以自动创建。${NC}"
-        return
-    fi
-    read -p "请输入新的管理员密码: " new_password
-    if [ -z "$new_password" ]; then
-        echo -e "${RED}密码不能为空！操作取消。${NC}"
-        return
-    fi
-    sed -i "/^ADMIN_PASSWORD=/c\\ADMIN_PASSWORD=${new_password}" .env
-    echo -e "${GREEN}密码已更新！正在重启应用以使新密码生效...${NC}"
-    restart_app
-}
-
 uninstall_app() {
-    echo -e "${RED}--- 7. 警告：这将从PM2中移除应用并删除整个项目文件夹！ ---${NC}"
+    echo -e "${RED}--- 警告：这将从PM2中移除应用并删除整个项目文件夹！ ---${NC}"
     read -p "你确定要继续吗？ (y/n): " confirm
     if [[ "$confirm" == "y" || "$confirm" == "Y" ]]; then
         echo "--> 正在从 PM2 中删除应用..."
@@ -841,30 +889,42 @@ uninstall_app() {
 show_menu() {
     clear
     echo -e "${YELLOW}======================================================${NC}"
-    echo -e "${YELLOW}          图片画廊 - 一体化部署与管理脚本          ${NC}"
+    echo -e "${YELLOW}      图片画廊 - 一体化部署与管理脚本 (v3.0)     ${NC}"
     echo -e "${YELLOW}======================================================${NC}"
     echo -e " 应用名称: ${GREEN}${APP_NAME}${NC}"
     echo -e " 安装路径: ${GREEN}${INSTALL_DIR}${NC}"
+    
+    # 【新增】在主菜单显示访问网址
+    if [ -d "${INSTALL_DIR}" ] && [ -f "${INSTALL_DIR}/.env" ]; then
+        local SERVER_IP
+        SERVER_IP=$(hostname -I | awk '{print $1}')
+        local PORT
+        PORT=$(grep 'PORT=' "${INSTALL_DIR}/.env" | cut -d '=' -f2)
+        echo -e " 访问网址: ${GREEN}http://${SERVER_IP}:${PORT}${NC}"
+    else
+        echo -e " 访问网址: ${RED}(应用尚未安装)${NC}"
+    fi
+
     echo -e "${YELLOW}------------------------------------------------------${NC}"
-    echo " 1. 安装应用 (首次使用，将在此目录创建所有文件)"
+    echo " 1. 安装或修复应用 (首次使用)"
     echo " 2. 启动应用"
     echo " 3. 停止应用"
     echo " 4. 重启应用"
     echo " 5. 查看实时日志"
-    echo " 6. 修改后台密码"
-    echo " 7. 彻底卸载应用 (删除PM2进程和所有文件)"
+    echo " 6. 修改后台用户名和密码" # 【修改】菜单文本
+    echo " 7. 彻底卸载应用"
     echo " 0. 退出"
     echo -e "${YELLOW}------------------------------------------------------${NC}"
     read -p "请输入你的选择 [0-7]: " choice
     
     case $choice in
-        1) check_root; install_app ;;
-        2) start_app ;;
+        1) install_app ;;
+        2) start_app; display_access_info ;; # 启动后也显示信息
         3) stop_app ;;
         4) restart_app ;;
         5) view_logs ;;
-        6) change_password ;;
-        7) check_root; uninstall_app ;;
+        6) manage_credentials ;; # 【修改】调用新函数
+        7) uninstall_app ;;
         0) exit 0 ;;
         *) echo -e "${RED}无效输入，请输入 0 到 7 之间的数字。${NC}" ;;
     esac
