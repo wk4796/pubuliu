@@ -39,7 +39,7 @@
         .lb-download:hover { background-color: #16a34a; }
 
         /* ===============================================================
-           终极解决方案：独占式状态机 CSS
+           诊断修复版 CSS
            =============================================================== */
 
         /* 状态 0: 默认状态 (在页面顶部) */
@@ -51,17 +51,14 @@
             top: 0;
             z-index: 40;
             box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
-            /* 为所有会变化的属性定义过渡 */
             transition: padding 0.3s ease-in-out, background-color 0.3s ease-in-out;
         }
 
         .header-sticky h1 {
             opacity: 1;
             margin-bottom: 0.75rem;
-            height: auto; /* 确保高度是自动的 */
-            overflow: visible; /* 确保内容可见 */
-            /* 为所有会变化的属性定义过渡 */
-            transition: opacity 0.3s ease-in-out, margin-bottom 0.3s ease-in-out, height 0.3s ease-in-out;
+            /* 关键修改：不再对 height 进行过渡 */
+            transition: opacity 0.3s ease-in-out, margin-bottom 0.3s ease-in-out;
         }
 
         /* 状态 1: 部分滚动 (0 < scrollY <= 50) */
@@ -71,7 +68,6 @@
             background-color: rgba(240, 253, 244, 0.8);
             backdrop-filter: blur(8px);
         }
-        /* 在此状态下，h1 样式继承自默认状态，无需额外定义 */
 
         /* 状态 2: 完全滚动 (scrollY > 50) */
         .header-sticky.state-scrolled-fully {
@@ -84,6 +80,7 @@
         .header-sticky.state-scrolled-fully h1 {
             opacity: 0;
             margin-bottom: 0;
+            /* 关键修改：让高度和溢出立即变化，不参与动画 */
             height: 0;
             overflow: hidden;
             pointer-events: none;
@@ -310,37 +307,29 @@
                 window.scrollTo({ top: 0, behavior: 'smooth' }); 
             });
             
-            // =================================================================
-            // (终极方案) 使用 requestAnimationFrame + 独占式状态机
-            // =================================================================
+            // JavaScript部分保持不变，它已经是最高效的了
             const header = document.querySelector('.header-sticky');
             let ticking = false;
 
             function handleScroll() {
                 const currentScrollY = window.scrollY;
 
-                // 1. 处理返回顶部按钮
                 if (currentScrollY > 300) { 
                     backToTopBtn.classList.add('visible'); 
                 } else { 
                     backToTopBtn.classList.remove('visible'); 
                 } 
 
-                // 2. 独占式状态机逻辑
                 if (currentScrollY > 50) {
-                    // 切换到状态 2: 完全滚动
                     header.classList.add('state-scrolled-fully');
                     header.classList.remove('state-scrolled-partially');
                 } else if (currentScrollY > 0) {
-                    // 切换到状态 1: 部分滚动
                     header.classList.add('state-scrolled-partially');
                     header.classList.remove('state-scrolled-fully');
                 } else {
-                    // 切换到状态 0: 默认
                     header.classList.remove('state-scrolled-fully', 'state-scrolled-partially');
                 }
                 
-                // 3. 处理无限滚动加载
                 handleInfiniteScroll();
             }
 
