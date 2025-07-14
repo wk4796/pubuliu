@@ -10,10 +10,12 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
     <script src="https://cdn.tailwindcss.com"></script>
+    
+    <script src="https://cdn.jsdelivr.net/npm/medium-zoom@1.1.0/dist/medium-zoom.min.js"></script>
 
     <style>
         body { font-family: 'Inter', 'Noto Sans SC', sans-serif; background-color: #f0fdf4; color: #14532d; display: flex; flex-direction: column; min-height: 100vh; }
-        body.lightbox-open { overflow: hidden; }
+        /* body.lightbox-open { overflow: hidden; } /* 这一行可能不再需要，因为 medium-zoom 会自己处理 */
         .filter-btn { padding: 0.5rem 1rem; border-radius: 9999px; font-weight: 500; transition: all 0.2s ease; border: 1px solid transparent; cursor: pointer; }
         .filter-btn:hover { background-color: #dcfce7; }
         .filter-btn.active { background-color: #22c55e; color: white; border-color: #16a34a; }
@@ -24,19 +26,20 @@
         .grid-item.is-visible { opacity: 1; transform: translateY(0); }
         .grid-item img { cursor: pointer; width: 100%; height: 100%; object-fit: cover; display: block; transition: transform 0.4s ease; }
         .grid-item:hover img { transform: scale(1.05); }
-        .lightbox { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.9); display: flex; justify-content: center; align-items: center; z-index: 1000; opacity: 0; visibility: hidden; transition: opacity 0.3s ease; }
-        .lightbox.active { opacity: 1; visibility: visible; }
-        .lightbox-image { max-width: 85%; max-height: 85%; display: block; object-fit: contain; }
-        .lightbox-btn { position: absolute; top: 50%; transform: translateY(-50%); background-color: rgba(255,255,255,0.1); color: white; border: none; font-size: 2.5rem; cursor: pointer; padding: 0.5rem 1rem; border-radius: 0.5rem; transition: background-color 0.2s; }
-        .lightbox-btn:hover { background-color: rgba(255,255,255,0.2); }
-        .lb-prev { left: 1rem; }
-        .lb-next { right: 1rem; }
-        .lb-close { top: 1rem; right: 1rem; font-size: 2rem; }
-        .lb-counter { position: absolute; top: 1.5rem; left: 50%; transform: translateX(-50%); color: white; font-size: 1rem; background-color: rgba(0,0,0,0.3); padding: 0.25rem 0.75rem; border-radius: 9999px; }
+
+        /* Lightbox related styles. Medium-zoom handles its own, so we can remove most of these. */
+        /* 以下是你原有 Lightbox 的样式，如果使用 medium-zoom，大部分将不再需要，但保留一些通用样式无妨 */
+        /* .lightbox { 
+             display: none; 
+        } */
+        /* medium-zoom 会生成自己的 overlay 和 image 元素，因此以下样式不再需要 */
+        /* .lightbox.active, .lightbox-image, .lightbox-btn, .lb-prev, .lb-next, .lb-close, .lb-counter, .lb-download */
+
         .back-to-top { position: fixed; bottom: 2rem; right: 2rem; background-color: #22c55e; color: white; width: 3rem; height: 3rem; border-radius: 9999px; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 8px rgba(0,0,0,0.2); cursor: pointer; opacity: 0; visibility: hidden; transform: translateY(20px); transition: all 0.3s ease; }
         .back-to-top.visible { opacity: 1; visibility: visible; transform: translateY(0); }
-        .lb-download { position: absolute; bottom: 1rem; right: 1rem; background-color: #22c55e; color: white; border: none; padding: 0.5rem 1rem; border-radius: 0.5rem; cursor: pointer; transition: background-color 0.2s; font-size: 1rem; }
-        .lb-download:hover { background-color: #16a34a; }
+        /* medium-zoom overlay style */
+        .medium-zoom-overlay { background-color: rgba(0, 0, 0, 0.9) !important; } /* 可以自定义背景色 */
+
 
         /* Sticky header optimization */
         .header-sticky {
@@ -116,14 +119,6 @@
         <p class="text-green-700">© 2025 图片画廊</p>
     </footer>
 
-    <div class="lightbox">
-        <span class="lb-counter"></span>
-        <button class="lightbox-btn lb-close">&times;</button>
-        <button class="lightbox-btn lb-prev">&lsaquo;</button>
-        <img class="lightbox-image">
-        <button class="lightbox-btn lb-next">&rsaquo;</button>
-        <button class="lb-download">下载</button> </div>
-
     <a class="back-to-top" title="返回顶部">
         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
     </a>
@@ -154,19 +149,24 @@
             const loader = document.getElementById('loader');
             const itemsPerLoad = 6;
             let currentFilter = 'all';
-            let filteredData = []; // This will hold the currently displayed images based on filter
+            let filteredData = []; 
             let itemsLoaded = 0;
             let isRendering = false;
+            
+            // --- medium-zoom 实例 ---
+            let zoom; // 将 zoom 实例声明在全局，以便在 filter 时重用或销毁
 
-            // --- Lightbox Variables ---
-            const lightbox = document.querySelector('.lightbox'); 
-            const lightboxImage = lightbox.querySelector('.lightbox-image'); 
-            const lbCounter = lightbox.querySelector('.lb-counter'); 
-            const lbPrev = lightbox.querySelector('.lb-prev'); 
-            const lbNext = lightbox.querySelector('.lb-next'); 
-            const lbClose = lightbox.querySelector('.lb-close'); 
-            const lbDownload = lightbox.querySelector('.lb-download'); 
-            let currentLightboxIndex = 0; // Use a dedicated index for lightbox, referring to filteredData
+            function initZoom() {
+                // 如果已经有 zoom 实例，先销毁它，以避免重复绑定
+                if (zoom) {
+                    zoom.destroy();
+                }
+                // 初始化 medium-zoom 到所有 .grid-item img 元素
+                zoom = mediumZoom(galleryContainer.querySelectorAll('.grid-item img'), {
+                    margin: 24, // 放大时图片与屏幕边缘的距离
+                    background: 'rgba(0, 0, 0, 0.9)' // 放大时的背景颜色
+                });
+            }
 
             function renderItems() {
                 if (isRendering || itemsLoaded >= filteredData.length) { loader.classList.add('hidden'); return; }
@@ -174,7 +174,13 @@
                 loader.classList.remove('hidden');
                 const itemsToRender = filteredData.slice(itemsLoaded, itemsLoaded + itemsPerLoad);
                 let imagesToLoad = itemsToRender.length;
-                if (imagesToLoad === 0) { isRendering = false; loader.classList.add('hidden'); return; }
+                if (imagesToLoad === 0) { 
+                    isRendering = false; 
+                    loader.classList.add('hidden'); 
+                    // 每次渲染完成后，重新绑定 medium-zoom 到新加载的图片上
+                    initZoom(); 
+                    return; 
+                }
                 itemsToRender.forEach((data, index) => {
                     const item = document.createElement('div');
                     item.className = 'grid-item';
@@ -182,17 +188,28 @@
                     
                     const img = document.createElement('img');
                     img.src = data.src;
+                    img.alt = data.category + '图片'; // 添加alt属性，有利于SEO和可访问性
+
                     img.onload = () => {
                         item.classList.add('is-visible');
                         resizeSingleGridItem(item);
                         imagesToLoad--;
-                        if (imagesToLoad === 0) { isRendering = false; loader.classList.add('hidden'); }
+                        if (imagesToLoad === 0) { 
+                            isRendering = false; 
+                            loader.classList.add('hidden'); 
+                            // 当这批图片加载完成后，初始化/更新 medium-zoom
+                            initZoom(); 
+                        }
                     };
                     img.onerror = () => {
                         console.error('图片加载失败:', img.src);
                         item.remove();
                         imagesToLoad--;
-                        if (imagesToLoad === 0) { isRendering = false; loader.classList.add('hidden'); }
+                        if (imagesToLoad === 0) { 
+                            isRendering = false; 
+                            loader.classList.add('hidden'); 
+                            initZoom(); // 即使有错误，也要尝试初始化
+                        }
                     };
                     item.appendChild(img);
                     galleryContainer.appendChild(item);
@@ -222,7 +239,6 @@
             window.addEventListener('resize', resizeAllGridItems);
             window.addEventListener('scroll', () => { 
                 if (isRendering) return; 
-                // Load more when scrolled near bottom, and there are more items to load in the filteredData
                 if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 500 && itemsLoaded < filteredData.length) { 
                     renderItems(); 
                 } 
@@ -237,8 +253,7 @@
                     button.classList.add('active');
                     galleryContainer.innerHTML = '';
                     itemsLoaded = 0;
-                    currentLightboxIndex = 0; // 重置 lightbox 索引
-
+                    
                     if (currentFilter === 'all') {
                         filteredData = imageData;
                     } else if (currentFilter === 'random') {
@@ -251,8 +266,7 @@
                     } else {
                         filteredData = imageData.filter(item => item.category === currentFilter);
                     }
-                    // 确保在重新渲染前，所有 lightbox 相关的状态都被正确重置
-                    closeLightbox(); 
+                    
                     setTimeout(() => {
                         renderItems();
                     }, 0);
@@ -260,87 +274,6 @@
             });
 
             const backToTopBtn = document.querySelector('.back-to-top'); 
-            
-            galleryContainer.addEventListener('click', (e) => { 
-                const item = e.target.closest('.grid-item'); 
-                if (item) { 
-                    // 获取当前点击图片在 filteredData 中的实际索引
-                    // 使用 data.src 来找到在 filteredData 中的索引更可靠
-                    const clickedImgSrc = item.querySelector('img').src;
-                    currentLightboxIndex = filteredData.findIndex(data => data.src === clickedImgSrc);
-
-                    if (currentLightboxIndex !== -1) { // 确保找到了图片
-                        updateLightbox(); 
-                        lightbox.classList.add('active'); 
-                        document.body.classList.add('lightbox-open'); 
-                    } else {
-                        console.warn("点击的图片未在 filteredData 中找到，Lightbox无法打开。");
-                    }
-                } 
-            }); 
-
-            function updateLightbox() { 
-                // 确保 currentLightboxIndex 在有效范围内
-                if (filteredData.length === 0) {
-                    closeLightbox();
-                    return;
-                }
-                currentLightboxIndex = (currentLightboxIndex + filteredData.length) % filteredData.length;
-
-                const currentItem = filteredData[currentLightboxIndex]; 
-                if (!currentItem) { // 额外的安全检查
-                    console.error("无法获取当前 lightbox 图片数据，索引:", currentLightboxIndex);
-                    closeLightbox();
-                    return;
-                }
-                lightboxImage.src = currentItem.src; 
-                lbCounter.textContent = `${currentLightboxIndex + 1} / ${filteredData.length}`; 
-            } 
-
-            function showPrevImage() { 
-                if (filteredData.length === 0) return;
-                currentLightboxIndex = (currentLightboxIndex - 1 + filteredData.length) % filteredData.length; 
-                updateLightbox(); 
-            } 
-
-            function showNextImage() { 
-                if (filteredData.length === 0) return;
-                currentLightboxIndex = (currentLightboxIndex + 1) % filteredData.length; 
-                updateLightbox(); 
-            } 
-
-            function closeLightbox() { 
-                lightbox.classList.remove('active'); 
-                document.body.classList.remove('lightbox-open'); 
-            } 
-
-            lbPrev.addEventListener('click', showPrevImage); 
-            lbNext.addEventListener('click', showNextImage); 
-            lbClose.addEventListener('click', closeLightbox); 
-            lbDownload.addEventListener('click', () => { 
-                const currentItem = filteredData[currentLightboxIndex];
-                if (currentItem && currentItem.src) {
-                    // 使用 download 属性强制下载，文件名可以从 URL 推断或自定义
-                    const a = document.createElement('a');
-                    a.href = currentItem.src;
-                    a.download = currentItem.src.split('/').pop(); // 从URL获取文件名
-                    document.body.appendChild(a);
-                    a.click();
-                    document.body.removeChild(a);
-                }
-            });
-
-            lightbox.addEventListener('click', (e) => { 
-                // 确保点击的是背景而不是图片或按钮
-                if (e.target === lightbox || e.target === lightboxImage) closeLightbox(); 
-            }); 
-
-            document.addEventListener('keydown', (e) => { 
-                if (!lightbox.classList.contains('active')) return; 
-                if (e.key === 'ArrowLeft') showPrevImage(); 
-                if (e.key === 'ArrowRight') showNextImage(); 
-                if (e.key === 'Escape') closeLightbox(); 
-            }); 
 
             window.addEventListener('scroll', () => { 
                 if (window.scrollY > 300) { 
@@ -369,8 +302,8 @@
             });
 
             function initialize() {
-                filteredData = imageData; // Initialize filteredData with all images
-                renderItems();
+                filteredData = imageData; 
+                renderItems(); // Render initial batch and then initialize zoom
             }
             initialize();
         });
