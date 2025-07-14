@@ -4,7 +4,7 @@
 #   图片画廊 专业版 - 一体化部署与管理脚本 (v17.2 终极版)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
-#   功能: 修复上传流程Bug，是最终交付的稳定版本。
+#   功能: 修复所有已知Bug，是最终交付的稳定版本。
 # =================================================================
 
 # --- 配置 ---
@@ -206,7 +206,7 @@ apiAdminRouter.post('/upload', upload.single('image'), async (req, res) => {
         
         let originalFilename = req.file.originalname;
         const existingFilenames = new Set(images.map(img => img.originalFilename));
-        if (existingFilenames.has(originalFilename)) {
+        if (req.body.rename === 'true' && existingFilenames.has(originalFilename)) {
             const ext = path.extname(originalFilename);
             const baseName = path.basename(originalFilename, ext);
             let counter = 1;
@@ -362,27 +362,28 @@ cat << 'EOF' > public/index.html
                 const columns = Array.from({ length: numColumns }, () => {
                     const colEl = document.createElement('div');
                     colEl.className = 'gallery-column';
-                    return { element: colEl, items: [], height: 0 };
+                    return { element: colEl, height: 0 };
                 });
+                
                 const imagesToDistribute = [...images];
                 if (currentFilter !== 'random') { imagesToDistribute.sort((a, b) => (b.height/b.width) - (a.height/a.width)); }
+                
                 imagesToDistribute.forEach(image => {
                     let shortestColumn = columns[0];
                     for (let i = 1; i < columns.length; i++) { if (columns[i].height < shortestColumn.height) { shortestColumn = columns[i]; } }
-                    shortestColumn.items.push(image);
-                    const imageAspect = image.height / image.width; shortestColumn.height += imageAspect;
+                    
+                    const imageAspect = image.height / image.width;
+                    shortestColumn.height += imageAspect;
+                    
+                    const item = document.createElement('a');
+                    item.className = 'gallery-item'; item.href = "#"; item.dataset.id = image.id;
+                    const webpSrcset = `/image-proxy/${image.filename}?w=400&format=webp 400w, /image-proxy/${image.filename}?w=800&format=webp 800w`;
+                    const jpegSrcset = `/image-proxy/${image.filename}?w=400 400w, /image-proxy/${image.filename}?w=800 800w`;
+                    item.innerHTML = `<picture><source type="image/webp" srcset="${webpSrcset}"><source type="image/jpeg" srcset="${jpegSrcset}"><img src="/image-proxy/${image.filename}?w=400" alt="${image.description}" loading="lazy"></picture>`;
+                    shortestColumn.element.appendChild(item);
                 });
-                columns.forEach(col => {
-                    col.items.forEach(image => {
-                        const item = document.createElement('a');
-                        item.className = 'gallery-item'; item.href = "#"; item.dataset.id = image.id;
-                        const webpSrcset = `/image-proxy/${image.filename}?w=400&format=webp 400w, /image-proxy/${image.filename}?w=800&format=webp 800w`;
-                        const jpegSrcset = `/image-proxy/${image.filename}?w=400 400w, /image-proxy/${image.filename}?w=800 800w`;
-                        item.innerHTML = `<picture><source type="image/webp" srcset="${webpSrcset}"><source type="image/jpeg" srcset="${jpegSrcset}"><img src="/image-proxy/${image.filename}?w=400" alt="${image.description}" loading="lazy"></picture>`;
-                        col.element.appendChild(item);
-                    });
-                    this.container.appendChild(col.element);
-                });
+
+                columns.forEach(col => this.container.appendChild(col.element));
             }
         };
 
@@ -391,9 +392,14 @@ cat << 'EOF' > public/index.html
         function applyFiltersAndRender() {
             let dataToProcess = [...allImageData];
             if (currentSearch) { const searchTerm = currentSearch.toLowerCase(); dataToProcess = dataToProcess.filter(item => (item.description && item.description.toLowerCase().includes(searchTerm)) || (item.originalFilename && item.originalFilename.toLowerCase().includes(searchTerm))); }
-            if (currentFilter === 'all') { filteredData = dataToProcess;
-            } else if (currentFilter === 'random') { for (let i = dataToProcess.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [dataToProcess[i], dataToProcess[j]] = [dataToProcess[j], dataToProcess[i]]; } filteredData = dataToProcess;
-            } else { filteredData = dataToProcess.filter(item => item.category === currentFilter); }
+            if (currentFilter === 'all') {
+                filteredData = dataToProcess.sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt));
+            } else if (currentFilter === 'random') { 
+                for (let i = dataToProcess.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [dataToProcess[i], dataToProcess[j]] = [dataToProcess[j], dataToProcess[i]]; }
+                filteredData = dataToProcess;
+            } else { 
+                filteredData = dataToProcess.filter(item => item.category === currentFilter).sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt));
+            }
             ColumnLayout.render(filteredData);
         }
         async function initializeGallery() { loader.classList.remove('hidden'); loader.textContent = '正在加载...'; try { allImageData = await fetchJSON('/api/images'); applyFiltersAndRender(); } catch (error) { console.error('获取图片数据失败:', error); loader.textContent = '加载失败，请刷新页面。'; } }
@@ -475,6 +481,7 @@ cat << 'EOF' > public/admin.html
         const apiRequest = async (url, options = {}) => { const response = await fetch(url, options); if (response.status === 401) { showToast('登录状态已过期', 'error'); setTimeout(() => window.location.href = '/login.html', 2000); throw new Error('Unauthorized'); } return response; };
         const formatBytes = (bytes, decimals = 2) => { if (!+bytes) return '0 Bytes'; const k = 1024; const dm = decimals < 0 ? 0 : decimals; const sizes = ["Bytes", "KB", "MB", "GB", "TB"]; const i = Math.floor(Math.log(bytes) / Math.log(k)); return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`; };
         const showToast = (message, type = 'success') => { const toast = document.getElementById('toast'); toast.className = `toast max-w-xs text-white text-sm rounded-lg shadow-lg p-3 ${type === 'success' ? 'bg-green-600' : 'bg-red-600'}`; toast.querySelector('#toast-message').textContent = message; toast.querySelector('#toast-icon').innerHTML = type === 'success' ? `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>` : `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>`; toast.style.display = 'block'; setTimeout(() => toast.classList.add('show'), 10); setTimeout(() => { toast.classList.remove('show'); setTimeout(() => toast.style.display = 'none', 300); }, 3000); };
+        const showGenericModal = (title, bodyHtml, footerHtml) => { DOMElements.genericModal.querySelector('#modal-title').textContent = title; DOMElements.genericModal.querySelector('#modal-body').innerHTML = bodyHtml; DOMElements.genericModal.querySelector('#modal-footer').innerHTML = footerHtml; DOMElements.genericModal.classList.add('active'); };
         const showConfirmationModal = (title, bodyHtml) => { return new Promise(resolve => { const footerHtml = `<button type="button" class="modal-cancel-btn bg-gray-300 hover:bg-gray-400 text-black py-2 px-4 rounded">取消</button><button type="button" id="modal-confirm-btn" class="bg-red-600 hover:bg-red-700 text-white py-2 px-4 rounded">继续上传</button>`; showGenericModal(title, bodyHtml, footerHtml); DOMElements.genericModal.querySelector('#modal-confirm-btn').onclick = () => { hideModal(DOMElements.genericModal); resolve(true); }; const cancelBtn = DOMElements.genericModal.querySelector('.modal-cancel-btn'); cancelBtn.onclick = () => { hideModal(DOMElements.genericModal); resolve(false); }; DOMElements.genericModal.onclick = (e) => { if (e.target === DOMElements.genericModal) { cancelBtn.click(); } }; }); };
         const hideModal = (modal) => modal.classList.remove('active');
         const handleFileSelection = (fileList) => { const imageFiles = Array.from(fileList).filter(f => f.type.startsWith('image/')); const currentFilenames = new Set(filesToUpload.map(item => item.file.name)); const newFiles = imageFiles.filter(f => !currentFilenames.has(f.name)).map(file => ({ file, description: DOMElements.unifiedDescription.value, userHasTyped: DOMElements.unifiedDescription.value !== '' })); filesToUpload = filesToUpload.concat(newFiles); DOMElements.uploadBtn.disabled = filesToUpload.length === 0; renderFilePreviews(); };
@@ -487,24 +494,28 @@ cat << 'EOF' > public/admin.html
         const processUploadQueue = async () => {
             DOMElements.uploadBtn.disabled = true;
             let uploadQueue = [...filesToUpload];
-            let processedCount = 0; const totalToUpload = uploadQueue.length;
-            const updateButtonText = () => { DOMElements.uploadBtn.textContent = `正在处理 (${processedCount}/${totalToUpload})...`; };
+            const originalQueueLength = uploadQueue.length;
+            let processedCount = 0;
+            const updateButtonText = () => { DOMElements.uploadBtn.textContent = `正在处理 (${processedCount}/${originalQueueLength})...`; };
             updateButtonText();
-            for (let i=0; i < uploadQueue.length; i++) {
-                const item = uploadQueue[i];
-                const originalIndex = filesToUpload.indexOf(item);
+
+            for (const item of uploadQueue) {
+                const originalIndex = filesToUpload.findIndex(f => f.file === item.file);
                 const previewItem = DOMElements.filePreviewList.querySelector(`[data-file-index="${originalIndex}"]`);
+                if (!previewItem) { processedCount++; updateButtonText(); continue; }
                 const statusEl = previewItem.querySelector('.upload-status');
                 try {
+                    let rename = false;
                     const checkRes = await apiRequest('/api/admin/check-filenames', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({filenames: [item.file.name]}) });
                     if (!checkRes.ok) throw new Error("文件名检查请求失败");
                     const { duplicates } = await checkRes.json();
                     if (duplicates.length > 0) {
                         const userConfirmed = await showConfirmationModal('文件已存在', `文件 "${item.file.name}" 已存在。是否仍然继续上传？<br>(新文件将被自动重命名)`);
                         if (!userConfirmed) { statusEl.textContent = '已取消'; processedCount++; updateButtonText(); continue; }
+                        rename = true;
                     }
                     statusEl.textContent = '上传中...';
-                    const formData = new FormData(); formData.append('image', item.file); formData.append('category', DOMElements.categorySelect.value); formData.append('description', item.description);
+                    const formData = new FormData(); formData.append('image', item.file); formData.append('category', DOMElements.categorySelect.value); formData.append('description', item.description); formData.append('rename', rename);
                     const response = await apiRequest('/api/admin/upload', { method: 'POST', body: formData });
                     const result = await response.json();
                     if (response.ok) { previewItem.classList.add('upload-success'); statusEl.textContent = '✅ 上传成功'; } 
@@ -654,7 +665,7 @@ uninstall_app() {
 }
 show_menu() {
     clear
-    echo -e "${YELLOW}======================================================${NC}"; echo -e "${YELLOW}     图片画廊 - 一体化部署与管理脚本 (v17.2)     ${NC}"; echo -e "${YELLOW}======================================================${NC}"
+    echo -e "${YELLOW}======================================================${NC}"; echo -e "${YELLOW}     图片画廊 - 一体化部署与管理脚本 (v17.3)     ${NC}"; echo -e "${YELLOW}======================================================${NC}"
     echo -e " 应用名称: ${GREEN}${APP_NAME}${NC}"; echo -e " 安装路径: ${GREEN}${INSTALL_DIR}${NC}"
     if [ -d "${INSTALL_DIR}" ] && [ -f "${INSTALL_DIR}/.env" ]; then
         local SERVER_IP; SERVER_IP=$(hostname -I | awk '{print $1}')
