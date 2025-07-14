@@ -82,6 +82,16 @@
     <script>
         document.addEventListener('DOMContentLoaded', function () {
             
+            // ===============================================================
+            //
+            //  >>>>> 在这里添加或修改你的图片 <<<<<
+            //
+            //  每张图片都需要包含:
+            //  - src:         图片链接
+            //  - category:    分类 (必须与上面的分类按钮 `data-filter` 对应)
+            //  - description: 图片的中文描述 (用于无障碍访问)
+            //
+            // ===============================================================
             const imageData = [
                 { src: 'https://tu.665410.xyz/5VK3U8DR9Q1V.jpg', category: '风景', description: '广阔的绿色山谷和连绵的群山' },
                 { src: 'https://tu.665410.xyz/DY8Y4VG0HQ1V.png', category: '二次元', description: '一位金发动漫少女回头凝视' },
@@ -106,43 +116,33 @@
             let isRendering = false;
             let lastFocusedElement;
 
-            // (已修复) renderItems 函数现在正确管理 isRendering 和加载动画
             function renderItems() {
                 if (isRendering) return;
                 if (itemsLoaded >= filteredData.length) {
                     loader.classList.add('hidden');
                     return;
                 }
-
                 isRendering = true;
                 loader.classList.remove('hidden');
-
                 const itemsToRender = filteredData.slice(itemsLoaded, itemsLoaded + itemsPerLoad);
-                
                 itemsToRender.forEach((data, index) => {
                     const item = document.createElement('div');
                     item.className = 'grid-item';
                     item.dataset.category = data.category;
                     item.dataset.index = itemsLoaded + index;
-
                     const img = document.createElement('img');
                     img.src = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
                     img.dataset.src = data.src;
                     img.alt = data.description;
-                    
                     img.onerror = () => {
                         console.error('图片加载失败:', img.dataset.src);
                         item.remove();
                     };
-
                     item.appendChild(img);
                     galleryContainer.appendChild(item);
                     imageObserver.observe(item);
                 });
-
                 itemsLoaded += itemsToRender.length;
-                
-                // 完成添加占位符后，立即隐藏加载动画并重置状态
                 loader.classList.add('hidden');
                 isRendering = false;
             }
