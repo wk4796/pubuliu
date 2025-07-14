@@ -26,17 +26,7 @@
         .grid-item:hover img { transform: scale(1.05); }
         .lightbox { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.9); display: flex; justify-content: center; align-items: center; z-index: 1000; opacity: 0; visibility: hidden; transition: opacity 0.3s ease; }
         .lightbox.active { opacity: 1; visibility: visible; }
-        .lightbox-image {
-            max-width: 85%;
-            max-height: 85%;
-            display: block;
-            object-fit: contain;
-            transform-origin: 0 0; /* 设置变换原点 */
-            cursor: grab; /* 拖拽光标 */
-        }
-        .lightbox-image.panning {
-            cursor: grabbing; /* 拖拽时光标 */
-        }
+        .lightbox-image { max-width: 85%; max-height: 85%; display: block; object-fit: contain; }
         .lightbox-btn { position: absolute; top: 50%; transform: translateY(-50%); background-color: rgba(255,255,255,0.1); color: white; border: none; font-size: 2.5rem; cursor: pointer; padding: 0.5rem 1rem; border-radius: 0.5rem; transition: background-color 0.2s; }
         .lightbox-btn:hover { background-color: rgba(255,255,255,0.2); }
         .lb-prev { left: 1rem; }
@@ -53,17 +43,13 @@
             padding-top: 2rem;
             padding-bottom: 2rem;
             transition: padding 0.3s ease-in-out, transform 0.3s ease-in-out;
-            transform: translateY(0); /* Initial state: fully visible */
-            position: sticky; /* Ensure it stays at top */
+            transform: translateY(0);
+            position: sticky;
             top: 0;
             z-index: 40;
-            background-color: rgba(255, 255, 255, 0.8);
+            background-color: rgba(240, 253, 244, 0.8); /* Adjusted to match body bg with opacity */
             backdrop-filter: blur(8px);
             box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
-            display: flex; /* 使用 Flexbox */
-            flex-direction: column; /* 垂直堆叠 */
-            justify-content: center; /* 垂直居中内容 */
-            align-items: center; /* 水平居中内容 */
         }
 
         .header-sticky.scrolled {
@@ -73,29 +59,28 @@
 
         /* Optimize for hiding title on scroll */
         .header-sticky h1 {
-            transition: opacity 0.3s ease-in-out, height 0.3s ease-in-out, margin-bottom 0.3s ease-in-out;
+            transition: opacity 0.3s ease-in-out, margin-bottom 0.3s ease-in-out;
             margin-bottom: 1rem;
-            opacity: 1; /* 初始显示 */
-            height: auto; /* 初始高度自适应 */
         }
 
+        /* (已修改) 确保标题隐藏时，其下方的外边距也平滑过渡到0 */
         .header-sticky.scrolled-down h1 {
             opacity: 0;
-            height: 0; /* 新增：将标题高度设为0 */
-            overflow: hidden; /* 新增：隐藏溢出内容 */
-            margin-bottom: 0; /* 标题隐藏时移除下边距 */
-            pointer-events: none; /* 确保标题隐藏后不可点击 */
+            height: 0;
+            overflow: hidden;
+            pointer-events: none;
+            margin-bottom: 0; /* 新增此行 */
         }
 
+        /* (已修改) 调整滚动后header的内边距，实现视觉上的垂直居中 */
         .header-sticky.scrolled-down {
-            padding-top: 0.75rem; /* 调整为更小 */
-            padding-bottom: 0.75rem; /* 调整为更小 */
+            padding-top: 1rem;    /* 调整内边距 */
+            padding-bottom: 1rem; /* 调整内边距 */
         }
 
-        /* 确保filter buttons是紧凑的，并随父元素flex布局 */
         #filter-buttons {
             transition: none;
-            margin-top: 0; /* 确保在标题隐藏后，按钮和顶部没有额外间距 */
+            margin-top: 0;
         }
     </style>
 </head>
@@ -115,7 +100,7 @@
         <div id="gallery-container" class="max-w-7xl mx-auto grid-gallery"></div>
         <div id="loader" class="text-center py-8 text-green-700 hidden">正在加载更多...</div>
     </main>
-
+    
     <footer class="text-center py-8 mt-auto border-t border-green-200">
         <p class="text-green-700">© 2025 图片画廊</p>
     </footer>
@@ -126,7 +111,8 @@
         <button class="lightbox-btn lb-prev">&lsaquo;</button>
         <img class="lightbox-image">
         <button class="lightbox-btn lb-next">&rsaquo;</button>
-        <button class="lb-download">下载</button> </div>
+        <button class="lb-download">下载</button> 
+    </div>
 
     <a class="back-to-top" title="返回顶部">
         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
@@ -134,7 +120,7 @@
 
     <script>
         document.addEventListener('DOMContentLoaded', function () {
-
+            
             // =================================================================
             // 数据中心：在这里管理您的所有图片
             // =================================================================
@@ -214,11 +200,11 @@
                 items.forEach(resizeSingleGridItem);
             }
             window.addEventListener('resize', resizeAllGridItems);
-            window.addEventListener('scroll', () => {
-                if (isRendering) return;
-                if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 500) {
-                    renderItems();
-                }
+            window.addEventListener('scroll', () => { 
+                if (isRendering) return; 
+                if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 500) { 
+                    renderItems(); 
+                } 
             });
 
             const filterButtons = document.querySelectorAll('.filter-btn');
@@ -248,334 +234,94 @@
                 });
             });
 
-            const lightbox = document.querySelector('.lightbox');
-            const backToTopBtn = document.querySelector('.back-to-top');
-            const lightboxImage = lightbox.querySelector('.lightbox-image');
-            const lbCounter = lightbox.querySelector('.lb-counter');
-            const lbPrev = lightbox.querySelector('.lb-prev');
-            const lbNext = lightbox.querySelector('.lb-next');
-            const lbClose = lightbox.querySelector('.lb-close');
-            const lbDownload = lightbox.querySelector('.lb-download');
-            let currentImageIndex = 0;
+            const lightbox = document.querySelector('.lightbox'); 
+            const backToTopBtn = document.querySelector('.back-to-top'); 
+            const lightboxImage = lightbox.querySelector('.lightbox-image'); 
+            const lbCounter = lightbox.querySelector('.lb-counter'); 
+            const lbPrev = lightbox.querySelector('.lb-prev'); 
+            const lbNext = lightbox.querySelector('.lb-next'); 
+            const lbClose = lightbox.querySelector('.lb-close'); 
+            const lbDownload = lightbox.querySelector('.lb-download'); 
+            let currentImageIndex = 0; 
 
-            // =================================================================
-            // 图片缩放和拖动功能变量
-            // =================================================================
-            let currentScale = 1; // 当前缩放比例
-            let currentX = 0; // 当前图片X轴偏移
-            let currentY = 0; // 当前图片Y轴偏移
-            let isPanning = false; // 是否正在拖动
-            let startX = 0; // 拖动起始X坐标
-            let startY = 0; // 拖动起始Y坐标
+            galleryContainer.addEventListener('click', (e) => { 
+                const item = e.target.closest('.grid-item'); 
+                if (item) { 
+                    currentImageIndex = parseInt(item.dataset.index); 
+                    updateLightbox(); 
+                    lightbox.classList.add('active'); 
+                    document.body.classList.add('lightbox-open'); 
+                } 
+            }); 
 
-            galleryContainer.addEventListener('click', (e) => {
-                const item = e.target.closest('.grid-item');
-                if (item) {
-                    currentImageIndex = parseInt(item.dataset.index);
-                    updateLightbox();
-                    lightbox.classList.add('active');
-                    document.body.classList.add('lightbox-open');
-                    resetImageTransform(); // 打开图片时重置缩放和位置
-                }
-            });
+            function updateLightbox() { 
+                const currentItem = filteredData[currentImageIndex]; 
+                if (!currentItem) return; 
+                lightboxImage.src = currentItem.src; 
+                lbCounter.textContent = `${currentImageIndex + 1} / ${filteredData.length}`; 
+            } 
 
-            function updateLightbox() {
-                const currentItem = filteredData[currentImageIndex];
-                if (!currentItem) return;
-                lightboxImage.src = currentItem.src;
-                lbCounter.textContent = `${currentImageIndex + 1} / ${filteredData.length}`;
-                resetImageTransform(); // 切换图片时重置缩放和位置
-            }
+            function showPrevImage() { 
+                currentImageIndex = (currentImageIndex - 1 + filteredData.length) % filteredData.length; 
+                updateLightbox(); 
+            } 
 
-            function showPrevImage() {
-                currentImageIndex = (currentImageIndex - 1 + filteredData.length) % filteredData.length;
-                updateLightbox();
-            }
+            function showNextImage() { 
+                currentImageIndex = (currentImageIndex + 1) % filteredData.length; 
+                updateLightbox(); 
+            } 
 
-            function showNextImage() {
-                currentImageIndex = (currentImageIndex + 1) % filteredData.length;
-                updateLightbox();
-            }
+            function closeLightbox() { 
+                lightbox.classList.remove('active'); 
+                document.body.classList.remove('lightbox-open'); 
+            } 
 
-            function closeLightbox() {
-                lightbox.classList.remove('active');
-                document.body.classList.remove('lightbox-open');
-                resetImageTransform(); // 关闭时重置
-            }
-
-            lbPrev.addEventListener('click', showPrevImage);
-            lbNext.addEventListener('click', showNextImage);
-            lbClose.addEventListener('click', closeLightbox);
-            lbDownload.addEventListener('click', () => {
+            lbPrev.addEventListener('click', showPrevImage); 
+            lbNext.addEventListener('click', showNextImage); 
+            lbClose.addEventListener('click', closeLightbox); 
+            lbDownload.addEventListener('click', () => { 
                 const currentItem = filteredData[currentImageIndex];
                 if (currentItem && currentItem.src) {
-                    window.open(currentItem.src, '_blank');
+                    window.open(currentItem.src, '_blank'); 
                 }
             });
 
-            lightbox.addEventListener('click', (e) => {
-                // 阻止点击图片本身关闭Lightbox，只允许点击背景关闭
-                if (e.target === lightbox) {
-                    closeLightbox();
-                }
-            });
+            lightbox.addEventListener('click', (e) => { 
+                if (e.target === lightbox) closeLightbox(); 
+            }); 
 
-            document.addEventListener('keydown', (e) => {
-                if (!lightbox.classList.contains('active')) return;
-                if (e.key === 'ArrowLeft') showPrevImage();
-                if (e.key === 'ArrowRight') showNextImage();
-                if (e.key === 'Escape') closeLightbox();
-            });
+            document.addEventListener('keydown', (e) => { 
+                if (!lightbox.classList.contains('active')) return; 
+                if (e.key === 'ArrowLeft') showPrevImage(); 
+                if (e.key === 'ArrowRight') showNextImage(); 
+                if (e.key === 'Escape') closeLightbox(); 
+            }); 
 
-            // =================================================================
-            // 修复：分类栏闪烁问题（进一步优化）
-            // =================================================================
-            let lastScrollY = 0;
-            let headerHidden = false; // 跟踪头部是否处于隐藏状态
-            const header = document.querySelector('.header-sticky');
-            const scrollThresholdForHide = 50; // 向下滚动多少像素后开始隐藏标题
-            const scrollThresholdForShow = 10; // 向上滚动多少像素后开始显示标题
-
-            window.addEventListener('scroll', () => {
-                const scrollY = window.scrollY;
-
-                // 返回顶部按钮的显示/隐藏
-                if (scrollY > 300) {
-                    backToTopBtn.classList.add('visible');
-                } else {
-                    backToTopBtn.classList.remove('visible');
-                }
-
-                // header的scrolled类
-                if (scrollY > 0) {
+            window.addEventListener('scroll', () => { 
+                if (window.scrollY > 300) { 
+                    backToTopBtn.classList.add('visible'); 
+                } else { 
+                    backToTopBtn.classList.remove('visible'); 
+                } 
+                // Header sticky class toggle
+                const header = document.querySelector('.header-sticky');
+                if (window.scrollY > 0) {
                     header.classList.add('scrolled');
                 } else {
                     header.classList.remove('scrolled');
                 }
 
-                // header的scrolled-down类，用于隐藏标题
-                // 只有当滚动方向改变且满足阈值时才改变状态
-                if (scrollY > lastScrollY && scrollY > scrollThresholdForHide) { // 向下滚动
-                    if (!headerHidden) {
-                        header.classList.add('scrolled-down');
-                        headerHidden = true;
-                    }
-                } else if (scrollY < lastScrollY && (lastScrollY - scrollY) > scrollThresholdForShow) { // 向上滚动，且滚动距离足够
-                    if (headerHidden) {
-                        header.classList.remove('scrolled-down');
-                        headerHidden = false;
-                    }
-                } else if (scrollY === 0 && headerHidden) { // 滚动到顶部时强制显示标题
+                // Logic for hiding title on scroll
+                if (window.scrollY > 50) { 
+                    header.classList.add('scrolled-down');
+                } else {
                     header.classList.remove('scrolled-down');
-                    headerHidden = false;
                 }
+            }); 
 
-                lastScrollY = scrollY;
+            backToTopBtn.addEventListener('click', () => { 
+                window.scrollTo({ top: 0, behavior: 'smooth' }); 
             });
-
-            backToTopBtn.addEventListener('click', () => {
-                window.scrollTo({ top: 0, behavior: 'smooth' });
-            });
-
-            // =================================================================
-            // 图片缩放和拖动功能实现
-            // =================================================================
-
-            function applyTransform() {
-                lightboxImage.style.transform = `translate(${currentX}px, ${currentY}px) scale(${currentScale})`;
-            }
-
-            function resetImageTransform() {
-                currentScale = 1;
-                currentX = 0;
-                currentY = 0;
-                applyTransform();
-                lightboxImage.classList.remove('panning');
-            }
-
-            // 鼠标滚轮缩放 (桌面端)
-            lightboxImage.addEventListener('wheel', (e) => {
-                e.preventDefault(); // 阻止页面滚动
-                const scaleAmount = 0.1;
-
-                const rect = lightboxImage.getBoundingClientRect();
-                const mouseX = e.clientX - rect.left;
-                const mouseY = e.clientY - rect.top;
-
-                const oldScale = currentScale;
-
-                if (e.deltaY < 0) { // 向上滚动 (放大)
-                    currentScale += scaleAmount;
-                } else { // 向下滚动 (缩小)
-                    currentScale = Math.max(1, currentScale - scaleAmount); // 最小缩放到1
-                }
-
-                currentX -= (mouseX / oldScale) * (currentScale - oldScale);
-                currentY -= (mouseY / oldScale) * (currentScale - oldScale);
-
-                limitPan();
-                applyTransform();
-            });
-
-            // 双击重置缩放 (桌面端)
-            lightboxImage.addEventListener('dblclick', resetImageTransform);
-
-            // 鼠标拖动 (桌面端)
-            lightboxImage.addEventListener('mousedown', (e) => {
-                if (currentScale > 1) { // 只有在放大时才允许拖动
-                    isPanning = true;
-                    startX = e.clientX - currentX;
-                    startY = e.clientY - currentY;
-                    lightboxImage.classList.add('panning');
-                }
-            });
-
-            lightbox.addEventListener('mousemove', (e) => {
-                if (!isPanning) return;
-                currentX = e.clientX - startX;
-                currentY = e.clientY - startY;
-                limitPan(); // 限制拖动范围
-                applyTransform();
-            });
-
-            lightbox.addEventListener('mouseup', () => {
-                isPanning = false;
-                lightboxImage.classList.remove('panning');
-            });
-
-            lightbox.addEventListener('mouseleave', () => {
-                isPanning = false;
-                lightboxImage.classList.remove('panning');
-            });
-
-            // 触摸事件 (移动端)
-            let touchStartX = 0;
-            let touchStartY = 0;
-            let initialDistance = 0;
-            let lastScale = 1;
-            let isTwoFinger = false;
-
-            lightboxImage.addEventListener('touchstart', (e) => {
-                if (e.touches.length === 1) { // 单指拖动
-                    if (currentScale > 1) {
-                        isPanning = true;
-                        touchStartX = e.touches[0].clientX - currentX;
-                        touchStartY = e.touches[0].clientY - currentY;
-                        lightboxImage.classList.add('panning');
-                    }
-                } else if (e.touches.length === 2) { // 双指缩放
-                    isTwoFinger = true;
-                    initialDistance = getDistance(e.touches[0], e.touches[1]);
-                    lastScale = currentScale;
-                }
-            });
-
-            lightboxImage.addEventListener('touchmove', (e) => {
-                e.preventDefault(); // 阻止默认的滚动行为
-
-                if (isPanning && !isTwoFinger) { // 单指拖动
-                    currentX = e.touches[0].clientX - touchStartX;
-                    currentY = e.touches[0].clientY - touchStartY;
-                    limitPan();
-                    applyTransform();
-                } else if (isTwoFinger && e.touches.length === 2) { // 双指缩放
-                    const currentDistance = getDistance(e.touches[0], e.touches[1]);
-                    const scaleFactor = currentDistance / initialDistance;
-                    currentScale = Math.max(1, lastScale * scaleFactor);
-
-                    const centerClientX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
-                    const centerClientY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-
-                    const rect = lightboxImage.getBoundingClientRect();
-                    const mouseX = centerClientX - rect.left;
-                    const mouseY = centerClientY - rect.top;
-
-                    const oldScale = lastScale;
-
-                    currentX -= (mouseX / oldScale) * (currentScale - oldScale);
-                    currentY -= (mouseY / oldScale) * (currentScale - oldScale);
-
-                    limitPan();
-                    applyTransform();
-                }
-            });
-
-            lightboxImage.addEventListener('touchend', () => {
-                isPanning = false;
-                isTwoFinger = false;
-                lightboxImage.classList.remove('panning');
-            });
-
-            function getDistance(p1, p2) {
-                return Math.sqrt(Math.pow(p2.clientX - p1.clientX, 2) + Math.pow(p2.clientY - p1.clientY, 2));
-            }
-
-            // =================================================================
-            // 修复：图片缩放后，操作按钮不被覆盖（更精确的计算）
-            // =================================================================
-            function limitPan() {
-                if (currentScale <= 1) {
-                    currentX = 0;
-                    currentY = 0;
-                    return;
-                }
-
-                const imgRect = lightboxImage.getBoundingClientRect();
-                const lightboxRect = lightbox.getBoundingClientRect();
-
-                // 获取Lightbox内部的按钮元素，以计算它们的宽度和高度
-                // 确保这些元素已经被正确地获取到
-                const lbPrevBtn = document.querySelector('.lb-prev');
-                const lbNextBtn = document.querySelector('.lb-next');
-                const lbCloseBtn = document.querySelector('.lb-close');
-                const lbDownloadBtn = document.querySelector('.lb-download');
-
-                // 假设按钮的尺寸和位置是固定的，并且有一些外边距
-                // 这里的值可以根据您的CSS实际情况进行调整
-                // prev/next 按钮的宽度/高度，以及它们的左右边距
-                const horizontalBtnWidth = lbPrevBtn ? lbPrevBtn.offsetWidth : 0;
-                const horizontalBtnMargin = 16; // 假设左右按钮的 margin-left/right 是 1rem (16px)
-
-                // close/download 按钮的高度/宽度，以及它们的上下边距
-                const verticalBtnHeight = lbCloseBtn ? lbCloseBtn.offsetHeight : 0;
-                const verticalBtnMargin = 16; // 假设上下按钮的 margin-top/bottom 是 1rem (16px)
-
-                // 计算图片在当前缩放比例下的实际渲染尺寸
-                const scaledImgWidth = imgRect.width * currentScale;
-                const scaledImgHeight = imgRect.height * currentScale;
-
-                // 计算Lightbox的可用视口区域，减去按钮可能占据的空间
-                // 左右边缘留出的安全空间
-                const safeHorizontalSpace = (horizontalBtnWidth + horizontalBtnMargin) * 2;
-                // 上下边缘留出的安全空间 (考虑顶部关闭按钮和底部下载按钮)
-                const safeVerticalSpace = (verticalBtnHeight + verticalBtnMargin) * 2; // 顶部和底部各一个按钮
-
-                const safeViewportWidth = lightboxRect.width - safeHorizontalSpace;
-                const safeViewportHeight = lightboxRect.height - safeVerticalSpace;
-
-                // 计算最大可拖动范围 (以Lightbox内部的图片渲染区域中心为参考点)
-                // 图片在Lightbox内原始居中时，其宽度是 imgRect.width，现在它放大了
-                // 所以我们计算的是放大后图片超出原始渲染区域的宽度/高度的一半
-                const maxPanX = Math.max(0, (scaledImgWidth - imgRect.width) / 2);
-                const maxPanY = Math.max(0, (scaledImgHeight - imgRect.height) / 2);
-
-                // 同时，我们还需要确保图片不会拖动到 Lightbox 边界以外的按钮区域
-                // 结合两者，取更严格的限制
-                const effectiveMaxPanX = Math.min(maxPanX, (safeViewportWidth - imgRect.width) / 2);
-                const effectiveMaxPanY = Math.min(maxPanY, (safeViewportHeight - imgRect.height) / 2);
-
-
-                // 应用限制到 currentX 和 currentY
-                currentX = Math.max(-effectiveMaxPanX, Math.min(currentX, effectiveMaxPanX));
-                currentY = Math.max(-effectiveMaxPanY, Math.min(currentY, effectiveMaxPanY));
-            }
-
-
-            // 当图片加载完成时，如果有缩放，重新应用transform以确保位置正确
-            lightboxImage.onload = () => {
-                applyTransform(); // 重新应用，以防图片尺寸变化
-                limitPan(); // 重新限制拖动范围
-            };
 
             function initialize() {
                 filteredData = imageData;
