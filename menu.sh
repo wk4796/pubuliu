@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v15.0 终极版)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v16.0 终极版)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
 #   功能: 集成所有高级功能，是功能、性能、体验的最终交付版本。
@@ -36,7 +36,7 @@ EOF
 cat << 'EOF' > package.json
 {
   "name": "image-gallery-pro",
-  "version": "6.0.0",
+  "version": "7.0.0",
   "description": "A high-performance, full-stack image gallery application with all features.",
   "main": "server.js",
   "scripts": {
@@ -358,28 +358,20 @@ cat << 'EOF' > public/index.html
                 const columns = Array.from({ length: numColumns }, () => ({ element: document.createElement('div'), items: [], height: 0 }));
                 columns.forEach(col => { col.element.className = 'gallery-column'; this.container.appendChild(col.element); });
                 const imagesToDistribute = [...images];
-                if (currentFilter !== 'random') {
-                    imagesToDistribute.sort((a, b) => (b.height/b.width) - (a.height/a.width));
-                }
+                if (currentFilter !== 'random') { imagesToDistribute.sort((a, b) => (b.height/b.width) - (a.height/a.width)); }
                 imagesToDistribute.forEach(image => {
                     let shortestColumn = columns[0];
                     for (let i = 1; i < columns.length; i++) { if (columns[i].height < shortestColumn.height) { shortestColumn = columns[i]; } }
-                    shortestColumn.items.push(image);
                     const imageAspect = image.height / image.width; shortestColumn.height += imageAspect;
-                });
-                columns.forEach(col => {
-                    col.items.forEach(image => {
-                        const item = document.createElement('a');
-                        item.className = 'gallery-item'; item.href = "#"; item.dataset.id = image.id;
-                        const webpSrcset = `/image-proxy/${image.filename}?w=400&format=webp 400w, /image-proxy/${image.filename}?w=800&format=webp 800w`;
-                        const jpegSrcset = `/image-proxy/${image.filename}?w=400 400w, /image-proxy/${image.filename}?w=800 800w`;
-                        item.innerHTML = `<picture><source type="image/webp" srcset="${webpSrcset}"><source type="image/jpeg" srcset="${jpegSrcset}"><img src="/image-proxy/${image.filename}?w=400" alt="${image.description}" loading="lazy"></picture>`;
-                        col.element.appendChild(item);
-                    });
+                    const item = document.createElement('a');
+                    item.className = 'gallery-item'; item.href = "#"; item.dataset.id = image.id;
+                    const webpSrcset = `/image-proxy/${image.filename}?w=400&format=webp 400w, /image-proxy/${image.filename}?w=800&format=webp 800w`;
+                    const jpegSrcset = `/image-proxy/${image.filename}?w=400 400w, /image-proxy/${image.filename}?w=800 800w`;
+                    item.innerHTML = `<picture><source type="image/webp" srcset="${webpSrcset}"><source type="image/jpeg" srcset="${jpegSrcset}"><img src="/image-proxy/${image.filename}?w=400" alt="${image.description}" loading="lazy"></picture>`;
+                    shortestColumn.element.appendChild(item);
                 });
             }
         };
-
         const fetchJSON = async (url) => { const response = await fetch(url); if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`); return response.json(); };
         async function createFilterButtons() { try { const categories = await fetchJSON('/api/public/categories'); filterButtonsContainer.querySelectorAll('.dynamic-filter').forEach(btn => btn.remove()); categories.forEach(category => { const button = document.createElement('button'); button.className = 'filter-btn dynamic-filter'; button.dataset.filter = category; button.textContent = category; filterButtonsContainer.appendChild(button); }); } catch (error) { console.error('无法加载分类按钮:', error); } }
         function applyFiltersAndRender() {
@@ -434,7 +426,7 @@ cat << 'EOF' > public/admin.html
 <head>
     <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>后台管理 - 图片画廊</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <style> body { background-color: #f8fafc; } .modal, .toast, .lightbox { display: none; } .modal.active, .lightbox.active { display: flex; } body.lightbox-open { overflow: hidden; } .category-item.active { background-color: #dcfce7; font-weight: bold; } .toast { position: fixed; top: 1.5rem; right: 1.5rem; z-index: 9999; transform: translateX(120%); transition: transform 0.3s ease-in-out; } .toast.show { transform: translateX(0); } .file-preview-item.upload-success { background-color: #f0fdf4; } .file-preview-item.upload-error { background-color: #ffebee; } .lightbox { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.9); justify-content: center; align-items: center; z-index: 1000; opacity: 0; visibility: hidden; transition: opacity 0.3s ease; } .lightbox.active { opacity: 1; visibility: visible; } .lightbox-image { max-width: 85%; max-height: 85%; display: block; object-fit: contain; } .lightbox-btn { position: absolute; top: 50%; transform: translateY(-50%); background-color: rgba(255,255,255,0.1); color: white; border: none; font-size: 2.5rem; cursor: pointer; padding: 0.5rem 1rem; border-radius: 0.5rem; transition: background-color 0.2s; } .lb-prev { left: 1rem; } .lb-next { right: 1rem; } .lb-close { top: 1rem; right: 1rem; font-size: 2rem; } .lb-download { position: absolute; bottom: 1rem; right: 1rem; background-color: #22c55e; color: white; border: none; padding: 0.5rem 1rem; border-radius: 0.5rem; cursor: pointer; transition: background-color 0.2s; font-size: 1rem; text-decoration: none; } .lb-download:hover { background-color: #16a34a; } #file-preview-list { resize: vertical; overflow: auto; } </style>
+    <style> body { background-color: #f8fafc; } .modal, .toast, .lightbox { display: none; } .modal.active, .lightbox.active { display: flex; } body.lightbox-open { overflow: hidden; } .category-item.active { background-color: #dcfce7; font-weight: bold; } .toast { position: fixed; top: 1.5rem; right: 1.5rem; z-index: 9999; transform: translateX(120%); transition: transform 0.3s ease-in-out; } .toast.show { transform: translateX(0); } .file-preview-item.upload-success { background-color: #f0fdf4; } .file-preview-item.upload-error { background-color: #fef2f2; } .lightbox { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.9); justify-content: center; align-items: center; z-index: 1000; opacity: 0; visibility: hidden; transition: opacity 0.3s ease; } .lightbox.active { opacity: 1; visibility: visible; } .lightbox-image { max-width: 85%; max-height: 85%; display: block; object-fit: contain; } .lightbox-btn { position: absolute; top: 50%; transform: translateY(-50%); background-color: rgba(255,255,255,0.1); color: white; border: none; font-size: 2.5rem; cursor: pointer; padding: 0.5rem 1rem; border-radius: 0.5rem; transition: background-color 0.2s; } .lb-prev { left: 1rem; } .lb-next { right: 1rem; } .lb-close { top: 1rem; right: 1rem; font-size: 2rem; } .lb-download { position: absolute; bottom: 1rem; right: 1rem; background-color: #22c55e; color: white; border: none; padding: 0.5rem 1rem; border-radius: 0.5rem; cursor: pointer; transition: background-color 0.2s; font-size: 1rem; text-decoration: none; } .lb-download:hover { background-color: #16a34a; } #file-preview-list { resize: vertical; } </style>
 </head>
 <body class="antialiased text-slate-800">
     <header class="bg-white shadow-md p-4 flex justify-between items-center sticky top-0 z-20"><h1 class="text-2xl font-bold text-slate-900">内容管理系统</h1><div><a href="/" target="_blank" class="text-green-600 hover:text-green-800 mr-4">查看前台</a><a href="/api/logout" class="bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded transition-colors">退出登录</a></div></header>
@@ -445,7 +437,7 @@ cat << 'EOF' > public/admin.html
                 <form id="upload-form" class="space-y-4">
                     <div><label for="image-input" id="drop-zone" class="w-full flex flex-col items-center justify-center p-6 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors"><svg class="w-10 h-10 mb-3 text-gray-400" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 20 16"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 13h3a3 3 0 0 0 0-6h-.025A5.56 5.56 0 0 0 16 6.5 5.5 5.5 0 0 0 5.207 5.021C5.137 5.017 5.071 5 5 5a4 4 0 0 0 0 8h2.167M10 15V6m0 0L8 8m2-2 2 2"/></svg><p class="text-sm text-gray-500"><span class="font-semibold">点击选择</span> 或拖拽多个文件到此处</p><input id="image-input" type="file" class="hidden" multiple accept="image/*"/></label></div>
                     <div class="space-y-2"><label for="unified-description" class="block text-sm font-medium">统一描述 (可选)</label><textarea id="unified-description" rows="2" class="w-full text-sm border rounded px-2 py-1" placeholder="在此处填写可应用到所有未填写描述的图片"></textarea></div>
-                    <div id="file-preview-container" class="hidden space-y-2"><div id="upload-summary" class="text-sm font-medium text-slate-600"></div><div id="file-preview-list" class="max-h-48 overflow-y-auto space-y-3 p-1 border rounded"></div></div>
+                    <div id="file-preview-container" class="hidden space-y-2"><div id="upload-summary" class="text-sm font-medium text-slate-600"></div><div id="file-preview-list-wrapper" class="relative h-48 border rounded"><div id="file-preview-list" class="absolute inset-0 overflow-y-auto space-y-3 p-2"></div><textarea class="absolute inset-0 w-full h-full opacity-0 p-0 m-0 border-0 cursor-s-resize pointer-events-none" style="resize: vertical;"></textarea></div></div>
                     <div><label for="category-select" class="block text-sm font-medium mb-1">设置分类</label><div class="flex items-center space-x-2"><select name="category" id="category-select" required class="w-full border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-500"></select><button type="button" id="add-category-btn" class="flex-shrink-0 bg-green-500 hover:bg-green-600 text-white font-bold w-9 h-9 rounded-full flex items-center justify-center text-xl" title="添加新分类">+</button></div></div>
                     <button type="submit" id="upload-btn" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg transition-colors disabled:bg-gray-400" disabled>上传文件</button>
                 </form>
@@ -465,68 +457,76 @@ cat << 'EOF' > public/admin.html
     <script>
     document.addEventListener('DOMContentLoaded', function() {
         // --- DECLARES ---
-        const UNCATEGORIZED = '未分类'; const DOMElements = { uploadForm: document.getElementById('upload-form'), uploadBtn: document.getElementById('upload-btn'), imageInput: document.getElementById('image-input'), dropZone: document.getElementById('drop-zone'), unifiedDescription: document.getElementById('unified-description'), filePreviewContainer: document.getElementById('file-preview-container'), filePreviewList: document.getElementById('file-preview-list'), uploadSummary: document.getElementById('upload-summary'), categorySelect: document.getElementById('category-select'), editCategorySelect: document.getElementById('edit-category-select'), addCategoryBtn: document.getElementById('add-category-btn'), categoryManagementList: document.getElementById('category-management-list'), imageList: document.getElementById('image-list'), imageListHeader: document.getElementById('image-list-header'), imageLoader: document.getElementById('image-loader'), searchInput: document.getElementById('search-input'), genericModal: document.getElementById('generic-modal'), editImageModal: document.getElementById('edit-image-modal'), editImageForm: document.getElementById('edit-image-form'), adminLightbox: document.getElementById('admin-lightbox'), };
+        const UNCATEGORIZED = '未分类'; const DOMElements = { uploadForm: document.getElementById('upload-form'), uploadBtn: document.getElementById('upload-btn'), imageInput: document.getElementById('image-input'), dropZone: document.getElementById('drop-zone'), unifiedDescription: document.getElementById('unified-description'), filePreviewContainer: document.getElementById('file-preview-container'), filePreviewList: document.getElementById('file-preview-list'), filePreviewWrapper: document.getElementById('file-preview-list-wrapper'), resizeProxy: document.querySelector('#file-preview-list-wrapper textarea'), uploadSummary: document.getElementById('upload-summary'), categorySelect: document.getElementById('category-select'), editCategorySelect: document.getElementById('edit-category-select'), addCategoryBtn: document.getElementById('add-category-btn'), categoryManagementList: document.getElementById('category-management-list'), imageList: document.getElementById('image-list'), imageListHeader: document.getElementById('image-list-header'), imageLoader: document.getElementById('image-loader'), searchInput: document.getElementById('search-input'), genericModal: document.getElementById('generic-modal'), editImageModal: document.getElementById('edit-image-modal'), editImageForm: document.getElementById('edit-image-form'), adminLightbox: document.getElementById('admin-lightbox'), };
         let filesToUpload = []; let adminLoadedImages = []; let currentAdminLightboxIndex = 0; let currentSearchTerm = ''; let debounceTimer;
         // --- UTILS & HELPERS ---
         const apiRequest = async (url, options = {}) => { const response = await fetch(url, options); if (response.status === 401) { showToast('登录状态已过期', 'error'); setTimeout(() => window.location.href = '/login.html', 2000); throw new Error('Unauthorized'); } return response; };
         const formatBytes = (bytes, decimals = 2) => { if (!+bytes) return '0 Bytes'; const k = 1024; const dm = decimals < 0 ? 0 : decimals; const sizes = ["Bytes", "KB", "MB", "GB", "TB"]; const i = Math.floor(Math.log(bytes) / Math.log(k)); return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`; };
         const showToast = (message, type = 'success') => { const toast = document.getElementById('toast'); toast.className = `toast max-w-xs text-white text-sm rounded-lg shadow-lg p-3 ${type === 'success' ? 'bg-green-600' : 'bg-red-600'}`; toast.querySelector('#toast-message').textContent = message; toast.querySelector('#toast-icon').innerHTML = type === 'success' ? `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>` : `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>`; toast.style.display = 'block'; setTimeout(() => toast.classList.add('show'), 10); setTimeout(() => { toast.classList.remove('show'); setTimeout(() => toast.style.display = 'none', 300); }, 3000); };
-        const showConfirmationModal = (title, bodyHtml) => { return new Promise(resolve => { const footerHtml = `<button type="button" class="modal-cancel-btn bg-gray-300 hover:bg-gray-400 text-black py-2 px-4 rounded">取消</button><button type="button" id="modal-confirm-btn" class="bg-red-600 hover:bg-red-700 text-white py-2 px-4 rounded">确认</button>`; showGenericModal(title, bodyHtml, footerHtml); document.getElementById('modal-confirm-btn').onclick = () => { hideModal(DOMElements.genericModal); resolve(true); }; DOMElements.genericModal.querySelector('.modal-cancel-btn').onclick = () => { hideModal(DOMElements.genericModal); resolve(false); }; }); };
+        const showConfirmationModal = (title, bodyHtml) => { return new Promise(resolve => { const footerHtml = `<button type="button" class="modal-cancel-btn bg-gray-300 hover:bg-gray-400 text-black py-2 px-4 rounded">取消</button><button type="button" id="modal-confirm-btn" class="bg-red-600 hover:bg-red-700 text-white py-2 px-4 rounded">继续上传</button>`; showGenericModal(title, bodyHtml, footerHtml); DOMElements.genericModal.querySelector('#modal-confirm-btn').onclick = () => { hideModal(DOMElements.genericModal); resolve(true); }; DOMElements.genericModal.querySelector('.modal-cancel-btn').onclick = () => { hideModal(DOMElements.genericModal); resolve(false); }; }); };
         const hideModal = (modal) => modal.classList.remove('active');
         DOMElements.genericModal.addEventListener('click', e => { if (e.target === DOMElements.genericModal) hideModal(DOMElements.genericModal); });
         DOMElements.editImageModal.addEventListener('click', e => { if (e.target === DOMElements.editImageModal || e.target.closest('.modal-cancel-btn')) hideModal(DOMElements.editImageModal); });
+        
         // --- UPLOAD LOGIC ---
-        const handleFileSelection = (fileList) => {
-            const imageFiles = Array.from(fileList).filter(f => f.type.startsWith('image/'));
-            const currentFilenames = new Set(filesToUpload.map(item => item.file.name));
-            const newFiles = imageFiles.filter(f => !currentFilenames.has(f.name)).map(file => ({ file, description: DOMElements.unifiedDescription.value, userHasTyped: DOMElements.unifiedDescription.value !== '' }));
-            filesToUpload = filesToUpload.concat(newFiles);
-            DOMElements.uploadBtn.disabled = filesToUpload.length === 0; renderFilePreviews();
-        };
-        const renderFilePreviews = () => { if (filesToUpload.length === 0) { DOMElements.filePreviewContainer.classList.add('hidden'); return; } DOMElements.filePreviewList.innerHTML = ''; let totalSize = 0; filesToUpload.forEach((item, index) => { totalSize += item.file.size; const listItem = document.createElement('div'); const tempId = `file-preview-${index}`; listItem.id = tempId; listItem.className = 'file-preview-item text-slate-600 border rounded p-2'; listItem.innerHTML = `<div class="flex items-start"><img class="w-12 h-12 object-cover rounded mr-3 bg-slate-100" id="thumb-${tempId}"><div class="flex-grow"><div class="flex justify-between items-center text-xs mb-1"><p class="truncate pr-2 font-medium">${item.file.name}</p><button type="button" data-index="${index}" class="remove-file-btn text-xl text-red-500 hover:text-red-700">&times;</button></div><p class="text-xs text-slate-500">${formatBytes(item.file.size)}</p></div></div><div class="relative mt-2"><div class="upload-progress absolute top-0 left-0 h-full bg-green-200 rounded" style="width: 0%;"></div><input type="text" data-index="${index}" class="relative w-full text-xs border rounded px-2 py-1 description-input bg-transparent" placeholder="添加独立描述..." value="${item.description}"></div><p class="upload-status text-xs text-red-500 mt-1"></p>`; DOMElements.filePreviewList.appendChild(listItem); const reader = new FileReader(); reader.onload = (e) => { document.getElementById(`thumb-${tempId}`).src = e.target.result; }; reader.readAsDataURL(item.file); }); DOMElements.uploadSummary.textContent = `已选择 ${filesToUpload.length} 个文件，总大小: ${formatBytes(totalSize)}`; DOMElements.filePreviewContainer.classList.remove('hidden'); };
+        const handleFileSelection = (fileList) => { const imageFiles = Array.from(fileList).filter(f => f.type.startsWith('image/')); const currentFilenames = new Set(filesToUpload.map(item => item.file.name)); const newFiles = imageFiles.filter(f => !currentFilenames.has(f.name)).map(file => ({ file, description: DOMElements.unifiedDescription.value, userHasTyped: DOMElements.unifiedDescription.value !== '' })); filesToUpload = filesToUpload.concat(newFiles); DOMElements.uploadBtn.disabled = filesToUpload.length === 0; renderFilePreviews(); };
+        const renderFilePreviews = () => { if (filesToUpload.length === 0) { DOMElements.filePreviewContainer.classList.add('hidden'); return; } DOMElements.filePreviewList.innerHTML = ''; let totalSize = 0; filesToUpload.forEach((item, index) => { totalSize += item.file.size; const listItem = document.createElement('div'); const tempId = `file-preview-${index}`; listItem.className = 'file-preview-item text-slate-600 border rounded p-2'; listItem.dataset.fileIndex = index; listItem.innerHTML = `<div class="flex items-start"><img class="w-12 h-12 object-cover rounded mr-3 bg-slate-100" id="thumb-${tempId}"><div class="flex-grow"><div class="flex justify-between items-center text-xs mb-1"><p class="truncate pr-2 font-medium">${item.file.name}</p><button type="button" data-index="${index}" class="remove-file-btn text-xl text-red-500 hover:text-red-700 leading-none">&times;</button></div><p class="text-xs text-slate-500">${formatBytes(item.file.size)}</p></div></div><input type="text" data-index="${index}" class="relative w-full text-xs border rounded px-2 py-1 description-input bg-transparent mt-2" placeholder="添加独立描述..." value="${item.description}"><p class="upload-status text-xs text-red-500 mt-1"></p>`; DOMElements.filePreviewList.appendChild(listItem); const reader = new FileReader(); reader.onload = (e) => { document.getElementById(`thumb-${tempId}`).src = e.target.result; }; reader.readAsDataURL(item.file); }); DOMElements.uploadSummary.textContent = `已选择 ${filesToUpload.length} 个文件，总大小: ${formatBytes(totalSize)}`; DOMElements.filePreviewContainer.classList.remove('hidden'); };
         const dz = DOMElements.dropZone; dz.addEventListener('dragover', (e) => { e.preventDefault(); dz.classList.add('bg-green-50', 'border-green-400'); }); dz.addEventListener('dragleave', (e) => dz.classList.remove('bg-green-50', 'border-green-400')); dz.addEventListener('drop', (e) => { e.preventDefault(); dz.classList.remove('bg-green-50', 'border-green-400'); handleFileSelection(e.dataTransfer.files); });
         DOMElements.imageInput.addEventListener('change', (e) => { handleFileSelection(e.target.files); e.target.value = ''; });
-        DOMElements.unifiedDescription.addEventListener('input', e => { const unifiedText = e.target.value; document.querySelectorAll('.file-preview-item').forEach(item => { const index = parseInt(item.dataset.fileIndex); if (filesToUpload[index] && !filesToUpload[index].userHasTyped) { item.querySelector('.description-input').value = unifiedText; filesToUpload[index].description = unifiedText; } }); });
-        DOMElements.filePreviewList.addEventListener('input', e => { if (e.target.classList.contains('description-input')) { const index = parseInt(e.target.dataset.index); if(filesToUpload[index]) { filesToUpload[index].description = e.target.value; filesToUpload[index].userHasTyped = true; } } });
-        DOMElements.filePreviewList.addEventListener('click', e => { if (e.target.classList.contains('remove-file-btn')) { const index = parseInt(e.target.dataset.index); filesToUpload.splice(index, 1); renderFilePreviews(); DOMElements.uploadBtn.disabled = filesToUpload.length === 0; } });
+        DOMElements.unifiedDescription.addEventListener('input', e => { const unifiedText = e.target.value; document.querySelectorAll('.file-preview-item').forEach(item => { const index = parseInt(item.dataset.fileIndex, 10); if (filesToUpload[index] && !filesToUpload[index].userHasTyped) { item.querySelector('.description-input').value = unifiedText; filesToUpload[index].description = unifiedText; } }); });
+        DOMElements.filePreviewList.addEventListener('input', e => { if (e.target.classList.contains('description-input')) { const index = parseInt(e.target.dataset.index, 10); if(filesToUpload[index]) { filesToUpload[index].description = e.target.value; filesToUpload[index].userHasTyped = true; } } });
+        DOMElements.filePreviewList.addEventListener('click', e => { if (e.target.classList.contains('remove-file-btn')) { const index = parseInt(e.target.dataset.index, 10); filesToUpload.splice(index, 1); renderFilePreviews(); DOMElements.uploadBtn.disabled = filesToUpload.length === 0; } });
+        const resizeObserver = new ResizeObserver(entries => { for (let entry of entries) { DOMElements.filePreviewWrapper.style.height = `${entry.contentRect.height}px`; }});
+        if(DOMElements.resizeProxy) resizeObserver.observe(DOMElements.resizeProxy);
+
         DOMElements.uploadForm.addEventListener('submit', async (e) => {
             e.preventDefault(); if (filesToUpload.length === 0) return;
             DOMElements.uploadBtn.disabled = true;
-            const res = await apiRequest('/api/admin/check-filenames', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({filenames: filesToUpload.map(f => f.file.name)}) });
-            const { duplicates } = await res.json();
-            for (const item of filesToUpload) {
-                if (duplicates.includes(item.file.name)) {
-                    const userConfirmed = await showConfirmationModal('文件已存在', `文件 "${item.file.name}" 已存在。是否仍然继续上传？<br>(新文件将被自动重命名)`);
-                    if (!userConfirmed) { item.skip = true; }
+            let filesToProcess = [...filesToUpload];
+            try {
+                const res = await apiRequest('/api/admin/check-filenames', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({filenames: filesToProcess.map(f => f.file.name)}) });
+                if(!res.ok) throw new Error("文件名检查失败");
+                const { duplicates } = await res.json();
+                if (duplicates.length > 0) {
+                    const tempQueue = [];
+                    for(const item of filesToProcess) {
+                        if (duplicates.includes(item.file.name)) {
+                            const userConfirmed = await showConfirmationModal('文件已存在', `文件 "${item.file.name}" 已存在。是否仍然继续上传？<br>(新文件将被自动重命名)`);
+                            if (userConfirmed) tempQueue.push(item);
+                        } else {
+                            tempQueue.push(item);
+                        }
+                    }
+                    filesToProcess = tempQueue;
                 }
-            }
-            DOMElements.uploadBtn.textContent = '正在上传...';
+            } catch(e) { showToast('检查文件名时出错，上传已取消。', 'error'); DOMElements.uploadBtn.disabled = false; return; }
+            
+            const totalToUpload = filesToProcess.length;
+            let uploadedCount = 0;
             const category = DOMElements.categorySelect.value;
-            for (const [index, item] of filesToUpload.entries()) {
-                if (item.skip) {
-                    const previewItem = document.querySelector(`[data-file-index="${index}"]`);
-                    if(previewItem) previewItem.querySelector('.upload-status').textContent = '已取消';
-                    continue;
-                }
-                const previewItem = document.querySelector(`[data-file-index="${index}"]`);
+            for (const item of filesToProcess) {
+                uploadedCount++;
+                DOMElements.uploadBtn.textContent = `正在上传... (${uploadedCount}/${totalToUpload})`;
+                const originalIndex = filesToUpload.findIndex(f => f.file.name === item.file.name);
+                const previewItem = DOMElements.filePreviewList.querySelector(`[data-file-index="${originalIndex}"]`);
+                if(!previewItem) continue;
                 const statusEl = previewItem.querySelector('.upload-status');
-                const progressEl = previewItem.querySelector('.upload-progress');
                 try {
                     statusEl.textContent = '上传中...';
                     const formData = new FormData();
-                    formData.append('image', item.file);
-                    formData.append('category', category);
-                    formData.append('description', item.description);
+                    formData.append('image', item.file); formData.append('category', category); formData.append('description', item.description);
                     const response = await apiRequest('/api/admin/upload', { method: 'POST', body: formData });
                     const result = await response.json();
-                    if (response.ok) { progressEl.style.width = '100%'; statusEl.textContent = '✅ 上传成功'; previewItem.classList.add('upload-success'); } 
+                    if (response.ok) { previewItem.classList.add('upload-success'); statusEl.textContent = '✅ 上传成功'; } 
                     else { throw new Error(result.message || '上传失败'); }
                 } catch (err) { statusEl.textContent = `❌ ${err.message}`; previewItem.classList.add('upload-error'); }
             }
             showToast(`所有任务处理完成。`); DOMElements.uploadBtn.textContent = '上传文件'; filesToUpload = []; DOMElements.imageInput.value = ''; DOMElements.unifiedDescription.value = '';
             setTimeout(() => { DOMElements.filePreviewContainer.classList.add('hidden'); DOMElements.uploadBtn.disabled = true; }, 3000);
-            await loadImages();
+            await loadImages('all', '全部图片');
         });
+        
+        // --- CATEGORY & IMAGE LIST LOGIC ---
         async function refreshCategories() { const currentVal = DOMElements.categorySelect.value; await loadAndPopulateCategories(currentVal); await loadAndDisplayCategoriesForManagement(); }
         async function loadAndPopulateCategories(selectedCategory = null) { try { const response = await apiRequest('/api/categories'); const categories = await response.json(); [DOMElements.categorySelect, DOMElements.editCategorySelect].forEach(select => { const currentVal = select.value; select.innerHTML = ''; categories.forEach(cat => select.add(new Option(cat, cat))); select.value = categories.includes(currentVal) ? currentVal : selectedCategory || categories[0]; }); } catch (error) { if (error.message !== 'Unauthorized') console.error('加载分类失败:', error); } }
         async function loadAndDisplayCategoriesForManagement() { try { const response = await apiRequest('/api/categories'); const categories = await response.json(); DOMElements.categoryManagementList.innerHTML = ''; const allCatItem = document.createElement('div'); allCatItem.className = 'category-item flex items-center justify-between p-2 rounded cursor-pointer hover:bg-gray-50 active'; allCatItem.innerHTML = `<span class="category-name flex-grow">全部图片</span>`; DOMElements.categoryManagementList.appendChild(allCatItem); categories.forEach(cat => { const isUncategorized = cat === UNCATEGORIZED; const item = document.createElement('div'); item.className = 'category-item flex items-center justify-between p-2 rounded'; item.innerHTML = `<span class="category-name flex-grow ${isUncategorized ? 'text-slate-500' : 'cursor-pointer hover:bg-gray-50'}">${cat}</span>` + (isUncategorized ? '' : `<div class="space-x-2 flex-shrink-0"><button data-name="${cat}" class="rename-cat-btn text-blue-500 hover:text-blue-700 text-sm">重命名</button><button data-name="${cat}" class="delete-cat-btn text-red-500 hover:red-700 text-sm">删除</button></div>`); DOMElements.categoryManagementList.appendChild(item); }); } catch (error) { if (error.message !== 'Unauthorized') console.error('加载分类管理列表失败:', error); } }
@@ -564,7 +564,7 @@ cat << 'EOF' > public/admin.html
                 document.getElementById('modal-form').onsubmit = async (ev) => { ev.preventDefault(); const newName = input.value.trim(); if (!newName || newName === catName) { hideModal(DOMElements.genericModal); return; } try { const response = await apiRequest('/api/admin/categories', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ oldName: catName, newName }) }); if (!response.ok) throw new Error((await response.json()).message); hideModal(DOMElements.genericModal); showToast('重命名成功'); await Promise.all([refreshCategories(), loadImages('all', '全部图片')]); } catch (error) { showToast(`重命名失败: ${error.message}`, 'error'); } };
             } else if (target.classList.contains('delete-cat-btn')) {
                 const confirmed = await showConfirmationModal('确认删除', `<p>确定要删除分类 "<strong>${catName}</strong>" 吗？<br>此分类下的图片将归入 "未分类"。</p>`);
-                if(confirmed) { try { const response = await apiRequest('/api/admin/categories', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: catName }) }); if (!response.ok) throw new Error((await response.json()).message); hideModal(DOMElements.genericModal); showToast('删除成功'); await Promise.all([refreshCategories(), loadImages('all', '全部图片')]); } catch (error) { showToast(`删除失败: ${error.message}`, 'error'); } }
+                if(confirmed) { try { const response = await apiRequest('/api/admin/categories', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: catName }) }); if (!response.ok) throw new Error((await response.json()).message); showToast('删除成功'); await Promise.all([refreshCategories(), loadImages('all', '全部图片')]); } catch (error) { showToast(`删除失败: ${error.message}`, 'error'); } }
             } else if (target.classList.contains('category-name')) {
                 document.querySelectorAll('.category-item').forEach(el => el.classList.remove('active'));
                 target.closest('.category-item').classList.add('active');
@@ -583,7 +583,7 @@ cat << 'EOF' > public/admin.html
             } else if (target.matches('.delete-btn')) {
                 const imageId = target.dataset.id;
                 const confirmed = await showConfirmationModal('确认删除', `<p>确定要永久删除这张图片吗？此操作无法撤销。</p>`);
-                if(confirmed) { try { const response = await apiRequest(`/api/admin/images/${imageId}`, { method: 'DELETE' }); if (!response.ok) throw new Error('删除失败'); hideModal(DOMElements.genericModal); showToast('图片已删除'); const activeCatItem = document.querySelector('.category-item.active .category-name'); const activeCat = activeCatItem ? activeCatItem.textContent : '全部图片'; await loadImages(activeCat === '全部图片' ? 'all' : activeCat, activeCat); } catch (error) { showToast(error.message, 'error'); } }
+                if(confirmed) { try { const response = await apiRequest(`/api/admin/images/${imageId}`, { method: 'DELETE' }); if (!response.ok) throw new Error('删除失败'); showToast('图片已删除'); const activeCatItem = document.querySelector('.category-item.active .category-name'); const activeCat = activeCatItem ? activeCatItem.textContent : '全部图片'; await loadImages(activeCat === '全部图片' ? 'all' : activeCat, activeCat); } catch (error) { showToast(error.message, 'error'); } }
             }
         });
         DOMElements.editImageForm.addEventListener('submit', async (e) => {
@@ -664,7 +664,7 @@ uninstall_app() {
 }
 show_menu() {
     clear
-    echo -e "${YELLOW}======================================================${NC}"; echo -e "${YELLOW}     图片画廊 - 一体化部署与管理脚本 (v15.0)     ${NC}"; echo -e "${YELLOW}======================================================${NC}"
+    echo -e "${YELLOW}======================================================${NC}"; echo -e "${YELLOW}     图片画廊 - 一体化部署与管理脚本 (v15.3)     ${NC}"; echo -e "${YELLOW}======================================================${NC}"
     echo -e " 应用名称: ${GREEN}${APP_NAME}${NC}"; echo -e " 安装路径: ${GREEN}${INSTALL_DIR}${NC}"
     if [ -d "${INSTALL_DIR}" ] && [ -f "${INSTALL_DIR}/.env" ]; then
         local SERVER_IP; SERVER_IP=$(hostname -I | awk '{print $1}')
