@@ -38,52 +38,62 @@
         .lb-download { position: absolute; bottom: 1rem; right: 1rem; background-color: #22c55e; color: white; border: none; padding: 0.5rem 1rem; border-radius: 0.5rem; cursor: pointer; transition: background-color 0.2s; font-size: 1rem; }
         .lb-download:hover { background-color: #16a34a; }
 
-        /* Sticky header optimization */
+        /* ===============================================================
+           终极解决方案：独占式状态机 CSS
+           =============================================================== */
+
+        /* 状态 0: 默认状态 (在页面顶部) */
         .header-sticky {
-            padding-top: 1rem; /* 已修改 */
-            padding-bottom: 1rem; /* 已修改 */
-            transition: padding 0.3s ease-in-out, background-color 0.3s ease-in-out;
-            transform: translateY(0);
+            padding-top: 1rem;
+            padding-bottom: 1rem;
+            background-color: rgba(240, 253, 244, 0);
             position: sticky;
             top: 0;
             z-index: 40;
-            background-color: rgba(240, 253, 244, 0);
             box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            /* 为所有会变化的属性定义过渡 */
+            transition: padding 0.3s ease-in-out, background-color 0.3s ease-in-out;
         }
 
-        .header-sticky.scrolled,
-        .header-sticky.scrolled-down {
+        .header-sticky h1 {
+            opacity: 1;
+            margin-bottom: 0.75rem;
+            height: auto; /* 确保高度是自动的 */
+            overflow: visible; /* 确保内容可见 */
+            /* 为所有会变化的属性定义过渡 */
+            transition: opacity 0.3s ease-in-out, margin-bottom 0.3s ease-in-out, height 0.3s ease-in-out;
+        }
+
+        /* 状态 1: 部分滚动 (0 < scrollY <= 50) */
+        .header-sticky.state-scrolled-partially {
+            padding-top: 0.75rem;
+            padding-bottom: 0.75rem;
+            background-color: rgba(240, 253, 244, 0.8);
+            backdrop-filter: blur(8px);
+        }
+        /* 在此状态下，h1 样式继承自默认状态，无需额外定义 */
+
+        /* 状态 2: 完全滚动 (scrollY > 50) */
+        .header-sticky.state-scrolled-fully {
+            padding-top: 0.5rem;
+            padding-bottom: 0.5rem;
             background-color: rgba(240, 253, 244, 0.8);
             backdrop-filter: blur(8px);
         }
 
-        .header-sticky.scrolled {
-            padding-top: 0.75rem; /* 已修改 */
-            padding-bottom: 0.75rem; /* 已修改 */
-        }
-
-        .header-sticky h1 {
-            transition: opacity 0.3s ease-in-out, margin-bottom 0.3s ease-in-out;
-            margin-bottom: 0.75rem; /* 已修改 */
-        }
-
-        .header-sticky.scrolled-down h1 {
+        .header-sticky.state-scrolled-fully h1 {
             opacity: 0;
+            margin-bottom: 0;
             height: 0;
             overflow: hidden;
             pointer-events: none;
-            margin-bottom: 0;
         }
-
-        .header-sticky.scrolled-down {
-            padding-top: 0.5rem; /* 已修改 */
-            padding-bottom: 0.5rem; /* 已修改 */
-        }
-
+        
         #filter-buttons {
             transition: none;
             margin-top: 0;
         }
+
     </style>
 </head>
 <body class="antialiased">
@@ -300,27 +310,37 @@
                 window.scrollTo({ top: 0, behavior: 'smooth' }); 
             });
             
+            // =================================================================
+            // (终极方案) 使用 requestAnimationFrame + 独占式状态机
+            // =================================================================
             const header = document.querySelector('.header-sticky');
             let ticking = false;
 
             function handleScroll() {
                 const currentScrollY = window.scrollY;
 
+                // 1. 处理返回顶部按钮
                 if (currentScrollY > 300) { 
                     backToTopBtn.classList.add('visible'); 
                 } else { 
                     backToTopBtn.classList.remove('visible'); 
                 } 
 
+                // 2. 独占式状态机逻辑
                 if (currentScrollY > 50) {
-                    header.classList.add('scrolled', 'scrolled-down');
+                    // 切换到状态 2: 完全滚动
+                    header.classList.add('state-scrolled-fully');
+                    header.classList.remove('state-scrolled-partially');
                 } else if (currentScrollY > 0) {
-                    header.classList.add('scrolled');
-                    header.classList.remove('scrolled-down');
+                    // 切换到状态 1: 部分滚动
+                    header.classList.add('state-scrolled-partially');
+                    header.classList.remove('state-scrolled-fully');
                 } else {
-                    header.classList.remove('scrolled', 'scrolled-down');
+                    // 切换到状态 0: 默认
+                    header.classList.remove('state-scrolled-fully', 'state-scrolled-partially');
                 }
                 
+                // 3. 处理无限滚动加载
                 handleInfiniteScroll();
             }
 
