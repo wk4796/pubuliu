@@ -1,10 +1,11 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v17.2 终极版)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v17.3 旗舰版)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
-#   功能: 修复所有已知Bug，是最终交付的稳定版本。
+#   功能: 全面重构，包含可移植性依赖检查、交互式重名上传、
+#         高级瀑布流布局、以及强化的菜单和状态显示系统。
 # =================================================================
 
 # --- 配置 ---
@@ -14,8 +15,13 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
+SCRIPT_VERSION="17.3"
 APP_NAME="image-gallery"
-INSTALL_DIR=$(pwd)/image-gallery-app
+
+# --- 路径设置 (核心改进：路径将基于脚本自身位置，确保唯一性) ---
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
+INSTALL_DIR="${SCRIPT_DIR}/image-gallery-app"
+
 
 # --- 核心功能：文件生成 ---
 generate_files() {
@@ -23,7 +29,9 @@ generate_files() {
     mkdir -p "${INSTALL_DIR}/public/uploads"
     mkdir -p "${INSTALL_DIR}/public/cache"
     mkdir -p "${INSTALL_DIR}/data"
-    cd "${INSTALL_DIR}" || exit
+    
+    # 切换到安装目录以执行后续文件生成操作
+    cd "${INSTALL_DIR}" || { echo -e "${RED}错误: 无法进入安装目录 '${INSTALL_DIR}'。${NC}"; return 1; }
 
     echo "--> 正在生成 data/categories.json..."
 cat << 'EOF' > data/categories.json
@@ -351,13 +359,39 @@ cat << 'EOF' > public/index.html
         const galleryContainer = document.getElementById('gallery-container'); const loader = document.getElementById('loader'); const searchInput = document.getElementById('search-input'); const filterButtonsContainer = document.getElementById('filter-buttons');
         let currentFilter = 'all'; let currentSearch = ''; let allImageData = []; let filteredData = []; let debounceTimer;
 
-        const ColumnLayout = {
-            container: galleryContainer, gap: 10,
-            getColumnsCount() { const width = window.innerWidth; if (width >= 1280) return 4; if (width >= 1024) return 3; if (width >= 768) return 2; return 1; },
+        /**
+         * 等高列瀑布流引擎 (Equal-Height Column Waterfall Engine)
+         * * @description 这是一个为图片画廊设计的先进布局解决方案。
+         * 它通过动态计算和分配，创建视觉上平衡的多列布局。
+         * * 工作原理:
+         * 1. 响应式列数: 根据当前浏览器窗口的宽度，自动确定最佳的列数（例如，桌面4列，平板2列）。
+         * 2. 高度追踪: 为每一列维护一个“当前高度”的记录。这个高度是列中所有图片宽高比的总和，而非实际像素高度，
+         * 这是一种轻量级且高效的计算方式。
+         * 3. 智能分配: 当有新的图片需要添加到布局中时，引擎会遍历所有列，找出当前“累计高度”最低的那一列，
+         * 并将新图片放入其中。这确保了所有列的增长速度大致相同。
+         * 4. 视觉优化 (可选排序): 在非随机模式下，可以将图片按宽高比排序再进行分配，这有助于将相似形状的
+         * 图片组合在一起，减少布局中的空隙。
+         * 5. 动态重绘: 当浏览器窗口大小改变时，整个布局会以平滑的方式重新计算和渲染。
+         */
+        const WaterfallLayoutEngine = {
+            container: galleryContainer,
+            gap: 10, // 像素单位的间隙
+            getColumnsCount() {
+                const width = window.innerWidth;
+                if (width >= 1280) return 4;
+                if (width >= 1024) return 3;
+                if (width >= 768) return 2;
+                return 1;
+            },
             render(images) {
                 this.container.innerHTML = '';
-                if (!images.length) { loader.classList.remove('hidden'); loader.textContent = '没有找到符合条件的图片。'; return; }
+                if (!images || images.length === 0) {
+                    loader.classList.remove('hidden');
+                    loader.textContent = '没有找到符合条件的图片。';
+                    return;
+                }
                 loader.classList.add('hidden');
+
                 const numColumns = this.getColumnsCount();
                 const columns = Array.from({ length: numColumns }, () => {
                     const colEl = document.createElement('div');
@@ -365,21 +399,32 @@ cat << 'EOF' > public/index.html
                     return { element: colEl, height: 0 };
                 });
                 
-                const imagesToDistribute = [...images];
-                if (currentFilter !== 'random') { imagesToDistribute.sort((a, b) => (b.height/b.width) - (a.height/a.width)); }
-                
-                imagesToDistribute.forEach(image => {
+                // 将图片分配到高度最小的列中
+                images.forEach(image => {
                     let shortestColumn = columns[0];
-                    for (let i = 1; i < columns.length; i++) { if (columns[i].height < shortestColumn.height) { shortestColumn = columns[i]; } }
+                    for (let i = 1; i < columns.length; i++) {
+                        if (columns[i].height < shortestColumn.height) {
+                            shortestColumn = columns[i];
+                        }
+                    }
                     
+                    // 基于宽高比累加高度
                     const imageAspect = image.height / image.width;
                     shortestColumn.height += imageAspect;
                     
                     const item = document.createElement('a');
-                    item.className = 'gallery-item'; item.href = "#"; item.dataset.id = image.id;
+                    item.className = 'gallery-item';
+                    item.href = "#";
+                    item.dataset.id = image.id;
+
                     const webpSrcset = `/image-proxy/${image.filename}?w=400&format=webp 400w, /image-proxy/${image.filename}?w=800&format=webp 800w`;
                     const jpegSrcset = `/image-proxy/${image.filename}?w=400 400w, /image-proxy/${image.filename}?w=800 800w`;
-                    item.innerHTML = `<picture><source type="image/webp" srcset="${webpSrcset}"><source type="image/jpeg" srcset="${jpegSrcset}"><img src="/image-proxy/${image.filename}?w=400" alt="${image.description}" loading="lazy"></picture>`;
+                    
+                    item.innerHTML = `<picture>
+                        <source type="image/webp" srcset="${webpSrcset}">
+                        <source type="image/jpeg" srcset="${jpegSrcset}">
+                        <img src="/image-proxy/${image.filename}?w=400" alt="${image.description}" loading="lazy" width="${image.width}" height="${image.height}">
+                    </picture>`;
                     shortestColumn.element.appendChild(item);
                 });
 
@@ -400,7 +445,7 @@ cat << 'EOF' > public/index.html
             } else { 
                 filteredData = dataToProcess.filter(item => item.category === currentFilter).sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt));
             }
-            ColumnLayout.render(filteredData);
+            WaterfallLayoutEngine.render(filteredData);
         }
         async function initializeGallery() { loader.classList.remove('hidden'); loader.textContent = '正在加载...'; try { allImageData = await fetchJSON('/api/images'); applyFiltersAndRender(); } catch (error) { console.error('获取图片数据失败:', error); loader.textContent = '加载失败，请刷新页面。'; } }
         const lightbox = document.querySelector('.lightbox'); const lightboxImage = lightbox.querySelector('.lightbox-image'); const lbCounter = lightbox.querySelector('.lb-counter'); const lbDownloadLink = document.getElementById('lightbox-download-link');
@@ -439,7 +484,7 @@ cat << 'EOF' > public/login.html
 <!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>后台登录 - 图片画廊</title><script src="https://cdn.tailwindcss.com"></script><style> body { background-color: #f0fdf4; } </style></head><body class="antialiased text-green-900"><div class="min-h-screen flex items-center justify-center"><div class="max-w-md w-full bg-white p-8 rounded-lg shadow-lg"><h1 class="text-3xl font-bold text-center text-green-900 mb-6">后台管理登录</h1><div id="error-message" class="hidden bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4" role="alert"><strong class="font-bold">登录失败！</strong><span class="block sm:inline">用户名或密码不正确。</span></div><form action="/api/login" method="POST"><div class="mb-4"><label for="username" class="block text-green-800 text-sm font-bold mb-2">用户名</label><input type="text" id="username" name="username" required class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-green-500"></div><div class="mb-6"><label for="password" class="block text-green-800 text-sm font-bold mb-2">密码</label><input type="password" id="password" name="password" required class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 mb-3 leading-tight focus:outline-none focus:ring-2 focus:ring-green-500"></div><div class="flex items-center justify-between"><button type="submit" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg focus:outline-none focus:shadow-outline transition-colors"> 登 录 </button></div></form></div></div><script> const urlParams = new URLSearchParams(window.location.search); if (urlParams.has('error')) { document.getElementById('error-message').classList.remove('hidden'); } </script></body></html>
 EOF
 
-    echo "--> 正在生成后台管理页 public/admin.html (最终版UI)..."
+    echo "--> 正在生成后台管理页 public/admin.html (集成交互式重名上传)..."
 cat << 'EOF' > public/admin.html
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -482,52 +527,74 @@ cat << 'EOF' > public/admin.html
         const formatBytes = (bytes, decimals = 2) => { if (!+bytes) return '0 Bytes'; const k = 1024; const dm = decimals < 0 ? 0 : decimals; const sizes = ["Bytes", "KB", "MB", "GB", "TB"]; const i = Math.floor(Math.log(bytes) / Math.log(k)); return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`; };
         const showToast = (message, type = 'success') => { const toast = document.getElementById('toast'); toast.className = `toast max-w-xs text-white text-sm rounded-lg shadow-lg p-3 ${type === 'success' ? 'bg-green-600' : 'bg-red-600'}`; toast.querySelector('#toast-message').textContent = message; toast.querySelector('#toast-icon').innerHTML = type === 'success' ? `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>` : `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>`; toast.style.display = 'block'; setTimeout(() => toast.classList.add('show'), 10); setTimeout(() => { toast.classList.remove('show'); setTimeout(() => toast.style.display = 'none', 300); }, 3000); };
         const showGenericModal = (title, bodyHtml, footerHtml) => { DOMElements.genericModal.querySelector('#modal-title').textContent = title; DOMElements.genericModal.querySelector('#modal-body').innerHTML = bodyHtml; DOMElements.genericModal.querySelector('#modal-footer').innerHTML = footerHtml; DOMElements.genericModal.classList.add('active'); };
-        const showConfirmationModal = (title, bodyHtml) => { return new Promise(resolve => { const footerHtml = `<button type="button" class="modal-cancel-btn bg-gray-300 hover:bg-gray-400 text-black py-2 px-4 rounded">取消</button><button type="button" id="modal-confirm-btn" class="bg-red-600 hover:bg-red-700 text-white py-2 px-4 rounded">继续上传</button>`; showGenericModal(title, bodyHtml, footerHtml); DOMElements.genericModal.querySelector('#modal-confirm-btn').onclick = () => { hideModal(DOMElements.genericModal); resolve(true); }; const cancelBtn = DOMElements.genericModal.querySelector('.modal-cancel-btn'); cancelBtn.onclick = () => { hideModal(DOMElements.genericModal); resolve(false); }; DOMElements.genericModal.onclick = (e) => { if (e.target === DOMElements.genericModal) { cancelBtn.click(); } }; }); };
+        const showConfirmationModal = (title, bodyHtml, confirmText = '确认', cancelText = '取消') => { return new Promise(resolve => { const footerHtml = `<button type="button" class="modal-cancel-btn bg-gray-300 hover:bg-gray-400 text-black py-2 px-4 rounded">${cancelText}</button><button type="button" id="modal-confirm-btn" class="bg-red-600 hover:bg-red-700 text-white py-2 px-4 rounded">${confirmText}</button>`; showGenericModal(title, bodyHtml, footerHtml); DOMElements.genericModal.querySelector('#modal-confirm-btn').onclick = () => { hideModal(DOMElements.genericModal); resolve(true); }; const cancelBtn = DOMElements.genericModal.querySelector('.modal-cancel-btn'); cancelBtn.onclick = () => { hideModal(DOMElements.genericModal); resolve(false); }; DOMElements.genericModal.onclick = (e) => { if (e.target === DOMElements.genericModal) { cancelBtn.click(); } }; }); };
         const hideModal = (modal) => modal.classList.remove('active');
-        const handleFileSelection = (fileList) => { const imageFiles = Array.from(fileList).filter(f => f.type.startsWith('image/')); const currentFilenames = new Set(filesToUpload.map(item => item.file.name)); const newFiles = imageFiles.filter(f => !currentFilenames.has(f.name)).map(file => ({ file, description: DOMElements.unifiedDescription.value, userHasTyped: DOMElements.unifiedDescription.value !== '' })); filesToUpload = filesToUpload.concat(newFiles); DOMElements.uploadBtn.disabled = filesToUpload.length === 0; renderFilePreviews(); };
+        const handleFileSelection = (fileList) => { const imageFiles = Array.from(fileList).filter(f => f.type.startsWith('image/')); const currentFilenames = new Set(filesToUpload.map(item => item.file.name)); const newFiles = imageFiles.filter(f => !currentFilenames.has(f.name)).map(file => ({ file, description: DOMElements.unifiedDescription.value, userHasTyped: DOMElements.unifiedDescription.value !== '', shouldRename: false, status: 'pending' })); filesToUpload.push(...newFiles); DOMElements.uploadBtn.disabled = filesToUpload.length === 0; renderFilePreviews(); };
         const renderFilePreviews = () => { if (filesToUpload.length === 0) { DOMElements.filePreviewContainer.classList.add('hidden'); return; } DOMElements.filePreviewList.innerHTML = ''; let totalSize = 0; filesToUpload.forEach((item, index) => { totalSize += item.file.size; const listItem = document.createElement('div'); const tempId = `file-preview-${index}`; listItem.className = 'file-preview-item text-slate-600 border rounded p-2'; listItem.dataset.fileIndex = index; listItem.innerHTML = `<div class="flex items-start"><img class="w-12 h-12 object-cover rounded mr-3 bg-slate-100" id="thumb-${tempId}"><div class="flex-grow"><div class="flex justify-between items-center text-xs mb-1"><p class="truncate pr-2 font-medium">${item.file.name}</p><button type="button" data-index="${index}" class="remove-file-btn text-xl text-red-500 hover:text-red-700 leading-none">&times;</button></div><p class="text-xs text-slate-500">${formatBytes(item.file.size)}</p></div></div><input type="text" data-index="${index}" class="relative w-full text-xs border rounded px-2 py-1 description-input bg-transparent mt-2" placeholder="添加独立描述..." value="${item.description}"><p class="upload-status text-xs mt-1"></p>`; DOMElements.filePreviewList.appendChild(listItem); const reader = new FileReader(); reader.onload = (e) => { document.getElementById(`thumb-${tempId}`).src = e.target.result; }; reader.readAsDataURL(item.file); }); DOMElements.uploadSummary.textContent = `已选择 ${filesToUpload.length} 个文件，总大小: ${formatBytes(totalSize)}`; DOMElements.filePreviewContainer.classList.remove('hidden'); };
         const dz = DOMElements.dropZone; dz.addEventListener('dragover', (e) => { e.preventDefault(); dz.classList.add('bg-green-50', 'border-green-400'); }); dz.addEventListener('dragleave', (e) => dz.classList.remove('bg-green-50', 'border-green-400')); dz.addEventListener('drop', (e) => { e.preventDefault(); dz.classList.remove('bg-green-50', 'border-green-400'); handleFileSelection(e.dataTransfer.files); });
         DOMElements.imageInput.addEventListener('change', (e) => { handleFileSelection(e.target.files); e.target.value = ''; });
         DOMElements.unifiedDescription.addEventListener('input', e => { const unifiedText = e.target.value; document.querySelectorAll('.file-preview-item').forEach(item => { const index = parseInt(item.dataset.fileIndex, 10); if (filesToUpload[index] && !filesToUpload[index].userHasTyped) { item.querySelector('.description-input').value = unifiedText; filesToUpload[index].description = unifiedText; } }); });
         DOMElements.filePreviewList.addEventListener('input', e => { if (e.target.classList.contains('description-input')) { const index = parseInt(e.target.dataset.index, 10); if(filesToUpload[index]) { filesToUpload[index].description = e.target.value; filesToUpload[index].userHasTyped = true; } } });
         DOMElements.filePreviewList.addEventListener('click', e => { if (e.target.classList.contains('remove-file-btn')) { const index = parseInt(e.target.dataset.index, 10); filesToUpload.splice(index, 1); renderFilePreviews(); DOMElements.uploadBtn.disabled = filesToUpload.length === 0; } });
-        const processUploadQueue = async () => {
+        
+        const processUploadQueue = async (e) => {
+            e.preventDefault();
             DOMElements.uploadBtn.disabled = true;
-            let uploadQueue = [...filesToUpload];
-            const originalQueueLength = uploadQueue.length;
+            
+            // 1. 预检查所有待上传文件
+            const pendingFiles = filesToUpload.filter(f => f.status === 'pending');
+            if (pendingFiles.length === 0) { showToast("没有需要上传的新文件。", "error"); DOMElements.uploadBtn.disabled = filesToUpload.length === 0; return; }
+            
+            const filenamesToCheck = pendingFiles.map(item => item.file.name);
+            const checkRes = await apiRequest('/api/admin/check-filenames', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({filenames: filenamesToCheck}) });
+            const { duplicates } = await checkRes.json();
+            
+            // 2. 对重名文件进行交互式确认
+            for (const item of pendingFiles) {
+                if (duplicates.includes(item.file.name)) {
+                    const userConfirmed = await showConfirmationModal('文件已存在', `文件 "<strong>${item.file.name}</strong>" 已存在。是否仍然继续上传？<br>(新文件将被自动重命名)`, '继续上传', '取消此文件');
+                    if (userConfirmed) {
+                        item.shouldRename = true;
+                    } else {
+                        item.status = 'cancelled';
+                        const previewItem = DOMElements.filePreviewList.querySelector(`[data-file-index="${filesToUpload.indexOf(item)}"]`);
+                        if(previewItem) previewItem.querySelector('.upload-status').textContent = '已取消';
+                    }
+                }
+            }
+
+            // 3. 开始上传处理
+            const uploadableFiles = filesToUpload.filter(f => f.status === 'pending');
+            const originalQueueLength = uploadableFiles.length;
             let processedCount = 0;
             const updateButtonText = () => { DOMElements.uploadBtn.textContent = `正在处理 (${processedCount}/${originalQueueLength})...`; };
-            updateButtonText();
+            if (originalQueueLength > 0) updateButtonText();
 
-            for (const item of uploadQueue) {
-                const originalIndex = filesToUpload.findIndex(f => f.file === item.file);
+            for (const item of uploadableFiles) {
+                const originalIndex = filesToUpload.indexOf(item);
                 const previewItem = DOMElements.filePreviewList.querySelector(`[data-file-index="${originalIndex}"]`);
                 if (!previewItem) { processedCount++; updateButtonText(); continue; }
                 const statusEl = previewItem.querySelector('.upload-status');
                 try {
-                    let rename = false;
-                    const checkRes = await apiRequest('/api/admin/check-filenames', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({filenames: [item.file.name]}) });
-                    if (!checkRes.ok) throw new Error("文件名检查请求失败");
-                    const { duplicates } = await checkRes.json();
-                    if (duplicates.length > 0) {
-                        const userConfirmed = await showConfirmationModal('文件已存在', `文件 "${item.file.name}" 已存在。是否仍然继续上传？<br>(新文件将被自动重命名)`);
-                        if (!userConfirmed) { statusEl.textContent = '已取消'; processedCount++; updateButtonText(); continue; }
-                        rename = true;
-                    }
                     statusEl.textContent = '上传中...';
-                    const formData = new FormData(); formData.append('image', item.file); formData.append('category', DOMElements.categorySelect.value); formData.append('description', item.description); formData.append('rename', rename);
+                    const formData = new FormData(); formData.append('image', item.file); formData.append('category', DOMElements.categorySelect.value); formData.append('description', item.description); formData.append('rename', item.shouldRename);
                     const response = await apiRequest('/api/admin/upload', { method: 'POST', body: formData });
                     const result = await response.json();
-                    if (response.ok) { previewItem.classList.add('upload-success'); statusEl.textContent = '✅ 上传成功'; } 
+                    if (response.ok) { item.status = 'success'; previewItem.classList.add('upload-success'); statusEl.textContent = '✅ 上传成功'; } 
                     else { throw new Error(result.message || '上传失败'); }
-                } catch (err) { if (err.message !== 'Unauthorized') { statusEl.textContent = `❌ ${err.message}`; previewItem.classList.add('upload-error'); }
+                } catch (err) { if (err.message !== 'Unauthorized') { item.status = 'error'; statusEl.textContent = `❌ ${err.message}`; previewItem.classList.add('upload-error'); }
                 } finally { processedCount++; updateButtonText(); }
             }
-            showToast(`所有任务处理完成。`); DOMElements.uploadBtn.textContent = '上传文件'; filesToUpload = []; DOMElements.imageInput.value = ''; DOMElements.unifiedDescription.value = '';
+            
+            showToast(`所有任务处理完成。`); DOMElements.uploadBtn.textContent = '上传文件'; 
+            filesToUpload = []; // 清空队列
+            DOMElements.imageInput.value = ''; 
+            DOMElements.unifiedDescription.value = '';
             setTimeout(() => { DOMElements.filePreviewContainer.classList.add('hidden'); DOMElements.uploadBtn.disabled = true; }, 3000);
             await loadImages('all', '全部图片');
         };
         DOMElements.uploadForm.addEventListener('submit', processUploadQueue);
+
         async function refreshCategories() { const currentVal = DOMElements.categorySelect.value; await loadAndPopulateCategories(currentVal); await loadAndDisplayCategoriesForManagement(); }
         async function loadAndPopulateCategories(selectedCategory = null) { try { const response = await apiRequest('/api/categories'); const categories = await response.json(); [DOMElements.categorySelect, DOMElements.editCategorySelect].forEach(select => { const currentVal = select.value; select.innerHTML = ''; categories.forEach(cat => select.add(new Option(cat, cat))); select.value = categories.includes(currentVal) ? currentVal : selectedCategory || categories[0]; }); } catch (error) { if (error.message !== 'Unauthorized') console.error('加载分类失败:', error); } }
         async function loadAndDisplayCategoriesForManagement() { try { const response = await apiRequest('/api/categories'); const categories = await response.json(); DOMElements.categoryManagementList.innerHTML = ''; const allCatItem = document.createElement('div'); allCatItem.className = 'category-item flex items-center justify-between p-2 rounded cursor-pointer hover:bg-gray-50 active'; allCatItem.innerHTML = `<span class="category-name flex-grow">全部图片</span>`; DOMElements.categoryManagementList.appendChild(allCatItem); categories.forEach(cat => { const isUncategorized = cat === UNCATEGORIZED; const item = document.createElement('div'); item.className = 'category-item flex items-center justify-between p-2 rounded'; item.innerHTML = `<span class="category-name flex-grow ${isUncategorized ? 'text-slate-500' : 'cursor-pointer hover:bg-gray-50'}">${cat}</span>` + (isUncategorized ? '' : `<div class="space-x-2 flex-shrink-0"><button data-name="${cat}" class="rename-cat-btn text-blue-500 hover:text-blue-700 text-sm">重命名</button><button data-name="${cat}" class="delete-cat-btn text-red-500 hover:red-700 text-sm">删除</button></div>`); DOMElements.categoryManagementList.appendChild(item); }); } catch (error) { if (error.message !== 'Unauthorized') console.error('加载分类管理列表失败:', error); } }
@@ -564,7 +631,7 @@ cat << 'EOF' > public/admin.html
                 const input = document.getElementById('modal-input'); input.value = catName;
                 document.getElementById('modal-form').onsubmit = async (ev) => { ev.preventDefault(); const newName = input.value.trim(); if (!newName || newName === catName) { hideModal(DOMElements.genericModal); return; } try { const response = await apiRequest('/api/admin/categories', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ oldName: catName, newName }) }); if (!response.ok) throw new Error((await response.json()).message); hideModal(DOMElements.genericModal); showToast('重命名成功'); await Promise.all([refreshCategories(), loadImages('all', '全部图片')]); } catch (error) { showToast(`重命名失败: ${error.message}`, 'error'); } };
             } else if (target.classList.contains('delete-cat-btn')) {
-                const confirmed = await showConfirmationModal('确认删除', `<p>确定要删除分类 "<strong>${catName}</strong>" 吗？<br>此分类下的图片将归入 "未分类"。</p>`);
+                const confirmed = await showConfirmationModal('确认删除', `<p>确定要删除分类 "<strong>${catName}</strong>" 吗？<br>此分类下的图片将归入 "未分类"。</p>`, '确认删除');
                 if(confirmed) { try { const response = await apiRequest('/api/admin/categories', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: catName }) }); if (!response.ok) throw new Error((await response.json()).message); showToast('删除成功'); await Promise.all([refreshCategories(), loadImages('all', '全部图片')]); } catch (error) { showToast(`删除失败: ${error.message}`, 'error'); } }
             } else if (target.classList.contains('category-name')) {
                 document.querySelectorAll('.category-item').forEach(el => el.classList.remove('active'));
@@ -583,7 +650,7 @@ cat << 'EOF' > public/admin.html
                 DOMElements.editImageModal.classList.add('active');
             } else if (target.matches('.delete-btn')) {
                 const imageId = target.dataset.id;
-                const confirmed = await showConfirmationModal('确认删除', `<p>确定要永久删除这张图片吗？此操作无法撤销。</p>`);
+                const confirmed = await showConfirmationModal('确认删除', `<p>确定要永久删除这张图片吗？此操作无法撤销。</p>`, '确认删除');
                 if(confirmed) { try { const response = await apiRequest(`/api/admin/images/${imageId}`, { method: 'DELETE' }); if (!response.ok) throw new Error('删除失败'); showToast('图片已删除'); const activeCatItem = document.querySelector('.category-item.active .category-name'); const activeCat = activeCatItem ? activeCatItem.textContent : '全部图片'; await loadImages(activeCat === '全部图片' ? 'all' : activeCat, activeCat); } catch (error) { showToast(error.message, 'error'); } }
             }
         });
@@ -592,6 +659,7 @@ cat << 'EOF' > public/admin.html
             const body = JSON.stringify({ originalFilename: document.getElementById('edit-originalFilename').value, category: DOMElements.editCategorySelect.value, description: document.getElementById('edit-description').value });
             try { const response = await apiRequest(`/api/admin/images/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body }); if (!response.ok) throw new Error((await response.json()).message); hideModal(DOMElements.editImageModal); showToast('更新成功'); const activeCatItem = document.querySelector('.category-item.active .category-name'); const activeCat = activeCatItem ? activeCatItem.textContent : '全部图片'; await loadImages(activeCat === '全部图片' ? 'all' : activeCat, activeCat); } catch (error) { showToast(`更新失败: ${error.message}`, 'error'); }
         });
+        [DOMElements.genericModal, DOMElements.editImageModal].forEach(modal => { const cancelBtn = modal.querySelector('.modal-cancel-btn'); if(cancelBtn) { cancelBtn.addEventListener('click', () => hideModal(modal)); } modal.addEventListener('click', (e) => { if (e.target === modal) hideModal(modal); }); });
         async function init() { await Promise.all([ refreshCategories(), loadImages('all', '全部图片') ]); }
         init();
     });
@@ -601,85 +669,284 @@ cat << 'EOF' > public/admin.html
 EOF
 
     echo -e "${GREEN}--- 所有项目文件已成功生成在 ${INSTALL_DIR} ---${NC}"
+    return 0
 }
 
 # --- 管理菜单功能 ---
-check_and_install_dep() {
-    local dep_name=$1; local check_command=$2; local install_command=$3; local SUDO_CMD=""
-    if command -v "$check_command" > /dev/null; then return 0; fi
-    echo -e "${YELLOW}--> 检测到核心依赖 '${dep_name}' 未安装。${NC}"
+check_and_install_deps() {
+    local dep_to_check=$1
+    local package_name=$2
+    local command_to_check=$3
+    
+    if command -v "$command_to_check" &> /dev/null; then
+        return 0
+    fi
+    
+    echo -e "${YELLOW}--> 检测到核心依赖 '${dep_to_check}' 未安装。${NC}"
+    
+    local pm_cmd=""
+    local sudo_cmd=""
+
     if [ "$EUID" -ne 0 ]; then
-        if command -v sudo > /dev/null; then SUDO_CMD="sudo";
-        else echo -e "${RED}错误：当前用户不是root，且未找到'sudo'命令。无法自动安装依赖。${NC}"; echo -e "${YELLOW}请切换到root用户或安装sudo后重试。${NC}"; return 1; fi
+        if command -v sudo &> /dev/null; then
+            sudo_cmd="sudo"
+        else
+            echo -e "${RED}错误：需要 root 或 sudo 权限来安装依赖，但两者都不可用。${NC}"
+            return 1
+        fi
     fi
-    if command -v apt-get > /dev/null; then
-        read -p "是否尝试自动安装? (y/n): " confirm
-        if [[ "$confirm" == "y" || "$confirm" == "Y" ]]; then
-            echo "--> 准备执行: ${SUDO_CMD} ${install_command}"; eval "${SUDO_CMD} ${install_command}"
-            if ! command -v "$check_command" > /dev/null; then echo -e "${RED}自动安装 '${dep_name}' 失败。请检查错误并手动安装。${NC}"; return 1;
-            else echo -e "${GREEN}'${dep_name}' 安装成功！${NC}"; fi
-        else echo -e "${YELLOW}已取消自动安装。请手动安装 '${dep_name}'。${NC}"; return 1; fi
-    else echo -e "${RED}未找到 'apt-get' 包管理器。请手动安装 '${dep_name}'。${NC}"; return 1; fi
-    return 0
-}
-display_access_info() {
-    cd "${INSTALL_DIR}" || return
-    local SERVER_IP; SERVER_IP=$(hostname -I | awk '{print $1}')
-    if [ -f ".env" ]; then
-        set -o allexport; source .env; set +o allexport
-        echo -e "${YELLOW}======================================================${NC}"; echo -e "${YELLOW}           应用已就绪！请使用以下信息访问           ${NC}"; echo -e "${YELLOW}======================================================${NC}"
-        echo -e "前台画廊地址: ${GREEN}http://${SERVER_IP}:${PORT}${NC}"; echo -e "后台管理地址: ${GREEN}http://${SERVER_IP}:${PORT}/admin${NC}"
-        echo -e "后台登录用户: ${BLUE}${ADMIN_USERNAME}${NC}"; echo -e "后台登录密码: ${BLUE}(您设置的密码)${NC}"
-        echo -e "${YELLOW}======================================================${NC}"
+
+    if command -v apt-get &> /dev/null; then
+        pm_cmd="apt-get install -y"
+        echo "--> 使用 apt-get 进行安装..."
+        $sudo_cmd apt-get update
+    elif command -v dnf &> /dev/null; then
+        pm_cmd="dnf install -y"
+        echo "--> 使用 dnf 进行安装..."
+    elif command -v yum &> /dev/null; then
+        pm_cmd="yum install -y"
+        echo "--> 使用 yum 进行安装..."
+    else
+        echo -e "${RED}错误: 未找到 apt, dnf 或 yum 包管理器。请手动安装 '${dep_to_check}'。${NC}"
+        return 1
+    fi
+
+    read -p "是否尝试使用 '${pm_cmd}' 自动安装 '${package_name}'? (y/n): " confirm
+    if [[ "$confirm" == "y" || "$confirm" == "Y" ]]; then
+        echo "--> 准备执行: ${sudo_cmd} ${pm_cmd} ${package_name}"
+        if eval "${sudo_cmd} ${pm_cmd} ${package_name}"; then
+            echo -e "${GREEN}'${dep_to_check}' 安装成功！${NC}"
+            return 0
+        else
+            echo -e "${RED}自动安装 '${dep_to_check}' 失败。请检查错误并手动安装。${NC}"
+            return 1
+        fi
+    else
+        echo -e "${YELLOW}已取消自动安装。请手动安装 '${dep_to_check}'。${NC}"
+        return 1
     fi
 }
+
+display_status() {
+    echo -e "${YELLOW}======================= 应用状态速览 =======================${NC}"
+    echo -e " 管理脚本版本: ${BLUE}v${SCRIPT_VERSION}${NC}"
+    echo -e " 应用名称: ${BLUE}${APP_NAME}${NC}"
+    echo -e " 安装路径: ${BLUE}${INSTALL_DIR}${NC}"
+
+    if [ -d "${INSTALL_DIR}" ] && [ -f "${INSTALL_DIR}/.env" ]; then
+        echo -e " 安装状态: ${GREEN}已安装${NC}"
+        
+        # 进入目录读取配置
+        cd "${INSTALL_DIR}" >/dev/null 2>&1
+        local SERVER_IP; SERVER_IP=$(hostname -I | awk '{print $1}')
+        if [ -z "${SERVER_IP}" ]; then SERVER_IP="127.0.0.1"; fi
+        
+        local PORT; PORT=$(grep 'PORT=' .env | cut -d '=' -f2)
+        local ADMIN_USER; ADMIN_USER=$(grep 'ADMIN_USERNAME=' .env | cut -d '=' -f2)
+        
+        # 检查 PM2 进程状态
+        if command -v pm2 &> /dev/null && pm2 id "$APP_NAME" &> /dev/null; then
+            local pm2_status; pm2_status=$(pm2 show "$APP_NAME" | grep 'status' | awk '{print $4}')
+            if [ "$pm2_status" == "online" ]; then
+                echo -e " 运行状态: ${GREEN}在线 (Online)${NC}"
+            else
+                echo -e " 运行状态: ${RED}离线 (Offline)${NC}"
+            fi
+        else
+            echo -e " 运行状态: ${YELLOW}未知 (PM2未运行或应用未被管理)${NC}"
+        fi
+
+        echo -e " 前台画廊: ${GREEN}http://${SERVER_IP}:${PORT}${NC}"
+        echo -e " 后台管理: ${GREEN}http://${SERVER_IP}:${PORT}/admin${NC}"
+        echo -e " 后台用户: ${BLUE}${ADMIN_USER}${NC}"
+        echo -e " 数据目录: ${BLUE}${INSTALL_DIR}/data${NC}"
+        echo -e " 日志文件: ${BLUE}$(pm2 show "$APP_NAME" | grep 'out log path' | awk '{print $6}')${NC}"
+        cd - >/dev/null 2>&1 # 返回原目录
+    else
+        echo -e " 安装状态: ${RED}未安装${NC}"
+    fi
+    echo -e "${YELLOW}==========================================================${NC}"
+}
+
 install_app() {
-    echo -e "${GREEN}--- 1. 开始安装或修复应用 ---${NC}"; echo "--> 正在检查系统环境..."
-    if ! check_and_install_dep "Node.js & npm" "node" "apt-get update && apt-get install -y nodejs npm"; then return 1; fi
-    if ! check_and_install_dep "pm2" "pm2" "npm install -g pm2"; then return 1; fi
-    if ! check_and_install_dep "build-essential" "make" "apt-get install -y build-essential"; then return 1; fi
-    echo -e "${GREEN}--> 所有核心依赖均已满足。${NC}"; generate_files
-    echo -e "${YELLOW}--- 安全设置向导 ---${NC}"; read -p "请输入新的后台管理员用户名 [默认为 admin]: " new_username; new_username=${new_username:-admin}
-    local new_password; while true; do read -s -p "请输入新的后台管理员密码 (必须填写): " new_password; echo; read -s -p "请再次输入密码以确认: " new_password_confirm; echo; if [ "$new_password" == "$new_password_confirm" ] && [ -n "$new_password" ]; then break; else echo -e "${RED}密码不匹配或为空，请重试。${NC}"; fi; done
-    local jwt_secret; jwt_secret=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 64 | head -n 1)
-    echo "--> 正在创建 .env 配置文件..."; ( echo "PORT=3000"; echo "ADMIN_USERNAME=${new_username}"; echo "ADMIN_PASSWORD=${new_password}"; echo "JWT_SECRET=${jwt_secret}"; ) > .env
-    echo -e "${GREEN}--> .env 配置文件创建成功！${NC}"; echo "--> 正在安装项目依赖 (npm install)..."; npm install
-    echo -e "${GREEN}--- 安装完成！正在自动启动应用... ---${NC}"; start_app; display_access_info
+    echo -e "${GREEN}--- 1. 开始安装或修复应用 ---${NC}"
+    echo "--> 正在检查系统环境..."
+    
+    check_and_install_deps "Node.js & npm" "nodejs npm" "node" || return 1
+    check_and_install_deps "PM2" "pm2" "pm2" || { echo "--> 将通过npm全局安装pm2..."; sudo npm install -g pm2; } || return 1
+    check_and_install_deps "编译工具(for sharp)" "build-essential" "make" || return 1
+
+    echo -e "${GREEN}--> 所有核心依赖均已满足。${NC}"
+    generate_files || return 1
+    
+    cd "${INSTALL_DIR}" || { echo -e "${RED}错误: 无法进入安装目录 '${INSTALL_DIR}'。${NC}"; return 1; }
+
+    echo -e "${YELLOW}--- 安全设置向导 ---${NC}"
+    read -p "请输入新的后台管理员用户名 [默认为 admin]: " new_username
+    new_username=${new_username:-admin}
+    
+    local new_password
+    while true; do
+        read -s -p "请输入新的后台管理员密码 (必须填写): " new_password; echo
+        read -s -p "请再次输入密码以确认: " new_password_confirm; echo
+        if [ "$new_password" == "$new_password_confirm" ] && [ -n "$new_password" ]; then
+            break
+        else
+            echo -e "${RED}密码不匹配或为空，请重试。${NC}"
+        fi
+    done
+    
+    local jwt_secret
+    jwt_secret=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 64 | head -n 1)
+    
+    echo "--> 正在创建 .env 配置文件..."
+    (
+        echo "PORT=3000"
+        echo "ADMIN_USERNAME=${new_username}"
+        echo "ADMIN_PASSWORD=${new_password}"
+        echo "JWT_SECRET=${jwt_secret}"
+    ) > .env
+    echo -e "${GREEN}--> .env 配置文件创建成功！${NC}"
+    
+    echo -e "${YELLOW}--> 正在安装项目依赖 (npm install)，这可能需要几分钟，请耐心等待...${NC}"
+    if npm install; then
+        echo -e "${GREEN}--> 项目依赖安装成功！${NC}"
+    else
+        echo -e "${RED}--> npm install 失败，请检查错误日志。${NC}"
+        return 1
+    fi
+
+    echo -e "${GREEN}--- 安装完成！正在自动启动应用... ---${NC}"
+    start_app
 }
-start_app() { cd "${INSTALL_DIR}" || exit; echo -e "${GREEN}--- 正在使用 PM2 启动应用... ---${NC}"; if [ ! -f ".env" ]; then echo -e "${RED}错误: .env 文件不存在。请先运行安装程序 (选项1)。${NC}"; return; fi; pm2 start server.js --name "$APP_NAME"; pm2 startup; pm2 save; echo -e "${GREEN}--- 应用已启动！---${NC}"; }
+
+start_app() {
+    echo -e "${GREEN}--- 正在启动应用... ---${NC}"
+    [ ! -d "${INSTALL_DIR}" ] || [ ! -f "${INSTALL_DIR}/.env" ] && { echo -e "${RED}错误: 应用未安装或 .env 文件不存在。请先运行安装程序 (选项1)。${NC}"; return 1; }
+    cd "${INSTALL_DIR}" || return 1
+    pm2 start server.js --name "$APP_NAME"
+    pm2 startup
+    pm2 save
+    echo -e "${GREEN}--- 应用已启动！---${NC}"
+}
+
+stop_app() {
+    echo -e "${YELLOW}--- 正在停止应用... ---${NC}"
+    [ ! -d "${INSTALL_DIR}" ] && { echo -e "${RED}错误: 应用未安装。${NC}"; return 1; }
+    pm2 stop "$APP_NAME"
+    echo -e "${GREEN}--- 应用已停止！---${NC}"
+}
+
+restart_app() {
+    echo -e "${GREEN}--- 正在重启应用... ---${NC}"
+    [ ! -d "${INSTALL_DIR}" ] && { echo -e "${RED}错误: 应用未安装。${NC}"; return 1; }
+    pm2 restart "$APP_NAME"
+    echo -e "${GREEN}--- 应用已重启！---${NC}"
+}
+
+view_logs() {
+    echo -e "${YELLOW}--- 显示应用日志 (按 Ctrl+C 退出)... ---${NC}"
+    [ ! -d "${INSTALL_DIR}" ] && { echo -e "${RED}错误: 应用未安装。${NC}"; return 1; }
+    pm2 logs "$APP_NAME"
+}
+
 manage_credentials() {
-    cd "${INSTALL_DIR}" || exit; echo -e "${YELLOW}--- 修改后台用户名和密码 ---${NC}"; if [ ! -f ".env" ]; then echo -e "${RED}错误: .env 文件不存在。请先安装应用。${NC}"; return; fi
-    local CURRENT_USER; CURRENT_USER=$(grep 'ADMIN_USERNAME=' .env | cut -d '=' -f2); echo "当前用户名: ${CURRENT_USER}"; read -p "请输入新的用户名 (留空则不修改): " new_username
-    local new_password; read -s -p "请输入新的密码 (留空则不修改): " new_password; echo
-    if [ -z "$new_username" ] && [ -z "$new_password" ]; then echo -e "${YELLOW}未做任何修改。${NC}"; return; fi
-    if [ -n "$new_username" ]; then sed -i "/^ADMIN_USERNAME=/c\\ADMIN_USERNAME=${new_username}" .env; echo -e "${GREEN}用户名已更新为: ${new_username}${NC}"; fi
-    if [ -n "$new_password" ]; then sed -i "/^ADMIN_PASSWORD=/c\\ADMIN_PASSWORD=${new_password}" .env; echo -e "${GREEN}密码已更新。${NC}"; fi
-    echo -e "${YELLOW}正在重启应用以使新凭据生效...${NC}"; restart_app
+    echo -e "${YELLOW}--- 修改后台配置 ---${NC}"
+    [ ! -d "${INSTALL_DIR}" ] || [ ! -f "${INSTALL_DIR}/.env" ] && { echo -e "${RED}错误: 应用未安装或 .env 文件不存在。${NC}"; return 1; }
+    cd "${INSTALL_DIR}" || return 1
+
+    local CURRENT_USER; CURRENT_USER=$(grep 'ADMIN_USERNAME=' .env | cut -d '=' -f2)
+    echo "当前用户名: ${CURRENT_USER}"
+    read -p "请输入新的用户名 (留空则不修改): " new_username
+    
+    read -s -p "请输入新的密码 (留空则不修改): " new_password; echo
+    
+    if [ -z "$new_username" ] && [ -z "$new_password" ]; then
+        echo -e "${YELLOW}未做任何修改。${NC}"
+        return
+    fi
+    
+    if [ -n "$new_username" ]; then
+        sed -i "/^ADMIN_USERNAME=/c\\ADMIN_USERNAME=${new_username}" .env
+        echo -e "${GREEN}用户名已更新为: ${new_username}${NC}"
+    fi
+    
+    if [ -n "$new_password" ]; then
+        sed -i "/^ADMIN_PASSWORD=/c\\ADMIN_PASSWORD=${new_password}" .env
+        echo -e "${GREEN}密码已更新。${NC}"
+    fi
+    
+    echo -e "${YELLOW}正在重启应用以使新凭据生效...${NC}"
+    restart_app
 }
-stop_app() { echo -e "${YELLOW}--- 停止应用... ---${NC}"; pm2 stop "$APP_NAME"; echo -e "${GREEN}--- 应用已停止！---${NC}"; }
-restart_app() { echo -e "${GREEN}--- 重启应用... ---${NC}"; pm2 restart "$APP_NAME"; echo -e "${GREEN}--- 应用已重启！---${NC}"; }
-view_logs() { echo -e "${YELLOW}--- 显示应用日志 (按 Ctrl+C 退出)... ---${NC}"; pm2 logs "$APP_NAME"; }
+
 uninstall_app() {
-    echo -e "${RED}--- 警告：这将从PM2中移除应用并删除整个项目文件夹！ ---${NC}"; read -p "你确定要继续吗？ (y/n): " confirm
-    if [[ "$confirm" == "y" || "$confirm" == "Y" ]]; then echo "--> 正在从 PM2 中删除应用..."; pm2 delete "$APP_NAME"; pm2 save --force; echo "--> 正在删除项目文件夹 ${INSTALL_DIR}..."; rm -rf "${INSTALL_DIR}"; echo -e "${GREEN}应用已彻底卸载。${NC}"; else echo "操作已取消。"; fi
+    echo -e "${RED}========================= 彻底卸载警告 =========================${NC}"
+    echo -e "${RED}此操作将执行以下动作，且【无法撤销】:${NC}"
+    echo -e "${RED}  1. 从 PM2 进程管理器中移除 '${APP_NAME}' 应用。${NC}"
+    echo -e "${RED}  2. 永久删除整个应用目录，包括:${NC}"
+    echo -e "${RED}     - 所有程序文件 (server.js, html, etc.)${NC}"
+    echo -e "${RED}     - 您的 .env 配置文件 (包含密码和密钥)${NC}"
+    echo -e "${RED}     - /public/uploads/ 目录下的【所有已上传图片】${NC}"
+    echo -e "${RED}     - /public/cache/ 目录下的【所有图片缓存】${NC}"
+    echo -e "${RED}     - /data/ 目录下的【所有数据库文件】(图片信息、分类等)${NC}"
+    echo -e "${RED}     - node_modules 文件夹${NC}"
+    echo -e "目标删除路径: ${YELLOW}${INSTALL_DIR}${NC}"
+    echo -e "${RED}==============================================================${NC}"
+    
+    read -p "您是否完全理解以上后果并确认要彻底卸载? (请输入 'yes' 以确认): " confirm
+    if [[ "$confirm" == "yes" ]]; then
+        echo "--> 正在从 PM2 中删除应用..."
+        if command -v pm2 &> /dev/null; then
+            pm2 delete "$APP_NAME" &> /dev/null
+            pm2 save --force &> /dev/null
+        fi
+        echo "--> 正在永久删除项目文件夹: ${INSTALL_DIR}..."
+        rm -rf "${INSTALL_DIR}"
+        echo -e "${GREEN}应用已彻底卸载。所有相关文件和进程已被移除。${NC}"
+    else
+        echo "操作已取消。"
+    fi
 }
+
 show_menu() {
     clear
-    echo -e "${YELLOW}======================================================${NC}"; echo -e "${YELLOW}     图片画廊 - 一体化部署与管理脚本 (v17.3)     ${NC}"; echo -e "${YELLOW}======================================================${NC}"
-    echo -e " 应用名称: ${GREEN}${APP_NAME}${NC}"; echo -e " 安装路径: ${GREEN}${INSTALL_DIR}${NC}"
-    if [ -d "${INSTALL_DIR}" ] && [ -f "${INSTALL_DIR}/.env" ]; then
-        local SERVER_IP; SERVER_IP=$(hostname -I | awk '{print $1}')
-        local PORT; PORT=$(grep 'PORT=' "${INSTALL_DIR}/.env" | cut -d '=' -f2)
-        echo -e " 访问网址: ${GREEN}http://${SERVER_IP}:${PORT}${NC}"
-    else echo -e " 访问网址: ${RED}(应用尚未安装)${NC}"; fi
-    echo -e "${YELLOW}------------------------------------------------------${NC}"; echo " 1. 安装或修复应用 (首次使用)"; echo " 2. 启动应用"; echo " 3. 停止应用"; echo " 4. 重启应用"; echo " 5. 查看实时日志"; echo " 6. 修改后台用户名和密码"; echo " 7. 彻底卸载应用"; echo " 0. 退出"; echo -e "${YELLOW}------------------------------------------------------${NC}"
-    read -p "请输入你的选择 [0-7]: " choice
+    display_status
+    echo " "
+    echo -e "${YELLOW}---------------------- 可用操作 ----------------------${NC}"
+    echo " 【基础操作】"
+    echo "   1. 安装或修复应用"
+    echo "   2. 启动应用"
+    echo "   3. 停止应用"
+    echo "   4. 重启应用"
+    echo ""
+    echo " 【维护与管理】"
+    echo "   5. 查看应用状态 (刷新信息)"
+    echo "   6. 修改后台配置 (用户名/密码)"
+    echo "   7. 查看实时日志"
+    echo "   8. ${RED}彻底卸载应用${NC}"
+    echo ""
+    echo "   0. 退出脚本"
+    echo -e "${YELLOW}------------------------------------------------------${NC}"
+    read -p "请输入你的选择 [0-8]: " choice
+    
     case $choice in
-        1) install_app ;; 2) start_app; display_access_info ;; 3) stop_app ;; 4) restart_app ;;
-        5) view_logs ;; 6) manage_credentials ;; 7) uninstall_app ;; 0) exit 0 ;;
+        1) install_app ;;
+        2) start_app ;;
+        3) stop_app ;;
+        4) restart_app ;;
+        5) show_menu ;; # 刷新状态就是重新调用菜单
+        6) manage_credentials ;;
+        7) view_logs ;;
+        8) uninstall_app ;;
+        0) exit 0 ;;
         *) echo -e "${RED}无效输入...${NC}" ;;
     esac
-    read -p "按任意键返回主菜单..."
+
+    # 在执行完一个动作后（除了退出和刷新），暂停并等待用户输入
+    if [[ "$choice" != "0" && "$choice" != "5" ]]; then
+        read -p "按任意键返回主菜单..."
+    fi
 }
 
 # --- 脚本主入口 ---
