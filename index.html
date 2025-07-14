@@ -35,17 +35,54 @@
         .lb-counter { position: absolute; top: 1.5rem; left: 50%; transform: translateX(-50%); color: white; font-size: 1rem; background-color: rgba(0,0,0,0.3); padding: 0.25rem 0.75rem; border-radius: 9999px; }
         .back-to-top { position: fixed; bottom: 2rem; right: 2rem; background-color: #22c55e; color: white; width: 3rem; height: 3rem; border-radius: 9999px; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 8px rgba(0,0,0,0.2); cursor: pointer; opacity: 0; visibility: hidden; transform: translateY(20px); transition: all 0.3s ease; }
         .back-to-top.visible { opacity: 1; visibility: visible; transform: translateY(0); }
-        
-        /* ===== 新增样式 ===== */
-        .header-scrolled { background-color: rgba(255, 255, 255, 0.85); backdrop-filter: blur(8px); box-shadow: 0 2px 4px rgba(0,0,0,0.05); padding-top: 1rem; padding-bottom: 1rem; }
-        .header-scrolled h1 { font-size: 1.875rem; }
-        .lb-download { bottom: 1.5rem; top: auto; left: 50%; transform: translateX(-50%); padding: 0.75rem; }
+        /* 新增样式 */
+        .header-hidden .main-title {
+            opacity: 0;
+            transform: translateY(-20px);
+            pointer-events: none;
+        }
+        .main-title {
+            transition: opacity 0.3s ease-out, transform 0.3s ease-out;
+        }
+        .lb-download {
+            position: absolute;
+            top: 1rem;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 1.2rem;
+            padding: 0.5rem 1rem;
+            background-color: rgba(34, 197, 94, 0.7);
+            border-radius: 0.5rem;
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .lb-download:hover {
+            background-color: rgba(34, 197, 94, 0.9);
+        }
+        .lb-download svg {
+            margin-right: 0.25rem;
+        }
+        /* 调整其他按钮位置，避免重叠 */
+        .lb-counter { top: 1rem; left: 1rem; transform: none; right: auto; padding: 0.25rem 0.75rem; border-radius: 9999px; background-color: rgba(0,0,0,0.3); }
+
+        /* 响应式调整，防止小屏幕下按钮重叠 */
+        @media (max-width: 600px) {
+            .lb-download {
+                top: 4rem;
+            }
+            .lb-counter {
+                top: 0.5rem;
+                left: 0.5rem;
+            }
+        }
     </style>
 </head>
 <body class="antialiased">
 
-    <header id="main-header" class="text-center py-8 md:py-12 bg-white/80 backdrop-blur-md shadow-sm sticky top-0 z-40 transition-all duration-300">
-        <h1 class="text-4xl md:text-5xl font-bold text-green-900 mb-4 transition-all duration-300">图片画廊</h1>
+    <header class="text-center py-8 md:py-12 bg-white/80 backdrop-blur-md shadow-sm sticky top-0 z-40" id="main-header">
+        <h1 class="text-4xl md:text-5xl font-bold text-green-900 mb-4 main-title">图片画廊</h1>
         <div id="filter-buttons" class="flex justify-center space-x-2">
             <button class="filter-btn active" data-filter="all">全部</button>
             <button class="filter-btn" data-filter="random">随机</button>
@@ -69,8 +106,12 @@
         <button class="lightbox-btn lb-prev">&lsaquo;</button>
         <img class="lightbox-image">
         <button class="lightbox-btn lb-next">&rsaquo;</button>
-        <a id="download-btn" class="lightbox-btn lb-download" title="下载图片" download>
-            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+        <a class="lightbox-btn lb-download" title="下载图片" download>
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 17V3"></path>
+                <path d="M6 11l6 6 6-6"></path>
+                <path d="M19 17v3a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-3"></path>
+            </svg>
         </a>
     </div>
 
@@ -80,18 +121,6 @@
 
     <script>
         document.addEventListener('DOMContentLoaded', function () {
-
-            // ===== 新增: 标题栏滚动效果 =====
-            const header = document.getElementById('main-header');
-            if (header) { // 做好非空判断更稳妥
-                window.addEventListener('scroll', () => {
-                    if (window.scrollY > 50) {
-                        header.classList.add('header-scrolled');
-                    } else {
-                        header.classList.remove('header-scrolled');
-                    }
-                });
-            }
             
             // =================================================================
             // 数据中心：在这里管理您的所有图片
@@ -201,7 +230,6 @@
                 });
             });
 
-            // ===== 灯箱逻辑（已修改）=====
             const lightbox = document.querySelector('.lightbox');
             const backToTopBtn = document.querySelector('.back-to-top');
             const lightboxImage = lightbox.querySelector('.lightbox-image');
@@ -209,9 +237,10 @@
             const lbPrev = lightbox.querySelector('.lb-prev');
             const lbNext = lightbox.querySelector('.lb-next');
             const lbClose = lightbox.querySelector('.lb-close');
-            const downloadBtn = document.getElementById('download-btn'); // 获取下载按钮
+            const lbDownload = lightbox.querySelector('.lb-download'); // 获取下载按钮
+
             let currentImageIndex = 0;
-            
+
             galleryContainer.addEventListener('click', (e) => {
                 const item = e.target.closest('.grid-item');
                 if (item) {
@@ -227,22 +256,23 @@
                 if (!currentItem) return;
                 lightboxImage.src = currentItem.src;
                 lbCounter.textContent = `${currentImageIndex + 1} / ${filteredData.length}`;
-
-                // --- 修改点 ---
-                // 更新下载按钮的链接和建议的文件名
-                downloadBtn.href = currentItem.src;
-                const extension = currentItem.src.split('.').pop();
-                downloadBtn.setAttribute('download', `gallery-image-${currentImageIndex + 1}.${extension}`);
+                // 设置下载按钮的 href
+                lbDownload.href = currentItem.src;
+                // 设置下载文件名
+                const filename = currentItem.src.substring(currentItem.src.lastIndexOf('/') + 1);
+                lbDownload.download = filename;
             }
 
             function showPrevImage() {
                 currentImageIndex = (currentImageIndex - 1 + filteredData.length) % filteredData.length;
                 updateLightbox();
             }
+
             function showNextImage() {
                 currentImageIndex = (currentImageIndex + 1) % filteredData.length;
                 updateLightbox();
             }
+
             function closeLightbox() {
                 lightbox.classList.remove('active');
                 document.body.classList.remove('lightbox-open');
@@ -251,21 +281,49 @@
             lbPrev.addEventListener('click', showPrevImage);
             lbNext.addEventListener('click', showNextImage);
             lbClose.addEventListener('click', closeLightbox);
-            lightbox.addEventListener('click', (e) => { if (e.target === lightbox) closeLightbox(); });
+            lightbox.addEventListener('click', (e) => {
+                if (e.target === lightbox) closeLightbox();
+            });
+
             document.addEventListener('keydown', (e) => {
                 if (!lightbox.classList.contains('active')) return;
                 if (e.key === 'ArrowLeft') showPrevImage();
                 if (e.key === 'ArrowRight') showNextImage();
                 if (e.key === 'Escape') closeLightbox();
             });
+
+            // 标题隐藏/显示逻辑
+            let lastScrollY = window.scrollY;
+            const mainHeader = document.getElementById('main-header');
+            const mainTitle = document.querySelector('.main-title'); // 选择标题元素
+
             window.addEventListener('scroll', () => {
+                // 隐藏/显示返回顶部按钮的逻辑
                 if (window.scrollY > 300) {
                     backToTopBtn.classList.add('visible');
                 } else {
                     backToTopBtn.classList.remove('visible');
                 }
+
+                // 标题的隐藏/显示逻辑
+                if (window.scrollY > lastScrollY && window.scrollY > 100) { // 向下滑动且超过一定距离
+                    mainHeader.classList.add('header-hidden');
+                    mainTitle.style.opacity = '0';
+                    mainTitle.style.transform = 'translateY(-20px)';
+                    mainTitle.style.pointerEvents = 'none';
+                } else if (window.scrollY < lastScrollY || window.scrollY <= 100) { // 向上滑动或回到顶部
+                    mainHeader.classList.remove('header-hidden');
+                    mainTitle.style.opacity = '1';
+                    mainTitle.style.transform = 'translateY(0)';
+                    mainTitle.style.pointerEvents = 'auto';
+                }
+                lastScrollY = window.scrollY;
             });
-            backToTopBtn.addEventListener('click', () => { window.scrollTo({ top: 0, behavior: 'smooth' }); });
+
+
+            backToTopBtn.addEventListener('click', () => {
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            });
 
             function initialize() {
                 filteredData = imageData;
