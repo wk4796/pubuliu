@@ -37,52 +37,12 @@
         .back-to-top.visible { opacity: 1; visibility: visible; transform: translateY(0); }
         .lb-download { position: absolute; bottom: 1rem; right: 1rem; background-color: #22c55e; color: white; border: none; padding: 0.5rem 1rem; border-radius: 0.5rem; cursor: pointer; transition: background-color 0.2s; font-size: 1rem; }
         .lb-download:hover { background-color: #16a34a; }
-
-        /* 独占式状态机 CSS */
-        .header-sticky {
-            padding-top: 1rem;
-            padding-bottom: 1rem;
-            background-color: rgba(240, 253, 244, 0);
-            position: sticky;
-            top: 0;
-            z-index: 40;
-            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
-            transition: padding 0.3s ease-in-out, background-color 0.3s ease-in-out;
-        }
-
-        .header-sticky h1 {
-            opacity: 1;
-            margin-bottom: 0.75rem;
-            transition: opacity 0.3s ease-in-out, margin-bottom 0.3s ease-in-out;
-        }
-
-        .header-sticky.state-scrolled-partially {
-            padding-top: 0.75rem;
-            padding-bottom: 0.75rem;
-            background-color: rgba(240, 253, 244, 0.8);
-            backdrop-filter: blur(8px);
-        }
-
-        .header-sticky.state-scrolled-fully {
-            padding-top: 0.5rem;
-            padding-bottom: 0.5rem;
-            background-color: rgba(240, 253, 244, 0.8);
-            backdrop-filter: blur(8px);
-        }
-
-        .header-sticky.state-scrolled-fully h1 {
-            opacity: 0;
-            margin-bottom: 0;
-            height: 0;
-            overflow: hidden;
-            pointer-events: none;
-        }
-        
-        #filter-buttons {
-            transition: none;
-            margin-top: 0;
-        }
-
+        .header-sticky { padding-top: 1rem; padding-bottom: 1rem; background-color: rgba(240, 253, 244, 0); position: sticky; top: 0; z-index: 40; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1); transition: padding 0.3s ease-in-out, background-color 0.3s ease-in-out; }
+        .header-sticky h1 { opacity: 1; margin-bottom: 0.75rem; transition: opacity 0.3s ease-in-out, margin-bottom 0.3s ease-in-out; }
+        .header-sticky.state-scrolled-partially { padding-top: 0.75rem; padding-bottom: 0.75rem; background-color: rgba(240, 253, 244, 0.8); backdrop-filter: blur(8px); }
+        .header-sticky.state-scrolled-fully { padding-top: 0.5rem; padding-bottom: 0.5rem; background-color: rgba(240, 253, 244, 0.8); backdrop-filter: blur(8px); }
+        .header-sticky.state-scrolled-fully h1 { opacity: 0; margin-bottom: 0; height: 0; overflow: hidden; pointer-events: none; }
+        #filter-buttons { transition: none; margin-top: 0; }
     </style>
 </head>
 <body class="antialiased">
@@ -110,7 +70,7 @@
         <span class="lb-counter"></span>
         <button class="lightbox-btn lb-close">&times;</button>
         <button class="lightbox-btn lb-prev">&lsaquo;</button>
-        <img class="lightbox-image">
+        <img class="lightbox-image" alt="">
         <button class="lightbox-btn lb-next">&rsaquo;</button>
         <button class="lb-download">下载</button> 
     </div>
@@ -122,7 +82,6 @@
     <script>
         document.addEventListener('DOMContentLoaded', function () {
             
-            // 数据中心：已为每张图片添加 description 字段用于 alt 文本
             const imageData = [
                 { src: 'https://tu.665410.xyz/5VK3U8DR9Q1V.jpg', category: '风景', description: '广阔的绿色山谷和连绵的群山' },
                 { src: 'https://tu.665410.xyz/DY8Y4VG0HQ1V.png', category: '二次元', description: '一位金发动漫少女回头凝视' },
@@ -145,15 +104,21 @@
             let filteredData = [];
             let itemsLoaded = 0;
             let isRendering = false;
-            let lastFocusedElement; // 用于无障碍访问，记录焦点
+            let lastFocusedElement;
 
+            // (已修复) renderItems 函数现在正确管理 isRendering 和加载动画
             function renderItems() {
-                if (isRendering || itemsLoaded >= filteredData.length) { loader.classList.add('hidden'); return; }
+                if (isRendering) return;
+                if (itemsLoaded >= filteredData.length) {
+                    loader.classList.add('hidden');
+                    return;
+                }
+
                 isRendering = true;
                 loader.classList.remove('hidden');
+
                 const itemsToRender = filteredData.slice(itemsLoaded, itemsLoaded + itemsPerLoad);
-                let imagesToLoad = itemsToRender.length;
-                if (imagesToLoad === 0) { isRendering = false; loader.classList.add('hidden'); return; }
+                
                 itemsToRender.forEach((data, index) => {
                     const item = document.createElement('div');
                     item.className = 'grid-item';
@@ -161,28 +126,27 @@
                     item.dataset.index = itemsLoaded + index;
 
                     const img = document.createElement('img');
-                    // 懒加载：src 指向一个透明的1x1像素图片作为占位符
                     img.src = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
-                    img.dataset.src = data.src; // 真实地址存储在 data-src
-                    img.alt = data.description; // 无障碍访问：设置 alt 文本
+                    img.dataset.src = data.src;
+                    img.alt = data.description;
                     
                     img.onerror = () => {
                         console.error('图片加载失败:', img.dataset.src);
                         item.remove();
-                        imagesToLoad--;
-                        if (imagesToLoad === 0) { isRendering = false; loader.classList.add('hidden'); }
                     };
 
                     item.appendChild(img);
                     galleryContainer.appendChild(item);
-
-                    // 开始观察新创建的元素
                     imageObserver.observe(item);
                 });
+
                 itemsLoaded += itemsToRender.length;
+                
+                // 完成添加占位符后，立即隐藏加载动画并重置状态
+                loader.classList.add('hidden');
+                isRendering = false;
             }
             
-            // 懒加载观察者
             const imageObserver = new IntersectionObserver((entries, observer) => {
                 entries.forEach(entry => {
                     if (entry.isIntersecting) {
@@ -198,7 +162,6 @@
                     }
                 });
             }, { rootMargin: '0px 0px 200px 0px' });
-
 
             function resizeSingleGridItem(item) {
                 const img = item.querySelector('img');
@@ -216,7 +179,7 @@
             }
 
             function resizeAllGridItems() {
-                const items = galleryContainer.querySelectorAll('.grid-item.is-visible'); // 只调整已显示的项目
+                const items = galleryContainer.querySelectorAll('.grid-item.is-visible');
                 items.forEach(resizeSingleGridItem);
             }
             window.addEventListener('resize', resizeAllGridItems);
@@ -242,13 +205,10 @@
                     } else {
                         filteredData = imageData.filter(item => item.category === currentFilter);
                     }
-                    setTimeout(() => {
-                        renderItems();
-                    }, 0);
+                    renderItems();
                 });
             });
 
-            // 灯箱(Lightbox) 与无障碍访问逻辑
             const lightbox = document.querySelector('.lightbox'); 
             const backToTopBtn = document.querySelector('.back-to-top'); 
             const lightboxImage = lightbox.querySelector('.lightbox-image'); 
@@ -276,7 +236,7 @@
                 const currentItem = filteredData[currentImageIndex]; 
                 if (!currentItem) return; 
                 lightboxImage.src = currentItem.src;
-                lightboxImage.alt = currentItem.description; // 同时更新灯箱内图片的alt
+                lightboxImage.alt = currentItem.description;
                 lbCounter.textContent = `${currentImageIndex + 1} / ${filteredData.length}`; 
             } 
 
@@ -363,7 +323,6 @@
                 } else {
                     header.classList.remove('state-scrolled-fully', 'state-scrolled-partially');
                 }
-                if (isRendering) return;
                 if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 500) { 
                     renderItems(); 
                 } 
