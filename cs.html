@@ -42,20 +42,17 @@
         .header-sticky {
             padding-top: 2rem;
             padding-bottom: 2rem;
-            /* (已修改) 为所有会变化的属性添加平滑过渡，消除闪烁 */
             transition: padding 0.3s ease-in-out, background-color 0.3s ease-in-out;
             transform: translateY(0);
             position: sticky;
             top: 0;
             z-index: 40;
-            /* 初始状态为透明，滚动后才应用带透明度的背景色 */
             background-color: rgba(240, 253, 244, 0); 
             box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
         }
 
         .header-sticky.scrolled,
         .header-sticky.scrolled-down {
-             /* 滚动后应用带模糊效果的背景 */
             background-color: rgba(240, 253, 244, 0.8);
             backdrop-filter: blur(8px);
         }
@@ -126,9 +123,6 @@
     <script>
         document.addEventListener('DOMContentLoaded', function () {
             
-            // =================================================================
-            // 数据中心：在这里管理您的所有图片
-            // =================================================================
             const imageData = [
                 { src: 'https://tu.665410.xyz/5VK3U8DR9Q1V.jpg', category: '风景' },
                 { src: 'https://tu.665410.xyz/DY8Y4VG0HQ1V.png', category: '二次元' },
@@ -144,7 +138,6 @@
                 { src: 'https://tu.665410.xyz/HU8A1PQ23Q1V.png', category: '二次元' },
             ];
 
-            // --- 全局变量 ---
             const galleryContainer = document.getElementById('gallery-container');
             const loader = document.getElementById('loader');
             const itemsPerLoad = 6;
@@ -205,12 +198,15 @@
                 items.forEach(resizeSingleGridItem);
             }
             window.addEventListener('resize', resizeAllGridItems);
-            window.addEventListener('scroll', () => { 
-                if (isRendering) return; 
+            
+            // --- （已修改）滚动加载逻辑 ---
+            // 将其也放入handleScroll函数，统一由requestAnimationFrame管理
+            function handleInfiniteScroll() {
+                if (isRendering) return;
                 if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 500) { 
                     renderItems(); 
                 } 
-            });
+            }
 
             const filterButtons = document.querySelectorAll('.filter-btn');
             filterButtons.forEach(button => {
@@ -301,38 +297,51 @@
                 if (e.key === 'ArrowRight') showNextImage(); 
                 if (e.key === 'Escape') closeLightbox(); 
             }); 
+            
+            backToTopBtn.addEventListener('click', () => { 
+                window.scrollTo({ top: 0, behavior: 'smooth' }); 
+            });
+            
+            // =================================================================
+            // (终极方案) 使用 requestAnimationFrame 优化所有滚动事件
+            // =================================================================
+            const header = document.querySelector('.header-sticky');
+            let ticking = false; // “节流阀”标志，防止重复请求
 
-            // (已修改) 滚动事件监听器
-            window.addEventListener('scroll', () => { 
-                const header = document.querySelector('.header-sticky');
+            function handleScroll() {
                 const currentScrollY = window.scrollY;
 
-                // 返回顶部按钮的显示/隐藏
+                // 1. 处理返回顶部按钮的显示/隐藏
                 if (currentScrollY > 300) { 
                     backToTopBtn.classList.add('visible'); 
                 } else { 
                     backToTopBtn.classList.remove('visible'); 
                 } 
 
-                // --- 修复闪烁的核心逻辑 ---
-                // 使用 if...else if...else 结构确保状态切换的唯一性
+                // 2. 处理粘性头部的状态切换（核心修复逻辑）
+                // 这个 if/else if/else 结构在 rAF 中可以完美运行
                 if (currentScrollY > 50) {
-                    // 状态一：深度滚动，标题隐藏
-                    header.classList.add('scrolled-down');
+                    header.classList.add('scrolled', 'scrolled-down');
                 } else if (currentScrollY > 0) {
-                    // 状态二：浅度滚动，标题栏收缩但标题可见
                     header.classList.add('scrolled');
                     header.classList.remove('scrolled-down');
                 } else {
-                    // 状态三：回到顶部，恢复初始样式
-                    header.classList.remove('scrolled');
-                    header.classList.remove('scrolled-down');
+                    header.classList.remove('scrolled', 'scrolled-down');
+                }
+                
+                // 3. 处理无限滚动加载
+                handleInfiniteScroll();
+            }
+
+            window.addEventListener('scroll', () => { 
+                if (!ticking) {
+                    window.requestAnimationFrame(() => {
+                        handleScroll();
+                        ticking = false; // 处理完后，打开阀门，允许下一次请求
+                    });
+                    ticking = true; // 在请求处理完成前，关闭阀门
                 }
             }); 
-
-            backToTopBtn.addEventListener('click', () => { 
-                window.scrollTo({ top: 0, behavior: 'smooth' }); 
-            });
 
             function initialize() {
                 filteredData = imageData;
