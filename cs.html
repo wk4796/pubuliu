@@ -42,14 +42,22 @@
         .header-sticky {
             padding-top: 2rem;
             padding-bottom: 2rem;
-            transition: padding 0.3s ease-in-out, transform 0.3s ease-in-out;
+            /* (已修改) 为所有会变化的属性添加平滑过渡，消除闪烁 */
+            transition: padding 0.3s ease-in-out, background-color 0.3s ease-in-out;
             transform: translateY(0);
             position: sticky;
             top: 0;
             z-index: 40;
-            background-color: rgba(240, 253, 244, 0.8); /* Adjusted to match body bg with opacity */
-            backdrop-filter: blur(8px);
+            /* 初始状态为透明，滚动后才应用带透明度的背景色 */
+            background-color: rgba(240, 253, 244, 0); 
             box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+        }
+
+        .header-sticky.scrolled,
+        .header-sticky.scrolled-down {
+             /* 滚动后应用带模糊效果的背景 */
+            background-color: rgba(240, 253, 244, 0.8);
+            backdrop-filter: blur(8px);
         }
 
         .header-sticky.scrolled {
@@ -57,25 +65,22 @@
             padding-bottom: 1rem;
         }
 
-        /* Optimize for hiding title on scroll */
         .header-sticky h1 {
             transition: opacity 0.3s ease-in-out, margin-bottom 0.3s ease-in-out;
             margin-bottom: 1rem;
         }
 
-        /* (已修改) 确保标题隐藏时，其下方的外边距也平滑过渡到0 */
         .header-sticky.scrolled-down h1 {
             opacity: 0;
             height: 0;
             overflow: hidden;
             pointer-events: none;
-            margin-bottom: 0; /* 新增此行 */
+            margin-bottom: 0;
         }
 
-        /* (已修改) 调整滚动后header的内边距，实现视觉上的垂直居中 */
         .header-sticky.scrolled-down {
-            padding-top: 1rem;    /* 调整内边距 */
-            padding-bottom: 1rem; /* 调整内边距 */
+            padding-top: 1rem;
+            padding-bottom: 1rem;
         }
 
         #filter-buttons {
@@ -297,24 +302,30 @@
                 if (e.key === 'Escape') closeLightbox(); 
             }); 
 
+            // (已修改) 滚动事件监听器
             window.addEventListener('scroll', () => { 
-                if (window.scrollY > 300) { 
+                const header = document.querySelector('.header-sticky');
+                const currentScrollY = window.scrollY;
+
+                // 返回顶部按钮的显示/隐藏
+                if (currentScrollY > 300) { 
                     backToTopBtn.classList.add('visible'); 
                 } else { 
                     backToTopBtn.classList.remove('visible'); 
                 } 
-                // Header sticky class toggle
-                const header = document.querySelector('.header-sticky');
-                if (window.scrollY > 0) {
-                    header.classList.add('scrolled');
-                } else {
-                    header.classList.remove('scrolled');
-                }
 
-                // Logic for hiding title on scroll
-                if (window.scrollY > 50) { 
+                // --- 修复闪烁的核心逻辑 ---
+                // 使用 if...else if...else 结构确保状态切换的唯一性
+                if (currentScrollY > 50) {
+                    // 状态一：深度滚动，标题隐藏
                     header.classList.add('scrolled-down');
+                } else if (currentScrollY > 0) {
+                    // 状态二：浅度滚动，标题栏收缩但标题可见
+                    header.classList.add('scrolled');
+                    header.classList.remove('scrolled-down');
                 } else {
+                    // 状态三：回到顶部，恢复初始样式
+                    header.classList.remove('scrolled');
                     header.classList.remove('scrolled-down');
                 }
             }); 
