@@ -4,7 +4,7 @@
 #   图片画廊 专业版 - 一体化部署与管理脚本 (v12.0 终极版)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
-#   功能: 实现顺序对齐画廊布局，是功能、性能、体验的最终交付版本。
+#   功能: 实现“等高列瀑布流”布局，是功能、性能、体验的最终交付版本。
 # =================================================================
 
 # --- 配置 ---
@@ -37,7 +37,7 @@ cat << 'EOF' > package.json
 {
   "name": "image-gallery-pro",
   "version": "5.0.0",
-  "description": "A high-performance, full-stack image gallery application with a justified layout engine.",
+  "description": "A high-performance, full-stack image gallery application with a balanced column layout engine.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
@@ -102,7 +102,6 @@ const writeDB = async (filePath, data) => {
     catch (error) { console.error(`写入DB时出错: ${filePath}`, error); }
 };
 
-// --- AUTH ---
 const authMiddleware = (isApi) => (req, res, next) => {
     const token = req.cookies[AUTH_TOKEN_NAME];
     if (!token) { return isApi ? res.status(401).json({ message: '认证失败' }) : res.redirect('/login.html'); }
@@ -112,7 +111,6 @@ const authMiddleware = (isApi) => (req, res, next) => {
 const requirePageAuth = authMiddleware(false);
 const requireApiAuth = authMiddleware(true);
 
-// --- ROUTES ---
 app.post('/api/login', (req, res) => {
     const { username, password } = req.body;
     if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
@@ -153,7 +151,6 @@ app.get('/api/public/categories', async (req, res) => {
     res.json(categoriesToShow.sort((a,b) => a === UNCATEGORIZED ? -1 : b === UNCATEGORIZED ? 1 : a.localeCompare(b, 'zh-CN')));
 });
 
-// --- IMAGE PROCESSING PROXY ---
 app.get('/image-proxy/:filename', async (req, res) => {
     const { filename } = req.params;
     const { w, h, format } = req.query;
@@ -288,18 +285,15 @@ app.use(express.static(path.join(__dirname, 'public')));
 })();
 EOF
 
-    echo "--> 正在生成主画廊 public/index.html (全新对齐画廊引擎)..."
+    echo "--> 正在生成主画廊 public/index.html (全新等高列布局引擎)..."
 cat << 'EOF' > public/index.html
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>图片画廊</title>
-    <meta name="description" content="一个展示精彩瞬间的对齐式图片画廊。">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+    <meta name="description" content="一个展示精彩瞬间的图片画廊。">
+    <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body { font-family: 'Inter', 'Noto Sans SC', sans-serif; background-color: #f0fdf4; color: #14532d; display: flex; flex-direction: column; min-height: 100vh; }
@@ -307,14 +301,11 @@ cat << 'EOF' > public/index.html
         .filter-btn { padding: 0.5rem 1rem; border-radius: 9999px; font-weight: 500; transition: all 0.2s ease; border: 1px solid transparent; cursor: pointer; }
         .filter-btn:hover { background-color: #dcfce7; }
         .filter-btn.active { background-color: #22c55e; color: white; border-color: #16a34a; }
-        
-        /* Justified Gallery Styles */
-        .gallery-container { width: 100%; }
-        .gallery-row { display: flex; gap: 10px; margin-bottom: 10px; }
-        .gallery-item { display: block; position: relative; overflow: hidden; border-radius: 0.5rem; background-color: #e4e4e7; }
-        .gallery-item img { display: block; width: 100%; height: 100%; object-fit: cover; transition: transform 0.3s ease, filter 0.3s ease; }
-        .gallery-item:hover img { transform: scale(1.05); filter: brightness(0.8); }
-
+        .gallery-container { display: flex; gap: 10px; }
+        .gallery-column { display: flex; flex-direction: column; gap: 10px; flex-grow: 1; flex-basis: 0; }
+        .gallery-item { display: block; position: relative; overflow: hidden; border-radius: 0.5rem; background-color: #e4e4e7; line-height: 0; }
+        .gallery-item img { width: 100%; height: auto; object-fit: cover; transition: transform 0.3s ease; }
+        .gallery-item:hover img { transform: scale(1.05); }
         .lightbox { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.9); display: none; justify-content: center; align-items: center; z-index: 1000; opacity: 0; transition: opacity 0.3s ease; }
         .lightbox.active { display: flex; opacity: 1; }
         .lightbox-image { max-width: 85%; max-height: 85%; display: block; object-fit: contain; }
@@ -333,10 +324,7 @@ cat << 'EOF' > public/index.html
     <header class="text-center header-sticky">
         <h1 class="text-4xl md:text-5xl font-bold text-green-900 mb-6">图片画廊</h1>
         <div class="max-w-4xl mx-auto mb-4 px-4"><div class="relative"><div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><svg class="w-5 h-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd" /></svg></div><input type="search" id="search-input" placeholder="搜索图片描述或文件名..." class="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-full leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-green-500 focus:border-green-500 sm:text-sm"></div></div>
-        <div id="filter-buttons" class="flex justify-center flex-wrap gap-2 px-4">
-            <button class="filter-btn active" data-filter="all">全部</button>
-            <button class="filter-btn" data-filter="random">随机</button>
-        </div>
+        <div id="filter-buttons" class="flex justify-center flex-wrap gap-2 px-4"><button class="filter-btn active" data-filter="all">全部</button><button class="filter-btn" data-filter="random">随机</button></div>
     </header>
     <main class="container mx-auto px-6 py-8 md:py-10 flex-grow">
         <div id="gallery-container" class="gallery-container max-w-7xl mx-auto"></div>
@@ -352,19 +340,23 @@ cat << 'EOF' > public/index.html
         const loader = document.getElementById('loader');
         const searchInput = document.getElementById('search-input');
         const filterButtonsContainer = document.getElementById('filter-buttons');
-        
         let currentFilter = 'all';
         let currentSearch = '';
         let allImageData = [];
         let filteredData = [];
         let debounceTimer;
 
-        // --- Justified Layout Engine ---
-        const JustifiedLayout = {
-            targetRowHeight: 250,
-            gap: 10,
+        // --- Balanced Column Layout Engine ---
+        const ColumnLayout = {
             container: galleryContainer,
-
+            gap: 10,
+            getColumnsCount() {
+                const width = window.innerWidth;
+                if (width >= 1280) return 4; // 2xl
+                if (width >= 1024) return 3; // lg
+                if (width >= 768) return 2;  // md
+                return 1;
+            },
             render(images) {
                 this.container.innerHTML = '';
                 if (!images.length) {
@@ -374,57 +366,47 @@ cat << 'EOF' > public/index.html
                 }
                 loader.classList.add('hidden');
 
-                let currentRow = [];
-                let currentRowWidth = 0;
-                const containerWidth = this.container.clientWidth;
+                const numColumns = this.getColumnsCount();
+                const columns = Array.from({ length: numColumns }, () => ({ items: [], height: 0 }));
 
-                images.forEach((image, index) => {
-                    const aspectRatio = image.width / image.height;
-                    currentRow.push(image);
-                    currentRowWidth += aspectRatio * this.targetRowHeight;
-
-                    if (currentRowWidth >= containerWidth || index === images.length - 1) {
-                        this.renderRow(currentRow, containerWidth, index === images.length - 1);
-                        currentRow = [];
-                        currentRowWidth = 0;
+                images.forEach(image => {
+                    let shortestColumn = columns[0];
+                    for (let i = 1; i < columns.length; i++) {
+                        if (columns[i].height < shortestColumn.height) {
+                            shortestColumn = columns[i];
+                        }
                     }
+                    shortestColumn.items.push(image);
+                    const imageAspect = image.height / image.width;
+                    shortestColumn.height += imageAspect; // Simplified height metric
                 });
-            },
 
-            renderRow(row, containerWidth, isLastRow) {
-                const rowDiv = document.createElement('div');
-                rowDiv.className = 'gallery-row';
-                
-                let totalAspectRatio = row.reduce((acc, img) => acc + (img.width / img.height), 0);
-                
-                let rowHeight = this.targetRowHeight;
-                if (!isLastRow) {
-                    rowHeight = (containerWidth - (row.length - 1) * this.gap) / totalAspectRatio;
-                }
+                columns.forEach(col => {
+                    const columnDiv = document.createElement('div');
+                    columnDiv.className = 'gallery-column';
+                    col.items.forEach(image => {
+                        const item = document.createElement('a');
+                        item.className = 'gallery-item';
+                        item.href = "#";
+                        item.dataset.id = image.id;
+                        
+                        const webpSrcset = `/image-proxy/${image.filename}?w=400&format=webp 400w, /image-proxy/${image.filename}?w=800&format=webp 800w`;
+                        const jpegSrcset = `/image-proxy/${image.filename}?w=400 400w, /image-proxy/${image.filename}?w=800 800w`;
 
-                row.forEach(image => {
-                    const imageWidth = rowHeight * (image.width / image.height);
-                    
-                    const item = document.createElement('a');
-                    item.className = 'gallery-item';
-                    item.href = "#";
-                    item.dataset.id = image.id;
-                    item.style.height = `${rowHeight}px`;
-                    item.style.width = `${imageWidth}px`;
-
-                    const img = document.createElement('img');
-                    img.src = `/image-proxy/${image.filename}?h=300`; // Use a slightly larger thumbnail for quality
-                    img.alt = image.description;
-                    img.loading = 'lazy';
-                    
-                    item.appendChild(img);
-                    rowDiv.appendChild(item);
+                        item.innerHTML = `
+                            <picture>
+                                <source type="image/webp" srcset="${webpSrcset}">
+                                <source type="image/jpeg" srcset="${jpegSrcset}">
+                                <img src="/image-proxy/${image.filename}?w=400" alt="${image.description}" loading="lazy">
+                            </picture>
+                        `;
+                        columnDiv.appendChild(item);
+                    });
+                    this.container.appendChild(columnDiv);
                 });
-                this.container.appendChild(rowDiv);
             }
         };
 
-        // --- Data & Filtering ---
         const fetchJSON = async (url) => { const response = await fetch(url); if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`); return response.json(); };
         
         async function createFilterButtons() {
@@ -455,7 +437,7 @@ cat << 'EOF' > public/index.html
             } else {
                 filteredData = dataToProcess.filter(item => item.category === currentFilter);
             }
-            JustifiedLayout.render(filteredData);
+            ColumnLayout.render(filteredData);
         }
 
         async function initializeGallery() {
@@ -541,7 +523,7 @@ cat << 'EOF' > public/admin.html
         </div>
         <section class="bg-white p-6 rounded-lg shadow-md xl:col-span-8">
             <div class="flex flex-col md:flex-row justify-between items-center mb-4 gap-4"><h2 id="image-list-header" class="text-xl font-semibold text-slate-900 flex-grow"></h2><div class="w-full md:w-64"><input type="search" id="search-input" placeholder="搜索文件名或描述..." class="w-full border rounded-full px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"></div></div>
-            <div id="image-list" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 2xl:grid-cols-4 gap-4"></div>
+            <div id="image-list" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4"></div>
             <div id="image-loader" class="text-center py-8 text-slate-500 hidden">正在加载...</div>
         </section>
     </main>
@@ -551,8 +533,10 @@ cat << 'EOF' > public/admin.html
     <div id="toast" class="toast max-w-xs bg-gray-800 text-white text-sm rounded-lg shadow-lg p-3" role="alert"><div class="flex items-center"><div id="toast-icon" class="mr-2"></div><span id="toast-message"></span></div></div>
     <script>
     document.addEventListener('DOMContentLoaded', function() {
+        // --- DECLARES ---
         const UNCATEGORIZED = '未分类'; const DOMElements = { uploadForm: document.getElementById('upload-form'), uploadBtn: document.getElementById('upload-btn'), imageInput: document.getElementById('image-input'), dropZone: document.getElementById('drop-zone'), unifiedDescription: document.getElementById('unified-description'), filePreviewContainer: document.getElementById('file-preview-container'), filePreviewList: document.getElementById('file-preview-list'), uploadSummary: document.getElementById('upload-summary'), categorySelect: document.getElementById('category-select'), editCategorySelect: document.getElementById('edit-category-select'), addCategoryBtn: document.getElementById('add-category-btn'), categoryManagementList: document.getElementById('category-management-list'), imageList: document.getElementById('image-list'), imageListHeader: document.getElementById('image-list-header'), imageLoader: document.getElementById('image-loader'), searchInput: document.getElementById('search-input'), genericModal: document.getElementById('generic-modal'), editImageModal: document.getElementById('edit-image-modal'), editImageForm: document.getElementById('edit-image-form'), adminLightbox: document.getElementById('admin-lightbox'), };
         let filesToUpload = []; let adminLoadedImages = []; let currentAdminLightboxIndex = 0; let currentSearchTerm = ''; let debounceTimer;
+        // --- UTILS & HELPERS ---
         const apiRequest = async (url, options = {}) => { const response = await fetch(url, options); if (response.status === 401) { showToast('登录状态已过期', 'error'); setTimeout(() => window.location.href = '/login.html', 2000); throw new Error('Unauthorized'); } return response; };
         const formatBytes = (bytes, decimals = 2) => { if (!+bytes) return '0 Bytes'; const k = 1024; const dm = decimals < 0 ? 0 : decimals; const sizes = ["Bytes", "KB", "MB", "GB", "TB"]; const i = Math.floor(Math.log(bytes) / Math.log(k)); return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`; };
         const showToast = (message, type = 'success') => { const toast = document.getElementById('toast'); toast.className = `toast max-w-xs text-white text-sm rounded-lg shadow-lg p-3 ${type === 'success' ? 'bg-green-600' : 'bg-red-600'}`; toast.querySelector('#toast-message').textContent = message; toast.querySelector('#toast-icon').innerHTML = type === 'success' ? `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>` : `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>`; toast.style.display = 'block'; setTimeout(() => toast.classList.add('show'), 10); setTimeout(() => { toast.classList.remove('show'); setTimeout(() => toast.style.display = 'none', 300); }, 3000); };
@@ -562,10 +546,7 @@ cat << 'EOF' > public/admin.html
         DOMElements.editImageModal.addEventListener('click', e => { if (e.target === DOMElements.editImageModal || e.target.closest('.modal-cancel-btn')) hideModal(DOMElements.editImageModal); });
         const handleFileSelection = (fileList) => { const imageFiles = Array.from(fileList).filter(f => f.type.startsWith('image/')); filesToUpload = imageFiles.map(file => ({ file, description: DOMElements.unifiedDescription.value, userHasTyped: DOMElements.unifiedDescription.value !== '' })); DOMElements.uploadBtn.disabled = filesToUpload.length === 0; renderFilePreviews(); };
         const renderFilePreviews = () => { if (filesToUpload.length === 0) { DOMElements.filePreviewContainer.classList.add('hidden'); return; } DOMElements.filePreviewList.innerHTML = ''; let totalSize = 0; filesToUpload.forEach((item, index) => { totalSize += item.file.size; const listItem = document.createElement('div'); listItem.className = 'file-preview-item text-slate-600 border rounded p-2'; listItem.dataset.fileIndex = index; listItem.innerHTML = `<div class="flex justify-between items-center text-xs mb-2"> <p class="truncate pr-2 font-medium">${item.file.name}</p> <p>${formatBytes(item.file.size)}</p> <span class="status-icon flex-shrink-0"></span></div><input type="text" data-index="${index}" class="w-full text-xs border rounded px-2 py-1 description-input" placeholder="添加独立描述..." value="${item.description}">`; DOMElements.filePreviewList.appendChild(listItem); }); DOMElements.uploadSummary.textContent = `已选择 ${filesToUpload.length} 个文件，总大小: ${formatBytes(totalSize)}`; DOMElements.filePreviewContainer.classList.remove('hidden'); };
-        const dz = DOMElements.dropZone;
-        dz.addEventListener('dragover', (e) => { e.preventDefault(); dz.classList.add('bg-green-50', 'border-green-400'); });
-        dz.addEventListener('dragleave', (e) => dz.classList.remove('bg-green-50', 'border-green-400'));
-        dz.addEventListener('drop', (e) => { e.preventDefault(); dz.classList.remove('bg-green-50', 'border-green-400'); handleFileSelection(e.dataTransfer.files); });
+        const dz = DOMElements.dropZone; dz.addEventListener('dragover', (e) => { e.preventDefault(); dz.classList.add('bg-green-50', 'border-green-400'); }); dz.addEventListener('dragleave', (e) => dz.classList.remove('bg-green-50', 'border-green-400')); dz.addEventListener('drop', (e) => { e.preventDefault(); dz.classList.remove('bg-green-50', 'border-green-400'); handleFileSelection(e.dataTransfer.files); });
         DOMElements.imageInput.addEventListener('change', (e) => handleFileSelection(e.target.files));
         DOMElements.unifiedDescription.addEventListener('input', e => { const unifiedText = e.target.value; document.querySelectorAll('.file-preview-item').forEach(item => { const index = parseInt(item.dataset.fileIndex); if (filesToUpload[index] && !filesToUpload[index].userHasTyped) { item.querySelector('.description-input').value = unifiedText; filesToUpload[index].description = unifiedText; } }); });
         DOMElements.filePreviewList.addEventListener('input', e => { if (e.target.classList.contains('description-input')) { const index = parseInt(e.target.dataset.index); if(filesToUpload[index]) { filesToUpload[index].description = e.target.value; filesToUpload[index].userHasTyped = true; } } });
@@ -645,7 +626,7 @@ EOF
     echo -e "${GREEN}--- 所有项目文件已成功生成在 ${INSTALL_DIR} ---${NC}"
 }
 
-# --- 管理菜单功能 (v7.5, 无改动) ---
+# --- 管理菜单功能 ---
 check_and_install_dep() {
     local dep_name=$1; local check_command=$2; local install_command=$3; local SUDO_CMD=""
     if command -v "$check_command" > /dev/null; then return 0; fi
