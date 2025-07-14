@@ -259,7 +259,7 @@
             let currentImageIndex = 0;
 
             // =================================================================
-            // 新增：图片缩放和拖动功能变量
+            // 图片缩放和拖动功能变量
             // =================================================================
             let currentScale = 1; // 当前缩放比例
             let currentX = 0; // 当前图片X轴偏移
@@ -314,7 +314,10 @@
             });
 
             lightbox.addEventListener('click', (e) => {
-                if (e.target === lightbox) closeLightbox();
+                // 阻止点击图片本身关闭Lightbox，只允许点击背景关闭
+                if (e.target === lightbox) {
+                    closeLightbox();
+                }
             });
 
             document.addEventListener('keydown', (e) => {
@@ -324,40 +327,43 @@
                 if (e.key === 'Escape') closeLightbox();
             });
 
-            // 优化后的滚动事件监听
-            let lastScrollY = 0; // 记录上一次的滚动位置
+            // =================================================================
+            // 修复：分类栏闪烁问题
+            // =================================================================
+            let lastScrollY = 0;
+            const header = document.querySelector('.header-sticky');
+            const scrollThresholdForHide = 50; // 向下滚动多少像素后开始隐藏标题
+            const scrollThresholdForShow = 10; // 向上滚动多少像素后开始显示标题 (减少闪烁)
+
             window.addEventListener('scroll', () => {
-                const header = document.querySelector('.header-sticky');
                 const scrollY = window.scrollY;
 
-                // 处理返回顶部按钮的显示/隐藏
+                // 返回顶部按钮的显示/隐藏
                 if (scrollY > 300) {
                     backToTopBtn.classList.add('visible');
                 } else {
                     backToTopBtn.classList.remove('visible');
                 }
 
-                // 处理header的scrolled类
+                // header的scrolled类
                 if (scrollY > 0) {
                     header.classList.add('scrolled');
                 } else {
                     header.classList.remove('scrolled');
                 }
 
-                // 处理header的scrolled-down类，用于隐藏标题
-                // 增加一个阈值，避免在滚动很小距离时频繁切换
-                const scrollThreshold = 10;
-
-                // 向上滚动
-                if (scrollY < lastScrollY && scrollY > 0) {
+                // header的scrolled-down类，用于隐藏标题
+                // 只有当滚动方向改变或超过特定阈值时才改变状态，减少闪烁
+                if (scrollY > lastScrollY && scrollY > scrollThresholdForHide) { // 向下滚动
+                    header.classList.add('scrolled-down');
+                } else if (scrollY < lastScrollY && scrollY < (lastScrollY - scrollThresholdForShow)) { // 向上滚动，且滚动距离足够
+                    header.classList.remove('scrolled-down');
+                } else if (scrollY === 0) { // 滚动到顶部时始终显示标题
                     header.classList.remove('scrolled-down');
                 }
-                // 向下滚动，且滚动距离超过阈值
-                else if (scrollY > lastScrollY + scrollThreshold && scrollY > 50) {
-                    header.classList.add('scrolled-down');
-                }
 
-                lastScrollY = scrollY; // 更新上一次滚动位置
+
+                lastScrollY = scrollY;
             });
 
             backToTopBtn.addEventListener('click', () => {
@@ -365,7 +371,7 @@
             });
 
             // =================================================================
-            // 新增：图片缩放和拖动功能实现
+            // 图片缩放和拖动功能实现
             // =================================================================
 
             function applyTransform() {
@@ -380,12 +386,11 @@
                 lightboxImage.classList.remove('panning');
             }
 
-            // 鼠标滚轮缩放 (桌面端) - 修正缩放中心
+            // 鼠标滚轮缩放 (桌面端)
             lightboxImage.addEventListener('wheel', (e) => {
                 e.preventDefault(); // 阻止页面滚动
                 const scaleAmount = 0.1;
 
-                // 获取鼠标相对于图片元素的坐标
                 const rect = lightboxImage.getBoundingClientRect();
                 const mouseX = e.clientX - rect.left;
                 const mouseY = e.clientY - rect.top;
@@ -398,12 +403,9 @@
                     currentScale = Math.max(1, currentScale - scaleAmount); // 最小缩放到1
                 }
 
-                // 调整图片位置以保持鼠标点在同一位置
-                // 新的偏移量 = 旧的偏移量 - (鼠标在图片上的X坐标 / 旧比例) * (新比例 - 旧比例)
                 currentX -= (mouseX / oldScale) * (currentScale - oldScale);
                 currentY -= (mouseY / oldScale) * (currentScale - oldScale);
 
-                // 限制拖动范围
                 limitPan();
                 applyTransform();
             });
@@ -474,20 +476,15 @@
                     const scaleFactor = currentDistance / initialDistance;
                     currentScale = Math.max(1, lastScale * scaleFactor);
 
-                    // 计算缩放中心点，通常是两指的中心
                     const centerClientX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
                     const centerClientY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
 
-                    // 获取图片元素的边界信息
                     const rect = lightboxImage.getBoundingClientRect();
-
-                    // 计算缩放中心相对于图片元素的坐标
                     const mouseX = centerClientX - rect.left;
                     const mouseY = centerClientY - rect.top;
 
-                    const oldScale = lastScale; // 使用上一次的双指缩放比例作为旧比例
+                    const oldScale = lastScale;
 
-                    // 调整图片位置以保持缩放中心在同一位置
                     currentX -= (mouseX / oldScale) * (currentScale - oldScale);
                     currentY -= (mouseY / oldScale) * (currentScale - oldScale);
 
@@ -506,33 +503,50 @@
                 return Math.sqrt(Math.pow(p2.clientX - p1.clientX, 2) + Math.pow(p2.clientY - p1.clientY, 2));
             }
 
-            // 限制图片拖动范围，使其不离开视口
+            // =================================================================
+            // 修复：图片缩放后，操作按钮不被覆盖
+            // =================================================================
             function limitPan() {
-                if (currentScale <= 1) { // 如果没有放大，则不允许拖动
+                if (currentScale <= 1) {
                     currentX = 0;
                     currentY = 0;
                     return;
                 }
 
-                const imgWidth = lightboxImage.clientWidth * currentScale;
-                const imgHeight = lightboxImage.clientHeight * currentScale;
-                const viewportWidth = lightbox.clientWidth;
-                const viewportHeight = lightbox.clientHeight;
+                const imgRect = lightboxImage.getBoundingClientRect();
+                const lightboxRect = lightbox.getBoundingClientRect();
 
-                // 计算图片的边界相对于视口中心的偏移量
-                // 注意： lightboxImage 是使用 object-fit: contain，实际渲染尺寸可能小于其父元素 lightbox
-                // 所以这里需要考虑图片实际渲染尺寸和视口大小的关系
-                const effectiveImgRenderedWidth = lightboxImage.width * currentScale;
-                const effectiveImgRenderedHeight = lightboxImage.height * currentScale;
+                // 图片在Lightbox内的实际渲染宽度和高度（考虑object-fit: contain）
+                const imgRenderedWidth = imgRect.width;
+                const imgRenderedHeight = imgRect.height;
 
-                // 计算图片在 lightbox 内部的偏移限制
-                // 如果图片宽度小于视口宽度，则x方向不需要拖动
-                const maxPanX = Math.max(0, (effectiveImgRenderedWidth - viewportWidth) / 2);
-                const maxPanY = Math.max(0, (effectiveImgRenderedHeight - viewportHeight) / 2);
+                // 计算图片在当前缩放比例下的实际尺寸
+                const scaledImgWidth = imgRenderedWidth * currentScale;
+                const scaledImgHeight = imgRenderedHeight * currentScale;
 
+                // 计算Lightbox内部的可用空间（减去padding/margin如果有的话，这里假设没有）
+                const viewportWidth = lightboxRect.width;
+                const viewportHeight = lightboxRect.height;
+
+                // 计算图片相对于Lightbox中心点的理论偏移量
+                // 注意：由于图片设置了 object-fit: contain，它可能比 lightbox 本身小
+                // 所以我们计算的是图片内容相对于 lightbox 内部的边界，而不是 lightbox 自身的边界
+                const offsetLeft = (viewportWidth - imgRenderedWidth) / 2;
+                const offsetTop = (viewportHeight - imgRenderedHeight) / 2;
+
+
+                // 计算最大可拖动范围 (以图片在Lightbox内的原始中心为参考点)
+                // maxPanX/Y 是从图片原始中心到其放大后边缘的距离，超过这个距离就会超出Lightbox的可见区域
+                const maxPanX = Math.max(0, (scaledImgWidth - imgRenderedWidth) / 2);
+                const maxPanY = Math.max(0, (scaledImgHeight - imgRenderedHeight) / 2);
+
+                // 应用限制到 currentX 和 currentY
+                // currentX 的范围是 [-maxPanX, maxPanX]
+                // currentY 的范围是 [-maxPanY, maxPanY]
                 currentX = Math.max(-maxPanX, Math.min(currentX, maxPanX));
                 currentY = Math.max(-maxPanY, Math.min(currentY, maxPanY));
             }
+
 
             // 当图片加载完成时，如果有缩放，重新应用transform以确保位置正确
             lightboxImage.onload = () => {
