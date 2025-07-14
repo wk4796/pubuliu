@@ -42,9 +42,14 @@
         .header-sticky {
             padding-top: 2rem;
             padding-bottom: 2rem;
-            transition: padding 0.3s ease-in-out, transform 0.3s ease-in-out, height 0.3s ease-in-out;
-            height: auto;
-            overflow: hidden;
+            transition: padding 0.3s ease-in-out, transform 0.3s ease-in-out;
+            transform: translateY(0); /* Initial state: fully visible */
+            position: sticky; /* Ensure it stays at top */
+            top: 0;
+            z-index: 40;
+            background-color: rgba(255, 255, 255, 0.8);
+            backdrop-filter: blur(8px);
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
         }
 
         .header-sticky.scrolled {
@@ -52,38 +57,32 @@
             padding-bottom: 1rem;
         }
 
-        /* New CSS for hiding title on scroll */
+        /* Optimize for hiding title on scroll */
         .header-sticky h1 {
-            transition: transform 0.3s ease-in-out, opacity 0.3s ease-in-out;
+            transition: opacity 0.3s ease-in-out, margin-bottom 0.3s ease-in-out;
+            margin-bottom: 1rem;
         }
 
         .header-sticky.scrolled-down h1 {
-            transform: translateY(-100%);
             opacity: 0;
-            height: 0; /* Make height 0 to not take up vertical space */
-            margin-bottom: 0; /* Remove margin to reduce space */
+            margin-bottom: 0;
+            pointer-events: none;
         }
 
         .header-sticky.scrolled-down {
-            height: auto; /* Allow height to adjust to content */
             padding-top: 1rem;
             padding-bottom: 1rem;
-            /* Using flexbox for vertical centering within the header when scrolled */
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
         }
 
         /* Ensure filter buttons are always visible and centered */
         #filter-buttons {
-            transition: transform 0.3s ease-in-out; /* Add transition for smoothness */
+            transition: none;
         }
     </style>
 </head>
 <body class="antialiased">
 
-    <header class="text-center header-sticky bg-white/80 backdrop-blur-md shadow-sm sticky top-0 z-40">
+    <header class="text-center header-sticky">
         <h1 class="text-4xl md:text-5xl font-bold text-green-900 mb-4">图片画廊</h1>
         <div id="filter-buttons" class="flex justify-center space-x-2">
             <button class="filter-btn active" data-filter="all">全部</button>
@@ -307,7 +306,7 @@
                     header.classList.remove('scrolled');
                 }
 
-                // New logic for hiding title on scroll
+                // Logic for hiding title on scroll
                 if (window.scrollY > 50) { 
                     header.classList.add('scrolled-down');
                 } else {
