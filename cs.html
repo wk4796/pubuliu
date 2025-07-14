@@ -40,14 +40,14 @@
 
         /* Sticky header optimization */
         .header-sticky {
-            padding-top: 2rem;
-            padding-bottom: 2rem;
+            padding-top: 1rem; /* 已修改 */
+            padding-bottom: 1rem; /* 已修改 */
             transition: padding 0.3s ease-in-out, background-color 0.3s ease-in-out;
             transform: translateY(0);
             position: sticky;
             top: 0;
             z-index: 40;
-            background-color: rgba(240, 253, 244, 0); 
+            background-color: rgba(240, 253, 244, 0);
             box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
         }
 
@@ -58,13 +58,13 @@
         }
 
         .header-sticky.scrolled {
-            padding-top: 1rem;
-            padding-bottom: 1rem;
+            padding-top: 0.75rem; /* 已修改 */
+            padding-bottom: 0.75rem; /* 已修改 */
         }
 
         .header-sticky h1 {
             transition: opacity 0.3s ease-in-out, margin-bottom 0.3s ease-in-out;
-            margin-bottom: 1rem;
+            margin-bottom: 0.75rem; /* 已修改 */
         }
 
         .header-sticky.scrolled-down h1 {
@@ -76,8 +76,8 @@
         }
 
         .header-sticky.scrolled-down {
-            padding-top: 1rem;
-            padding-bottom: 1rem;
+            padding-top: 0.5rem; /* 已修改 */
+            padding-bottom: 0.5rem; /* 已修改 */
         }
 
         #filter-buttons {
@@ -199,8 +199,6 @@
             }
             window.addEventListener('resize', resizeAllGridItems);
             
-            // --- （已修改）滚动加载逻辑 ---
-            // 将其也放入handleScroll函数，统一由requestAnimationFrame管理
             function handleInfiniteScroll() {
                 if (isRendering) return;
                 if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 500) { 
@@ -302,24 +300,18 @@
                 window.scrollTo({ top: 0, behavior: 'smooth' }); 
             });
             
-            // =================================================================
-            // (终极方案) 使用 requestAnimationFrame 优化所有滚动事件
-            // =================================================================
             const header = document.querySelector('.header-sticky');
-            let ticking = false; // “节流阀”标志，防止重复请求
+            let ticking = false;
 
             function handleScroll() {
                 const currentScrollY = window.scrollY;
 
-                // 1. 处理返回顶部按钮的显示/隐藏
                 if (currentScrollY > 300) { 
                     backToTopBtn.classList.add('visible'); 
                 } else { 
                     backToTopBtn.classList.remove('visible'); 
                 } 
 
-                // 2. 处理粘性头部的状态切换（核心修复逻辑）
-                // 这个 if/else if/else 结构在 rAF 中可以完美运行
                 if (currentScrollY > 50) {
                     header.classList.add('scrolled', 'scrolled-down');
                 } else if (currentScrollY > 0) {
@@ -329,7 +321,6 @@
                     header.classList.remove('scrolled', 'scrolled-down');
                 }
                 
-                // 3. 处理无限滚动加载
                 handleInfiniteScroll();
             }
 
@@ -337,9 +328,9 @@
                 if (!ticking) {
                     window.requestAnimationFrame(() => {
                         handleScroll();
-                        ticking = false; // 处理完后，打开阀门，允许下一次请求
+                        ticking = false;
                     });
-                    ticking = true; // 在请求处理完成前，关闭阀门
+                    ticking = true;
                 }
             }); 
 
