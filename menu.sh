@@ -36,7 +36,7 @@ EOF
 cat << 'EOF' > package.json
 {
   "name": "image-gallery-pro",
-  "version": "4.1.0",
+  "version": "4.2.0",
   "description": "A high-performance, full-stack image gallery application with on-demand image processing.",
   "main": "server.js",
   "scripts": {
@@ -102,7 +102,6 @@ const writeDB = async (filePath, data) => {
     catch (error) { console.error(`写入DB时出错: ${filePath}`, error); }
 };
 
-// --- AUTH ---
 const authMiddleware = (isApi) => (req, res, next) => {
     const token = req.cookies[AUTH_TOKEN_NAME];
     if (!token) { return isApi ? res.status(401).json({ message: '认证失败' }) : res.redirect('/login.html'); }
@@ -112,7 +111,6 @@ const authMiddleware = (isApi) => (req, res, next) => {
 const requirePageAuth = authMiddleware(false);
 const requireApiAuth = authMiddleware(true);
 
-// --- ROUTES ---
 app.post('/api/login', (req, res) => {
     const { username, password } = req.body;
     if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
@@ -153,21 +151,17 @@ app.get('/api/public/categories', async (req, res) => {
     res.json(categoriesToShow.sort((a,b) => a === UNCATEGORIZED ? -1 : b === UNCATEGORIZED ? 1 : a.localeCompare(b, 'zh-CN')));
 });
 
-// --- IMAGE PROCESSING PROXY ---
 app.get('/image-proxy/:filename', async (req, res) => {
     const { filename } = req.params;
     const { w, h, format } = req.query;
     const width = w ? parseInt(w) : null;
     const height = h ? parseInt(h) : null;
-
     const originalPath = path.join(uploadsDir, filename);
     const ext = path.extname(filename);
     const name = path.basename(filename, ext);
-    
     const browserAcceptsWebP = req.headers.accept && req.headers.accept.includes('image/webp');
     const targetFormat = (format === 'webp' || (browserAcceptsWebP && format !== 'jpeg')) ? 'webp' : 'jpeg';
     const mimeType = `image/${targetFormat}`;
-    
     const cacheFilename = `${name}_w${width || 'auto'}_h${height || 'auto'}.${targetFormat}`;
     const cachePath = path.join(cacheDir, cacheFilename);
 
@@ -177,16 +171,8 @@ app.get('/image-proxy/:filename', async (req, res) => {
     } catch (error) {
         try {
             await fs.access(originalPath);
-            const transformer = sharp(originalPath)
-                .resize(width, height, { fit: 'inside', withoutEnlargement: true });
-
-            let processedImageBuffer;
-            if (targetFormat === 'webp') {
-                processedImageBuffer = await transformer.webp({ quality: 80 }).toBuffer();
-            } else {
-                processedImageBuffer = await transformer.jpeg({ quality: 85 }).toBuffer();
-            }
-
+            const transformer = sharp(originalPath).resize(width, height, { fit: 'inside', withoutEnlargement: true });
+            const processedImageBuffer = await (targetFormat === 'webp' ? transformer.webp({ quality: 80 }) : transformer.jpeg({ quality: 85 })).toBuffer();
             await fs.writeFile(cachePath, processedImageBuffer);
             res.setHeader('Content-Type', mimeType);
             res.send(processedImageBuffer);
@@ -197,13 +183,10 @@ app.get('/image-proxy/:filename', async (req, res) => {
     }
 });
 
-
 const apiAdminRouter = express.Router();
 apiAdminRouter.use(requireApiAuth);
-
 const storage = multer.diskStorage({ destination: (req, file, cb) => cb(null, uploadsDir), filename: (req, file, cb) => { const uniqueSuffix = uuidv4(); const extension = path.extname(file.originalname); cb(null, `${uniqueSuffix}${extension}`); } });
 const upload = multer({ storage: storage });
-
 apiAdminRouter.post('/upload', upload.single('image'), async (req, res) => {
     if (!req.file) return res.status(400).json({ message: '没有选择文件。' });
     const images = await readDB(dbPath);
@@ -212,7 +195,6 @@ apiAdminRouter.post('/upload', upload.single('image'), async (req, res) => {
     await writeDB(dbPath, images);
     res.status(200).json({ message: '上传成功', image: newImage });
 });
-
 apiAdminRouter.delete('/images/:id', async (req, res) => {
     let images = await readDB(dbPath);
     const imageToDelete = images.find(img => img.id === req.params.id);
@@ -223,14 +205,12 @@ apiAdminRouter.delete('/images/:id', async (req, res) => {
     await writeDB(dbPath, updatedImages);
     res.json({ message: '删除成功' });
 });
-
 apiAdminRouter.put('/images/:id', async (req, res) => {
     let images = await readDB(dbPath);
     const { category, description, filename } = req.body;
     const imageIndex = images.findIndex(img => img.id === req.params.id);
     if (imageIndex === -1) return res.status(404).json({ message: '图片未找到' });
     const imageToUpdate = { ...images[imageIndex] };
-
     if (filename && filename !== imageToUpdate.filename) {
         const oldPath = path.join(uploadsDir, imageToUpdate.filename);
         const newPath = path.join(uploadsDir, filename);
@@ -238,11 +218,8 @@ apiAdminRouter.put('/images/:id', async (req, res) => {
             await fs.access(newPath);
             return res.status(400).json({ message: '新文件名已存在。' });
         } catch (error) {
-            try {
-                await fs.rename(oldPath, newPath);
-                imageToUpdate.filename = filename;
-                imageToUpdate.src = `/uploads/${filename}`;
-            } catch (renameError) { return res.status(500).json({ message: '文件重命名失败。' }); }
+            try { await fs.rename(oldPath, newPath); imageToUpdate.filename = filename; imageToUpdate.src = `/uploads/${filename}`; } 
+            catch (renameError) { return res.status(500).json({ message: '文件重命名失败。' }); }
         }
     }
     imageToUpdate.category = category || imageToUpdate.category;
@@ -251,7 +228,6 @@ apiAdminRouter.put('/images/:id', async (req, res) => {
     await writeDB(dbPath, images);
     res.json({ message: '更新成功', image: imageToUpdate });
 });
-
 apiAdminRouter.post('/categories', async (req, res) => {
     const { name } = req.body;
     if (!name || name.trim() === '') return res.status(400).json({ message: '分类名称不能为空。' });
@@ -261,7 +237,6 @@ apiAdminRouter.post('/categories', async (req, res) => {
     await writeDB(categoriesPath, categories);
     res.status(201).json({ message: '分类创建成功', category: name });
 });
-
 apiAdminRouter.delete('/categories', async (req, res) => {
     const { name } = req.body;
     if (!name || name === UNCATEGORIZED) return res.status(400).json({ message: '无效的分类或“未分类”无法删除。' });
@@ -274,7 +249,6 @@ apiAdminRouter.delete('/categories', async (req, res) => {
     await writeDB(dbPath, images);
     res.status(200).json({ message: `分类 '${name}' 已删除，相关图片已归入 '${UNCATEGORIZED}'。` });
 });
-
 apiAdminRouter.put('/categories', async (req, res) => {
     const { oldName, newName } = req.body;
     if (!oldName || !newName || oldName === newName || oldName === UNCATEGORIZED) return res.status(400).json({ message: '无效的分类名称。' });
@@ -288,10 +262,8 @@ apiAdminRouter.put('/categories', async (req, res) => {
     await writeDB(dbPath, images);
     res.status(200).json({ message: `分类 '${oldName}' 已重命名为 '${newName}'。` });
 });
-
 app.use('/api/admin', apiAdminRouter);
 app.use(express.static(path.join(__dirname, 'public')));
-
 (async () => {
     if (!JWT_SECRET) { console.error(`错误: JWT_SECRET 未在 .env 文件中设置。`); process.exit(1); }
     await initializeDirectories();
@@ -299,7 +271,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 })();
 EOF
 
-    echo "--> 正在生成主画廊 public/index.html (全新响应式图片UI)..."
+    echo "--> 正在生成主画廊 public/index.html (全新动态UI)..."
 cat << 'EOF' > public/index.html
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -482,7 +454,7 @@ cat << 'EOF' > public/login.html
 <!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>后台登录 - 图片画廊</title><script src="https://cdn.tailwindcss.com"></script><style> body { background-color: #f0fdf4; } </style></head><body class="antialiased text-green-900"><div class="min-h-screen flex items-center justify-center"><div class="max-w-md w-full bg-white p-8 rounded-lg shadow-lg"><h1 class="text-3xl font-bold text-center text-green-900 mb-6">后台管理登录</h1><div id="error-message" class="hidden bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4" role="alert"><strong class="font-bold">登录失败！</strong><span class="block sm:inline">用户名或密码不正确。</span></div><form action="/api/login" method="POST"><div class="mb-4"><label for="username" class="block text-green-800 text-sm font-bold mb-2">用户名</label><input type="text" id="username" name="username" required class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-green-500"></div><div class="mb-6"><label for="password" class="block text-green-800 text-sm font-bold mb-2">密码</label><input type="password" id="password" name="password" required class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 mb-3 leading-tight focus:outline-none focus:ring-2 focus:ring-green-500"></div><div class="flex items-center justify-between"><button type="submit" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg focus:outline-none focus:shadow-outline transition-colors"> 登 录 </button></div></form></div></div><script> const urlParams = new URLSearchParams(window.location.search); if (urlParams.has('error')) { document.getElementById('error-message').classList.remove('hidden'); } </script></body></html>
 EOF
 
-    echo "--> 正在生成后台管理页 public/admin.html (已增加最终UI优化)..."
+    echo "--> 正在生成后台管理页 public/admin.html (最终版UI)..."
 cat << 'EOF' > public/admin.html
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -585,8 +557,7 @@ cat << 'EOF' > public/admin.html
             DOMElements.imageList.innerHTML = ''; DOMElements.imageLoader.classList.remove('hidden');
             try {
                 const url = `/api/images?category=${category}&search=${encodeURIComponent(currentSearchTerm)}`;
-                const response = await apiRequest(url);
-                adminLoadedImages = await response.json();
+                const response = await apiRequest(url); adminLoadedImages = await response.json();
                 DOMElements.imageLoader.classList.add('hidden');
                 const totalSize = adminLoadedImages.reduce((acc, img) => acc + (img.size || 0), 0);
                 const titleText = currentSearchTerm ? `搜索 "${currentSearchTerm}" 的结果` : categoryName;
@@ -598,7 +569,7 @@ cat << 'EOF' > public/admin.html
         function renderImageCard(image) {
             const card = document.createElement('div');
             card.className = 'border rounded-lg shadow-sm bg-white overflow-hidden flex flex-col';
-            card.innerHTML = `<a class="preview-btn h-40 bg-slate-100 flex items-center justify-center cursor-pointer" data-id="${image.id}"><img src="/image-proxy/${image.filename}?w=400" alt="${image.description}" class="max-h-full max-w-full object-contain"></a><div class="p-3 flex-grow flex flex-col"><p class="font-bold text-sm truncate" title="${image.filename}">${image.filename}</p><p class="text-xs text-slate-500 -mt-1 mb-2">${formatBytes(image.size)}</p><p class="text-xs text-slate-500 mb-2">${image.category}</p><p class="text-xs text-slate-600 flex-grow mb-3 break-words">${image.description || '无描述'}</p></div><div class="bg-slate-50 p-2 flex justify-center space-x-2"><button data-id="${image.id}" class="preview-btn text-sm bg-gray-500 hover:bg-gray-600 text-white font-bold py-1 px-3 rounded transition-colors">预览</button><a href="${image.src}" download="${image.filename}" class="download-btn text-sm bg-green-600 hover:bg-green-700 text-white font-bold py-1 px-3 rounded transition-colors" title="下载">下载</a><button data-image='${JSON.stringify(image)}' class="edit-btn text-sm bg-blue-500 hover:bg-blue-600 text-white font-bold py-1 px-3 rounded">编辑</button><button data-id="${image.id}" class="delete-btn text-sm bg-red-500 hover:bg-red-600 text-white font-bold py-1 px-3 rounded">删除</button></div>`;
+            card.innerHTML = `<div class="h-40 bg-slate-100 flex items-center justify-center"><img src="/image-proxy/${image.filename}?w=400" alt="${image.description}" class="max-h-full max-w-full object-contain"></div><div class="p-3 flex-grow flex flex-col"><p class="font-bold text-sm truncate" title="${image.filename}">${image.filename}</p><p class="text-xs text-slate-500 -mt-1 mb-2">${formatBytes(image.size)}</p><p class="text-xs text-slate-500 mb-2">${image.category}</p><p class="text-xs text-slate-600 flex-grow mb-3 break-words">${image.description || '无描述'}</p></div><div class="bg-slate-50 p-2 flex justify-center space-x-2"><button data-id="${image.id}" class="preview-btn text-sm bg-gray-500 hover:bg-gray-600 text-white font-bold py-1 px-3 rounded transition-colors">预览</button><a href="${image.src}" download="${image.filename}" class="download-btn text-sm bg-green-600 hover:bg-green-700 text-white font-bold py-1 px-3 rounded transition-colors inline-block" title="下载">下载</a><button data-image='${JSON.stringify(image)}' class="edit-btn text-sm bg-blue-500 hover:bg-blue-600 text-white font-bold py-1 px-3 rounded">编辑</button><button data-id="${image.id}" class="delete-btn text-sm bg-red-500 hover:bg-red-600 text-white font-bold py-1 px-3 rounded">删除</button></div>`;
             DOMElements.imageList.appendChild(card);
         }
         
