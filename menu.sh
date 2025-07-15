@@ -1,11 +1,11 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v18.9.8 UI融合版)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v18.9.9 最终修正版)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
-#   v18.9.8 更新:
-#   - 重大更新(用户需求): 融合新的UI模板。保留原版所有动态功能(API加载、分类、搜索、暗黑模式)，但将前端外观替换为用户指定的新版HTML/CSS样式。
+#   v18.9.9 更新:
+#   - 细节修复(用户需求): 精确修正头部和页脚下方的两条分割线样式，使其与用户源文件100%匹配，同时保留所有动态功能。
 # =================================================================
 
 # --- 配置 ---
@@ -17,7 +17,7 @@ NC='\033[0m' # No Color
 # 为 y/n 提示定义更具体的颜色
 PROMPT_Y="(${GREEN}y${NC}/${RED}n${NC})"
 
-SCRIPT_VERSION="18.9.8"
+SCRIPT_VERSION="18.9.9"
 APP_NAME="image-gallery"
 
 # --- 路径设置 (核心改进：路径将基于脚本自身位置，确保唯一性) ---
@@ -330,7 +330,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 })();
 EOF
 
-    echo "--> 正在生成主画廊 public/index.html (UI融合版)..."
+    echo "--> 正在生成主画廊 public/index.html (v18.9.9 最终修正版)..."
 cat << 'EOF' > public/index.html
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -346,19 +346,16 @@ cat << 'EOF' > public/index.html
     <script src="https://cdn.tailwindcss.com"></script>
 
     <style>
-        /* --- 核心颜色变量 (移植自旧版，用于支持暗黑模式) --- */
+        /* --- 核心颜色变量 (用于支持暗黑模式) --- */
         :root {
             --bg-color: #f0fdf4;
             --text-color: #14532d;
-            --text-color-light: #166534;
-            --header-bg: rgba(240, 253, 244, 0);
             --header-bg-scrolled: rgba(240, 253, 244, 0.85);
             --filter-btn-color: #166534;
             --filter-btn-hover-bg: #dcfce7;
             --filter-btn-active-bg: #22c55e;
             --filter-btn-active-border: #16a34a;
             --grid-item-bg: #e4e4e7;
-            --divider-color: #dcfce7;
             --search-bg: #ffffff;
             --search-placeholder-color: #9ca3af;
         }
@@ -366,15 +363,12 @@ cat << 'EOF' > public/index.html
         body.dark {
             --bg-color: #111827;
             --text-color: #a7f3d0;
-            --text-color-light: #6ee7b7;
-            --header-bg: rgba(17, 24, 39, 0);
             --header-bg-scrolled: rgba(17, 24, 39, 0.85);
             --filter-btn-color: #a7f3d0;
             --filter-btn-hover-bg: #1f2937;
             --filter-btn-active-bg: #16a34a;
             --filter-btn-active-border: #15803d;
             --grid-item-bg: #374151;
-            --divider-color: #166534;
             --search-bg: #1f2937;
             --search-placeholder-color: #6b7280;
         }
@@ -382,20 +376,19 @@ cat << 'EOF' > public/index.html
         body { font-family: 'Inter', 'Noto Sans SC', sans-serif; background-color: var(--bg-color); color: var(--text-color); display: flex; flex-direction: column; min-height: 100vh; }
         body.overflow-hidden { overflow: hidden; }
 
-        /* --- Header 样式 (融合新旧版本逻辑) --- */
-        .header-sticky { padding-top: 1rem; padding-bottom: 1rem; background-color: var(--header-bg); position: sticky; top: 0; z-index: 40; box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05); transition: padding 0.3s ease-in-out, background-color 0.3s ease-in-out; }
-        .header-sticky.state-scrolled-partially { background-color: var(--header-bg-scrolled); backdrop-filter: blur(8px); }
+        /* --- Header 样式 (修正版) --- */
+        .header-sticky { padding-top: 1rem; padding-bottom: 1rem; background-color: rgba(240, 253, 244, 0); position: sticky; top: 0; z-index: 40; /* 修正 #1: 采用用户源文件的阴影样式 */ box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1); transition: padding 0.3s ease-in-out, background-color 0.3s ease-in-out; }
+        .header-sticky h1 { opacity: 1; margin-bottom: 0.75rem; transition: opacity 0.3s ease-in-out, margin-bottom 0.3s ease-in-out; }
+        .header-sticky.state-scrolled-partially { padding-top: 0.75rem; padding-bottom: 0.75rem; background-color: var(--header-bg-scrolled); backdrop-filter: blur(8px); }
         .header-sticky.state-scrolled-fully { padding-top: 0.5rem; padding-bottom: 0.5rem; background-color: var(--header-bg-scrolled); backdrop-filter: blur(8px); }
-        .header-sticky #header-top { transition: opacity 0.3s ease-in-out, height 0.3s ease-in-out, margin-bottom 0.3s ease-in-out; }
-        .header-sticky.state-scrolled-fully #header-top { opacity: 0; height: 0; margin-bottom: 0; pointer-events: none; overflow: hidden; }
+        .header-sticky.state-scrolled-fully h1 { opacity: 0; margin-bottom: 0; height: 0; overflow: hidden; pointer-events: none; }
         
-        /* --- 搜索浮层样式 (移植自旧版) --- */
+        /* --- 搜索浮层样式 --- */
         #search-overlay { opacity: 0; visibility: hidden; transition: opacity 0.3s ease, visibility 0s 0.3s; }
         #search-overlay.active { opacity: 1; visibility: visible; transition: opacity 0.3s ease, visibility 0s 0s; }
         #search-box { transform: scale(0.95); opacity: 0; transition: transform 0.3s ease, opacity 0.3s ease; }
         #search-overlay.active #search-box { transform: scale(1); opacity: 1; }
         
-        /* --- 主体网格样式 (采用新版) --- */
         .grid-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); grid-auto-rows: 10px; gap: 1rem; }
         .grid-item { position: relative; border-radius: 0.5rem; overflow: hidden; background-color: var(--grid-item-bg); box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1); opacity: 0; transform: translateY(20px); transition: opacity 0.5s ease-out, transform 0.5s ease-out, box-shadow 0.3s ease; }
         .grid-item-wide { grid-column: span 2; }
@@ -404,12 +397,10 @@ cat << 'EOF' > public/index.html
         .grid-item img { cursor: pointer; width: 100%; height: 100%; object-fit: cover; display: block; transition: transform 0.4s ease; }
         .grid-item:hover img { transform: scale(1.05); }
 
-        /* --- 过滤按钮样式 (采用新版并使用变量) --- */
         .filter-btn { padding: 0.5rem 1rem; border-radius: 9999px; font-weight: 500; transition: all 0.2s ease; border: 1px solid transparent; cursor: pointer; background-color: transparent; color: var(--filter-btn-color); }
         .filter-btn:hover { background-color: var(--filter-btn-hover-bg); }
         .filter-btn.active { background-color: var(--filter-btn-active-bg); color: white; border-color: var(--filter-btn-active-border); }
         
-        /* --- Lightbox 及其他组件样式 (采用新版并微调) --- */
         .lightbox { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.9); display: flex; justify-content: center; align-items: center; z-index: 1000; opacity: 0; visibility: hidden; transition: opacity 0.3s ease; }
         .lightbox.active { opacity: 1; visibility: visible; }
         .lightbox-image { max-width: 85%; max-height: 85%; display: block; object-fit: contain; }
@@ -425,32 +416,30 @@ cat << 'EOF' > public/index.html
 </head>
 <body class="antialiased">
 
-    <header class="header-sticky text-center">
-        <div id="header-top" class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between mb-4 h-auto md:h-14">
-             <div class="w-1/3"></div> 
-             <h1 class="text-4xl md:text-5xl font-bold w-1/3">图片画廊</h1>
-             <div class="w-1/3 flex items-center justify-end gap-1">
-                <button id="search-toggle-btn" title="搜索" class="p-2 rounded-full text-[var(--text-color)] hover:bg-gray-500/10">
-                    <svg class="w-6 h-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg>
-                </button>
-                <button id="theme-toggle" title="切换主题" class="p-2 rounded-full text-[var(--text-color)] hover:bg-gray-500/10">
-                    <svg id="theme-icon-sun" class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
-                    <svg id="theme-icon-moon" class="w-6 h-6 hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" /></svg>
-                </button>
-             </div>
-        </div>
+    <div class="fixed top-4 right-4 z-50 flex items-center gap-1">
+        <button id="search-toggle-btn" title="搜索" class="p-2 rounded-full text-[var(--text-color)] bg-[var(--bg-color)] hover:bg-gray-500/10 shadow-md">
+            <svg class="w-6 h-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg>
+        </button>
+        <button id="theme-toggle" title="切换主题" class="p-2 rounded-full text-[var(--text-color)] bg-[var(--bg-color)] hover:bg-gray-500/10 shadow-md">
+            <svg id="theme-icon-sun" class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
+            <svg id="theme-icon-moon" class="w-6 h-6 hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" /></svg>
+        </button>
+    </div>
+
+    <header class="text-center header-sticky">
+        <h1 class="text-4xl md:text-5xl font-bold">图片画廊</h1>
         <div id="filter-buttons" class="flex justify-center flex-wrap gap-2 px-4">
             <button class="filter-btn active" data-filter="all">全部</button>
             <button class="filter-btn" data-filter="random">随机</button>
         </div>
     </header>
-    
+
     <main class="container mx-auto px-6 py-8 md:py-10 flex-grow">
         <div id="gallery-container" class="max-w-7xl mx-auto grid-gallery"></div>
         <div id="loader" class="text-center py-8 hidden">正在加载更多...</div>
     </main>
     
-    <footer class="text-center py-8 mt-auto border-t" style="border-color: var(--divider-color);">
+    <footer class="text-center py-8 mt-auto border-t border-green-200">
         <p>© 2025 图片画廊</p>
     </footer>
 
@@ -467,7 +456,6 @@ cat << 'EOF' > public/index.html
     </div>
     
     <div class="lightbox"><span class="lb-counter"></span><button class="lightbox-btn lb-close">&times;</button><button class="lightbox-btn lb-prev">&lsaquo;</button><img class="lightbox-image" alt=""><button class="lightbox-btn lb-next">&rsaquo;</button><a href="#" id="lightbox-download-link" download class="lb-download">下载</a></div>
-    
     <a class="back-to-top" title="返回顶部"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></a>
 
     <script>
@@ -479,7 +467,6 @@ cat << 'EOF' > public/index.html
         const header = document.querySelector('.header-sticky');
         let allLoadedImages = []; let currentFilter = 'all'; let currentSearch = ''; let currentPage = 1; let isLoading = false; let hasMoreImages = true; let debounceTimer; let lastFocusedElement;
         
-        // --- 主题和搜索功能 (从旧版移植) ---
         const searchToggleBtn = document.getElementById('search-toggle-btn');
         const themeToggleBtn = document.getElementById('theme-toggle');
         const themeIconSun = document.getElementById('theme-icon-sun');
@@ -508,7 +495,6 @@ cat << 'EOF' > public/index.html
         themeToggleBtn.addEventListener('click', () => { const newTheme = body.classList.contains('dark') ? 'light' : 'dark'; localStorage.setItem('theme', newTheme); applyTheme(newTheme); });
         applyTheme(localStorage.getItem('theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
 
-        // --- 核心数据获取与渲染逻辑 (从旧版移植) ---
         const fetchJSON = async (url) => { const response = await fetch(url); if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`); return response.json(); };
         const resetGallery = () => { galleryContainer.innerHTML = ''; allLoadedImages = []; currentPage = 1; hasMoreImages = true; window.scrollTo(0, 0); };
         const fetchAndRenderImages = async () => {
@@ -546,7 +532,6 @@ cat << 'EOF' > public/index.html
             });
         }, { rootMargin: '0px 0px 200px 0px' });
         
-        // --- 瀑布流布局逻辑 (从旧版移植) ---
         const resizeSingleGridItem = (item) => {
             const img = item.querySelector('img');
             if (!img || !img.complete || img.naturalHeight === 0) return;
@@ -560,7 +545,6 @@ cat << 'EOF' > public/index.html
         const resizeAllGridItems = () => { const items = galleryContainer.querySelectorAll('.grid-item.is-visible'); items.forEach(resizeSingleGridItem); };
         window.addEventListener('resize', () => { clearTimeout(debounceTimer); debounceTimer = setTimeout(resizeAllGridItems, 200); });
         
-        // --- 分类按钮逻辑 (从旧版移植) ---
         const createFilterButtons = async () => {
             try {
                 const categories = await fetchJSON('/api/public/categories');
@@ -580,7 +564,6 @@ cat << 'EOF' > public/index.html
             resetGallery(); fetchAndRenderImages();
         });
 
-        // --- 灯箱逻辑 (从旧版移植并适配新HTML) ---
         const lightbox = document.querySelector('.lightbox'); const lightboxImage = lightbox.querySelector('.lightbox-image'); const lbCounter = lightbox.querySelector('.lb-counter'); const lbDownloadLink = document.getElementById('lightbox-download-link'); let currentImageIndexInFiltered = 0;
         galleryContainer.addEventListener('click', (e) => { const item = e.target.closest('.grid-item'); if (item) { lastFocusedElement = document.activeElement; currentImageIndexInFiltered = allLoadedImages.findIndex(img => img.id === item.dataset.id); if (currentImageIndexInFiltered === -1) return; updateLightbox(); lightbox.classList.add('active'); document.body.classList.add('overflow-hidden'); } });
         const updateLightbox = () => { const currentItem = allLoadedImages[currentImageIndexInFiltered]; if (!currentItem) return; lightboxImage.src = currentItem.src; lightboxImage.alt = currentItem.description; lbCounter.textContent = `${currentImageIndexInFiltered + 1} / ${allLoadedImages.length}`; lbDownloadLink.href = currentItem.src; lbDownloadLink.download = currentItem.originalFilename; };
@@ -590,7 +573,6 @@ cat << 'EOF' > public/index.html
         lightbox.addEventListener('click', (e) => { const target = e.target; if (target.matches('.lb-next')) showNextImage(); else if (target.matches('.lb-prev')) showPrevImage(); else if (target.matches('.lb-close') || target === lightbox) closeLightbox(); });
         document.addEventListener('keydown', (e) => { if (lightbox.classList.contains('active')) { if (e.key === 'ArrowLeft') showPrevImage(); else if (e.key === 'ArrowRight') showNextImage(); else if (e.key === 'Escape') closeLightbox(); } });
         
-        // --- 滚动事件与返回顶部逻辑 (从旧版移植) ---
         const backToTopBtn = document.querySelector('.back-to-top'); let ticking = false;
         backToTopBtn.addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' })); 
         
@@ -599,12 +581,10 @@ cat << 'EOF' > public/index.html
             if (currentScrollY > 300) { backToTopBtn.classList.add('visible'); } 
             else { backToTopBtn.classList.remove('visible'); } 
             
-            // Header 动画
             if (currentScrollY > 50) { header.classList.add('state-scrolled-fully'); header.classList.remove('state-scrolled-partially'); } 
             else if (currentScrollY > 0) { header.classList.add('state-scrolled-partially'); header.classList.remove('state-scrolled-fully'); } 
             else { header.classList.remove('state-scrolled-fully', 'state-scrolled-partially'); }
             
-            // 无限滚动
             if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 500) { fetchAndRenderImages(); } 
         }
 
@@ -624,7 +604,7 @@ cat << 'EOF' > public/login.html
 <!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>后台登录 - 图片画廊</title><script src="https://cdn.tailwindcss.com"></script><style> body { background-color: #f0fdf4; } </style></head><body class="antialiased text-green-900"><div class="min-h-screen flex items-center justify-center"><div class="max-w-md w-full bg-white p-8 rounded-lg shadow-lg"><h1 class="text-3xl font-bold text-center text-green-900 mb-6">后台管理登录</h1><div id="error-message" class="hidden bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4" role="alert"><strong class="font-bold">登录失败！</strong><span class="block sm:inline">用户名或密码不正确。</span></div><form action="/api/login" method="POST"><div class="mb-4"><label for="username" class="block text-green-800 text-sm font-bold mb-2">用户名</label><input type="text" id="username" name="username" required class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-green-500"></div><div class="mb-6"><label for="password" class="block text-green-800 text-sm font-bold mb-2">密码</label><input type="password" id="password" name="password" required class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 mb-3 leading-tight focus:outline-none focus:ring-2 focus:ring-green-500"></div><div class="flex items-center justify-between"><button type="submit" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg focus:outline-none focus:shadow-outline transition-colors"> 登 录 </button></div></form></div></div><script> const urlParams = new URLSearchParams(window.location.search); if (urlParams.has('error')) { document.getElementById('error-message').classList.remove('hidden'); } </script></body></html>
 EOF
 
-    echo "--> 正在生成后台管理页 public/admin.html (v18.9.6 UI优化版)..."
+    echo "--> 正在生成后台管理页 public/admin.html..."
 cat << 'EOF' > public/admin.html
 <!DOCTYPE html>
 <html lang="zh-CN">
