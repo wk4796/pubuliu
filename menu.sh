@@ -1,15 +1,13 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v18.1 稳定版)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v18.4 主题切换版)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
-#   功能: 全面重构，包含可移植性依赖检查、交互式重名上传、
-#         高级瀑布流布局、以及强化的菜单和状态显示系统。
-#   v18.1 更新:
-#   - 修复: 菜单标题行格式与颜色代码的显示错误。
-#   - 修复: 增强权限处理逻辑，智能判断是否需要 sudo，
-#           完美兼容 root 用户和普通用户的环境。
+#   v18.4 更新:
+#   - 新增: 在画廊主页右上角添加日夜主题切换功能。
+#   - 优化: 调整顶栏布局，将搜索框和主题切换按钮置于同一行。
+#   - 动画: 主题切换具有平滑的颜色过渡动画。
 # =================================================================
 
 # --- 配置 ---
@@ -21,7 +19,7 @@ NC='\033[0m' # No Color
 # 为 y/n 提示定义更具体的颜色
 PROMPT_Y="(${GREEN}y${NC}/${RED}n${NC})"
 
-SCRIPT_VERSION="18.1"
+SCRIPT_VERSION="18.4"
 APP_NAME="image-gallery"
 
 # --- 路径设置 (核心改进：路径将基于脚本自身位置，确保唯一性) ---
@@ -69,7 +67,7 @@ cat << 'EOF' > package.json
 }
 EOF
 
-    echo "--> 正在生成后端服务器 server.js (已增加同名文件检查API)..."
+    echo "--> 正在生成后端服务器 server.js (已增加分页API)..."
 cat << 'EOF' > server.js
 const express = require('express');
 const multer = require('multer');
@@ -139,17 +137,37 @@ app.get('/admin', requirePageAuth, (req, res) => res.redirect('/admin.html'));
 
 app.get('/api/images', async (req, res) => {
     let images = await readDB(dbPath);
-    const { category, search } = req.query;
+    const { category, search, page = 1, limit = 12 } = req.query;
+
     if (search) {
         const searchTerm = search.toLowerCase();
         images = images.filter(img => (img.originalFilename && img.originalFilename.toLowerCase().includes(searchTerm)) || (img.description && img.description.toLowerCase().includes(searchTerm)));
     }
+    
     if (category && category !== 'all' && category !== 'random') {
         images = images.filter(img => img.category === category);
     } else if (category === 'random') {
         images.sort(() => 0.5 - Math.random());
+    } else {
+        images.sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt));
     }
-    res.json(images.sort((a,b) => new Date(b.uploadedAt) - new Date(a.uploadedAt)));
+    
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const startIndex = (pageNum - 1) * limitNum;
+    const endIndex = pageNum * limitNum;
+    
+    const paginatedImages = images.slice(startIndex, endIndex);
+    const totalImages = images.length;
+
+    res.json({
+        images: paginatedImages,
+        page: pageNum,
+        limit: limitNum,
+        totalPages: Math.ceil(totalImages / limitNum),
+        totalImages: totalImages,
+        hasMore: endIndex < totalImages
+    });
 });
 
 app.get('/api/categories', async (req, res) => {
@@ -314,171 +332,458 @@ app.use(express.static(path.join(__dirname, 'public')));
 })();
 EOF
 
-    echo "--> 正在生成主画廊 public/index.html (等高列瀑布流引擎)..."
+    echo "--> 正在生成主画廊 public/index.html (全新高级版)..."
 cat << 'EOF' > public/index.html
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>图片画廊</title><meta name="description" content="一个展示精彩瞬间的图片画廊。">
-    <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>图片画廊</title>
+    <meta name="description" content="一个展示精彩瞬间的瀑布流图片画廊。">
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
     <script src="https://cdn.tailwindcss.com"></script>
+
     <style>
-        body { font-family: 'Inter', 'Noto Sans SC', sans-serif; background-color: #f0fdf4; color: #14532d; display: flex; flex-direction: column; min-height: 100vh; }
+        :root {
+            --bg-color: #f0fdf4;
+            --text-color: #14532d;
+            --header-bg: rgba(240, 253, 244, 0);
+            --header-bg-scrolled: rgba(240, 253, 244, 0.85);
+            --header-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.05), 0 2px 4px -2px rgb(0 0 0 / 0.05);
+            --filter-btn-color: #14532d;
+            --filter-btn-hover-bg: #dcfce7;
+            --filter-btn-active-bg: #22c55e;
+            --filter-btn-active-border: #16a34a;
+            --grid-item-bg: #e4e4e7;
+            --search-bg: white;
+            --search-border: #d1d5db;
+            --search-placeholder: #6b7280;
+            --search-text: #111827;
+            --theme-icon-color: #f59e0b;
+        }
+
+        body.dark {
+            --bg-color: #111827;
+            --text-color: #d1d5db;
+            --header-bg: rgba(17, 24, 39, 0);
+            --header-bg-scrolled: rgba(17, 24, 39, 0.85);
+            --header-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.2), 0 2px 4px -2px rgb(0 0 0 / 0.2);
+            --filter-btn-color: #d1d5db;
+            --filter-btn-hover-bg: #374151;
+            --filter-btn-active-bg: #16a34a;
+            --filter-btn-active-border: #15803d;
+            --grid-item-bg: #374151;
+            --search-bg: #1f2937;
+            --search-border: #4b5563;
+            --search-placeholder: #9ca3af;
+            --search-text: #f9fafb;
+            --theme-icon-color: #fde047;
+        }
+        
+        body { font-family: 'Inter', 'Noto Sans SC', sans-serif; background-color: var(--bg-color); color: var(--text-color); display: flex; flex-direction: column; min-height: 100vh; transition: background-color 0.3s ease, color 0.3s ease; }
         body.lightbox-open { overflow: hidden; }
-        .filter-btn { padding: 0.5rem 1rem; border-radius: 9999px; font-weight: 500; transition: all 0.2s ease; border: 1px solid transparent; cursor: pointer; }
-        .filter-btn:hover { background-color: #dcfce7; }
-        .filter-btn.active { background-color: #22c55e; color: white; border-color: #16a34a; }
-        .gallery-container { display: flex; gap: 10px; }
-        .gallery-column { display: flex; flex-direction: column; gap: 10px; flex-basis: 0; flex-grow: 1; }
-        .gallery-item { display: block; position: relative; overflow: hidden; border-radius: 0.5rem; background-color: #e4e4e7; line-height: 0; }
-        .gallery-item img { width: 100%; height: auto; object-fit: cover; transition: transform 0.3s ease, filter 0.3s ease; }
-        .gallery-item:hover img { transform: scale(1.05); filter: brightness(0.85); }
-        .lightbox { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.9); display: none; justify-content: center; align-items: center; z-index: 1000; opacity: 0; transition: opacity 0.3s ease; }
-        .lightbox.active { display: flex; opacity: 1; }
+        .filter-btn { padding: 0.5rem 1rem; border-radius: 9999px; font-weight: 500; transition: all 0.2s ease; border: 1px solid transparent; cursor: pointer; background-color: transparent; color: var(--filter-btn-color); }
+        .filter-btn:hover { background-color: var(--filter-btn-hover-bg); }
+        .filter-btn.active { background-color: var(--filter-btn-active-bg); color: white; border-color: var(--filter-btn-active-border); }
+        
+        /* Grid Waterfall Layout */
+        .grid-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); grid-auto-rows: 10px; gap: 1rem; }
+        .grid-item { position: relative; border-radius: 0.5rem; overflow: hidden; background-color: var(--grid-item-bg); box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1); opacity: 0; transform: translateY(20px); transition: opacity 0.5s ease-out, transform 0.5s ease-out, box-shadow 0.3s ease; }
+        .grid-item-wide { grid-column: span 2; }
+        @media (max-width: 480px) { .grid-item-wide { grid-column: span 1; } }
+        .grid-item.is-visible { opacity: 1; transform: translateY(0); }
+        .grid-item img { cursor: pointer; width: 100%; height: 100%; object-fit: cover; display: block; transition: transform 0.4s ease; }
+        .grid-item:hover img { transform: scale(1.05); }
+
+        /* Lightbox */
+        .lightbox { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.9); display: flex; justify-content: center; align-items: center; z-index: 1000; opacity: 0; visibility: hidden; transition: opacity 0.3s ease; }
+        .lightbox.active { opacity: 1; visibility: visible; }
         .lightbox-image { max-width: 85%; max-height: 85%; display: block; object-fit: contain; }
         .lightbox-btn { position: absolute; top: 50%; transform: translateY(-50%); background-color: rgba(255,255,255,0.1); color: white; border: none; font-size: 2.5rem; cursor: pointer; padding: 0.5rem 1rem; border-radius: 0.5rem; transition: background-color 0.2s; }
+        .lightbox-btn:hover { background-color: rgba(255,255,255,0.2); }
         .lb-prev { left: 1rem; } .lb-next { right: 1rem; } .lb-close { top: 1rem; right: 1rem; font-size: 2rem; }
         .lb-counter { position: absolute; top: 1.5rem; left: 50%; transform: translateX(-50%); color: white; font-size: 1rem; background-color: rgba(0,0,0,0.3); padding: 0.25rem 0.75rem; border-radius: 9999px; }
-        .back-to-top { position: fixed; bottom: 2rem; right: 2rem; background-color: #22c55e; color: white; width: 3rem; height: 3rem; border-radius: 9999px; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 8px rgba(0,0,0,0.2); cursor: pointer; opacity: 0; visibility: hidden; transform: translateY(20px); transition: all 0.3s ease; }
-        .back-to-top.visible { opacity: 1; visibility: visible; transform: translateY(0); }
         .lb-download { position: absolute; bottom: 1rem; right: 1rem; background-color: #22c55e; color: white; border: none; padding: 0.5rem 1rem; border-radius: 0.5rem; cursor: pointer; transition: background-color 0.2s; font-size: 1rem; text-decoration: none; }
         .lb-download:hover { background-color: #16a34a; }
-        .header-sticky { padding-top: 1rem; padding-bottom: 1rem; background-color: rgba(240, 253, 244, 0.8); backdrop-filter: blur(8px); position: sticky; top: 0; z-index: 40; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1); transition: padding 0.3s ease-in-out, background-color 0.3s ease-in-out; }
+        
+        /* Header Scroll Effect */
+        .header-sticky { padding-top: 1.5rem; padding-bottom: 1.5rem; background-color: var(--header-bg); position: sticky; top: 0; z-index: 40; transition: padding 0.3s ease-in-out, background-color 0.3s ease-in-out; }
+        .header-sticky.state-scrolled-partially, .header-sticky.state-scrolled-fully { background-color: var(--header-bg-scrolled); backdrop-filter: blur(8px); box-shadow: var(--header-shadow); }
+        .header-sticky h1 { opacity: 1; transition: opacity 0.3s ease-in-out, margin-bottom 0.3s ease-in-out, height 0.3s ease-in-out; }
+        .header-sticky.state-scrolled-partially { padding-top: 0.75rem; padding-bottom: 0.75rem; }
+        .header-sticky.state-scrolled-fully { padding-top: 0.5rem; padding-bottom: 0.5rem; }
+        .header-sticky.state-scrolled-fully h1 { opacity: 0; margin-bottom: 0 !important; height: 0; overflow: hidden; pointer-events: none; }
+
+        /* Search Bar & Theme Toggle */
+        #search-input { background-color: var(--search-bg); border-color: var(--search-border); color: var(--search-text); }
+        #search-input::placeholder { color: var(--search-placeholder); }
+        .theme-toggle-btn svg { color: var(--theme-icon-color); transition: color 0.3s ease, transform 0.4s ease; }
+        .theme-toggle-btn:hover svg { transform: scale(1.1) rotate(15deg); }
+        
+        /* Misc */
+        .back-to-top { position: fixed; bottom: 2rem; right: 2rem; background-color: #22c55e; color: white; width: 3rem; height: 3rem; border-radius: 9999px; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 8px rgba(0,0,0,0.2); cursor: pointer; opacity: 0; visibility: hidden; transform: translateY(20px); transition: all 0.3s ease; }
+        .back-to-top.visible { opacity: 1; visibility: visible; transform: translateY(0); }
+        .footer { border-top: 1px solid var(--search-border); transition: border-color 0.3s ease; }
     </style>
 </head>
 <body class="antialiased">
+
     <header class="text-center header-sticky">
-        <h1 class="text-4xl md:text-5xl font-bold text-green-900 mb-6">图片画廊</h1>
-        <div class="max-w-4xl mx-auto mb-4 px-4"><div class="relative"><div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><svg class="w-5 h-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd" /></svg></div><input type="search" id="search-input" placeholder="搜索图片描述或文件名..." class="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-full leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-green-500 focus:border-green-500 sm:text-sm"></div></div>
-        <div id="filter-buttons" class="flex justify-center flex-wrap gap-2 px-4"><button class="filter-btn active" data-filter="all">全部</button><button class="filter-btn" data-filter="random">随机</button></div>
+        <h1 class="text-4xl md:text-5xl font-bold mb-6">图片画廊</h1>
+        <div class="max-w-4xl mx-auto flex items-center justify-center gap-4 px-4">
+            <div class="relative flex-grow">
+                <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
+                    <svg class="w-5 h-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd" /></svg>
+                </div>
+                <input type="search" id="search-input" placeholder="搜索图片描述或文件名..." class="block w-full pl-10 pr-3 py-2 border rounded-full leading-5 sm:text-sm focus:outline-none focus:ring-1 focus:ring-green-500">
+            </div>
+            <button id="theme-toggle" title="切换主题" class="theme-toggle-btn flex-shrink-0 p-2 rounded-full hover:bg-gray-500/10">
+                <svg id="theme-icon-sun" class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
+                <svg id="theme-icon-moon" class="w-6 h-6 hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" /></svg>
+            </button>
+        </div>
+        <div id="filter-buttons" class="flex justify-center flex-wrap gap-2 px-4 mt-6">
+            <button class="filter-btn active" data-filter="all">全部</button>
+            <button class="filter-btn" data-filter="random">随机</button>
+        </div>
     </header>
+
     <main class="container mx-auto px-6 py-8 md:py-10 flex-grow">
-        <div id="gallery-container" class="gallery-container max-w-7xl mx-auto"></div>
-        <div id="loader" class="text-center py-8 text-green-700 hidden">正在加载...</div>
+        <div id="gallery-container" class="max-w-7xl mx-auto grid-gallery"></div>
+        <div id="loader" class="text-center py-8 hidden">正在加载...</div>
     </main>
-    <footer class="text-center py-8 mt-auto border-t border-green-200"><p class="text-green-700">© 2025 图片画廊</p></footer>
-    <div class="lightbox"><span class="lb-counter"></span><button class="lightbox-btn lb-close">&times;</button><button class="lightbox-btn lb-prev">&lsaquo;</button><img class="lightbox-image" alt=""><button class="lightbox-btn lb-next">&rsaquo;</button><a href="#" id="lightbox-download-link" download class="lb-download">下载</a></div>
-    <a class="back-to-top" title="返回顶部"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></a>
     
+    <footer class="text-center py-8 mt-auto footer">
+        <p>© 2025 图片画廊</p>
+    </footer>
+
+    <div class="lightbox">
+        <span class="lb-counter"></span>
+        <button class="lightbox-btn lb-close">&times;</button>
+        <button class="lightbox-btn lb-prev">&lsaquo;</button>
+        <img class="lightbox-image" alt="">
+        <button class="lightbox-btn lb-next">&rsaquo;</button>
+        <a href="#" id="lightbox-download-link" download class="lb-download">下载</a>
+    </div>
+
+    <a class="back-to-top" title="返回顶部">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+    </a>
+
     <script>
     document.addEventListener('DOMContentLoaded', function () {
-        const galleryContainer = document.getElementById('gallery-container'); const loader = document.getElementById('loader'); const searchInput = document.getElementById('search-input'); const filterButtonsContainer = document.getElementById('filter-buttons');
-        let currentFilter = 'all'; let currentSearch = ''; let allImageData = []; let filteredData = []; let debounceTimer;
+        // DOM Elements
+        const body = document.body;
+        const themeToggleBtn = document.getElementById('theme-toggle');
+        const themeIconSun = document.getElementById('theme-icon-sun');
+        const themeIconMoon = document.getElementById('theme-icon-moon');
+        const galleryContainer = document.getElementById('gallery-container');
+        const loader = document.getElementById('loader');
+        const searchInput = document.getElementById('search-input');
+        const filterButtonsContainer = document.getElementById('filter-buttons');
+        const header = document.querySelector('.header-sticky');
+        
+        // State
+        let allLoadedImages = [];
+        let currentFilter = 'all';
+        let currentSearch = '';
+        let currentPage = 1;
+        let isLoading = false;
+        let hasMoreImages = true;
+        let debounceTimer;
+        let lastFocusedElement;
 
-        /**
-         * 等高列瀑布流引擎 (Equal-Height Column Waterfall Engine)
-         * * @description 这是一个为图片画廊设计的先进布局解决方案。
-         * 它通过动态计算和分配，创建视觉上平衡的多列布局。
-         * * 工作原理:
-         * 1. 响应式列数: 根据当前浏览器窗口的宽度，自动确定最佳的列数（例如，桌面4列，平板2列）。
-         * 2. 高度追踪: 为每一列维护一个“当前高度”的记录。这个高度是列中所有图片宽高比的总和，而非实际像素高度，
-         * 这是一种轻量级且高效的计算方式。
-         * 3. 智能分配: 当有新的图片需要添加到布局中时，引擎会遍历所有列，找出当前“累计高度”最低的那一列，
-         * 并将新图片放入其中。这确保了所有列的增长速度大致相同。
-         * 4. 视觉优化 (可选排序): 在非随机模式下，可以将图片按宽高比排序再进行分配，这有助于将相似形状的
-         * 图片组合在一起，减少布局中的空隙。
-         * 5. 动态重绘: 当浏览器窗口大小改变时，整个布局会以平滑的方式重新计算和渲染。
-         */
-        const WaterfallLayoutEngine = {
-            container: galleryContainer,
-            gap: 10, // 像素单位的间隙
-            getColumnsCount() {
-                const width = window.innerWidth;
-                if (width >= 1280) return 4;
-                if (width >= 1024) return 3;
-                if (width >= 768) return 2;
-                return 1;
-            },
-            render(images) {
-                this.container.innerHTML = '';
-                if (!images || images.length === 0) {
-                    loader.classList.remove('hidden');
-                    loader.textContent = '没有找到符合条件的图片。';
-                    return;
-                }
-                loader.classList.add('hidden');
-
-                const numColumns = this.getColumnsCount();
-                const columns = Array.from({ length: numColumns }, () => {
-                    const colEl = document.createElement('div');
-                    colEl.className = 'gallery-column';
-                    return { element: colEl, height: 0 };
-                });
-                
-                // 将图片分配到高度最小的列中
-                images.forEach(image => {
-                    let shortestColumn = columns[0];
-                    for (let i = 1; i < columns.length; i++) {
-                        if (columns[i].height < shortestColumn.height) {
-                            shortestColumn = columns[i];
-                        }
-                    }
-                    
-                    // 基于宽高比累加高度
-                    const imageAspect = image.height / image.width;
-                    shortestColumn.height += imageAspect;
-                    
-                    const item = document.createElement('a');
-                    item.className = 'gallery-item';
-                    item.href = "#";
-                    item.dataset.id = image.id;
-
-                    const webpSrcset = `/image-proxy/${image.filename}?w=400&format=webp 400w, /image-proxy/${image.filename}?w=800&format=webp 800w`;
-                    const jpegSrcset = `/image-proxy/${image.filename}?w=400 400w, /image-proxy/${image.filename}?w=800 800w`;
-                    
-                    item.innerHTML = `<picture>
-                        <source type="image/webp" srcset="${webpSrcset}">
-                        <source type="image/jpeg" srcset="${jpegSrcset}">
-                        <img src="/image-proxy/${image.filename}?w=400" alt="${image.description}" loading="lazy" width="${image.width}" height="${image.height}">
-                    </picture>`;
-                    shortestColumn.element.appendChild(item);
-                });
-
-                columns.forEach(col => this.container.appendChild(col.element));
+        // --- Theme Management ---
+        const applyTheme = (theme) => {
+            if (theme === 'dark') {
+                body.classList.add('dark');
+                themeIconSun.classList.add('hidden');
+                themeIconMoon.classList.remove('hidden');
+            } else {
+                body.classList.remove('dark');
+                themeIconSun.classList.remove('hidden');
+                themeIconMoon.classList.add('hidden');
             }
         };
 
-        const fetchJSON = async (url) => { const response = await fetch(url); if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`); return response.json(); };
-        async function createFilterButtons() { try { const categories = await fetchJSON('/api/public/categories'); filterButtonsContainer.querySelectorAll('.dynamic-filter').forEach(btn => btn.remove()); categories.forEach(category => { const button = document.createElement('button'); button.className = 'filter-btn dynamic-filter'; button.dataset.filter = category; button.textContent = category; filterButtonsContainer.appendChild(button); }); } catch (error) { console.error('无法加载分类按钮:', error); } }
-        function applyFiltersAndRender() {
-            let dataToProcess = [...allImageData];
-            if (currentSearch) { const searchTerm = currentSearch.toLowerCase(); dataToProcess = dataToProcess.filter(item => (item.description && item.description.toLowerCase().includes(searchTerm)) || (item.originalFilename && item.originalFilename.toLowerCase().includes(searchTerm))); }
-            if (currentFilter === 'all') {
-                filteredData = dataToProcess.sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt));
-            } else if (currentFilter === 'random') { 
-                for (let i = dataToProcess.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [dataToProcess[i], dataToProcess[j]] = [dataToProcess[j], dataToProcess[i]]; }
-                filteredData = dataToProcess;
-            } else { 
-                filteredData = dataToProcess.filter(item => item.category === currentFilter).sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt));
-            }
-            WaterfallLayoutEngine.render(filteredData);
+        themeToggleBtn.addEventListener('click', () => {
+            const newTheme = body.classList.contains('dark') ? 'light' : 'dark';
+            localStorage.setItem('theme', newTheme);
+            applyTheme(newTheme);
+        });
+
+        // Initialize theme on page load
+        const savedTheme = localStorage.getItem('theme');
+        if (savedTheme) {
+            applyTheme(savedTheme);
+        } else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+            applyTheme('dark');
         }
-        async function initializeGallery() { loader.classList.remove('hidden'); loader.textContent = '正在加载...'; try { allImageData = await fetchJSON('/api/images'); applyFiltersAndRender(); } catch (error) { console.error('获取图片数据失败:', error); loader.textContent = '加载失败，请刷新页面。'; } }
-        const lightbox = document.querySelector('.lightbox'); const lightboxImage = lightbox.querySelector('.lightbox-image'); const lbCounter = lightbox.querySelector('.lb-counter'); const lbDownloadLink = document.getElementById('lightbox-download-link');
+
+        // --- API & Data ---
+        const fetchJSON = async (url) => {
+            const response = await fetch(url);
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+            return response.json();
+        };
+        
+        const resetGallery = () => {
+            galleryContainer.innerHTML = '';
+            allLoadedImages = [];
+            currentPage = 1;
+            hasMoreImages = true;
+            window.scrollTo(0, 0);
+        };
+
+        const fetchAndRenderImages = async () => {
+            if (isLoading || !hasMoreImages) return;
+            isLoading = true;
+            loader.classList.remove('hidden');
+
+            try {
+                const url = `/api/images?page=${currentPage}&limit=12&category=${currentFilter}&search=${encodeURIComponent(currentSearch)}`;
+                const data = await fetchJSON(url);
+                
+                if (data.images && data.images.length > 0) {
+                    renderItems(data.images);
+                    allLoadedImages.push(...data.images);
+                    currentPage++;
+                    hasMoreImages = data.hasMore;
+                } else {
+                    hasMoreImages = false;
+                    if (allLoadedImages.length === 0) {
+                        loader.textContent = '没有找到符合条件的图片。';
+                    }
+                }
+            } catch (error) {
+                console.error('获取图片数据失败:', error);
+                loader.textContent = '加载失败，请刷新页面。';
+            } finally {
+                isLoading = false;
+                if (!hasMoreImages && allLoadedImages.length > 0) {
+                    loader.classList.add('hidden');
+                }
+            }
+        };
+
+        // --- Rendering & Layout ---
+        const renderItems = (images) => {
+            images.forEach(image => {
+                const item = document.createElement('div');
+                item.className = 'grid-item';
+                item.dataset.id = image.id;
+                
+                const img = document.createElement('img');
+                img.src = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"; // Placeholder
+                img.dataset.src = `/image-proxy/${image.filename}?w=400`;
+                img.alt = image.description || image.originalFilename;
+                img.onerror = () => { item.remove(); };
+
+                item.appendChild(img);
+                galleryContainer.appendChild(item);
+                imageObserver.observe(item);
+            });
+        };
+
+        const imageObserver = new IntersectionObserver((entries, observer) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    const item = entry.target;
+                    const img = item.querySelector('img');
+                    img.src = img.dataset.src;
+                    img.onload = () => {
+                        item.style.backgroundColor = 'transparent';
+                        item.classList.add('is-visible');
+                        resizeSingleGridItem(item);
+                    };
+                    observer.unobserve(item);
+                }
+            });
+        }, { rootMargin: '0px 0px 300px 0px' });
+
+        const resizeSingleGridItem = (item) => {
+            const img = item.querySelector('img');
+            if (!img || !img.complete || img.naturalHeight === 0) return;
+
+            const imageInData = allLoadedImages.find(i => i.id === item.dataset.id);
+            if (!imageInData) return;
+
+            const rowHeight = 10;
+            const rowGap = 16;
+            const ratio = imageInData.width / imageInData.height;
+            
+            if (ratio > 1.5) item.classList.add('grid-item-wide');
+            
+            const clientWidth = item.clientWidth;
+            if (clientWidth > 0) {
+                const scaledHeight = clientWidth / ratio;
+                const rowSpan = Math.ceil((scaledHeight + rowGap) / (rowHeight + rowGap));
+                item.style.gridRowEnd = `span ${rowSpan}`;
+            }
+        };
+
+        const resizeAllGridItems = () => {
+            const items = galleryContainer.querySelectorAll('.grid-item.is-visible');
+            items.forEach(resizeSingleGridItem);
+        };
+        
+        // --- Event Listeners ---
+        window.addEventListener('resize', () => {
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(resizeAllGridItems, 200);
+        });
+        
+        const createFilterButtons = async () => {
+            try {
+                const categories = await fetchJSON('/api/public/categories');
+                filterButtonsContainer.querySelectorAll('.dynamic-filter').forEach(btn => btn.remove());
+                categories.forEach(category => {
+                    const button = document.createElement('button');
+                    button.className = 'filter-btn dynamic-filter';
+                    button.dataset.filter = category;
+                    button.textContent = category;
+                    filterButtonsContainer.appendChild(button);
+                });
+            } catch (error) { console.error('无法加载分类按钮:', error); }
+        };
+
+        filterButtonsContainer.addEventListener('click', (e) => {
+            const target = e.target.closest('.filter-btn');
+            if (!target || target.classList.contains('active')) return;
+            currentFilter = target.dataset.filter;
+            document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
+            target.classList.add('active');
+            resetGallery();
+            fetchAndRenderImages();
+        });
+
+        searchInput.addEventListener('input', () => {
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => {
+                currentSearch = searchInput.value;
+                document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
+                filterButtonsContainer.querySelector('[data-filter="all"]').classList.add('active');
+                currentFilter = 'all';
+                resetGallery();
+                fetchAndRenderImages();
+            }, 300);
+        });
+
+        // --- Lightbox Logic ---
+        const lightbox = document.querySelector('.lightbox');
+        const lightboxImage = lightbox.querySelector('.lightbox-image');
+        const lbCounter = lightbox.querySelector('.lb-counter');
+        const lbDownloadLink = document.getElementById('lightbox-download-link');
         let currentImageIndexInFiltered = 0;
+        
         galleryContainer.addEventListener('click', (e) => {
-            e.preventDefault();
-            const item = e.target.closest('.gallery-item');
+            const item = e.target.closest('.grid-item');
             if (item) {
-                currentImageIndexInFiltered = filteredData.findIndex(img => img.id === item.dataset.id);
+                lastFocusedElement = document.activeElement;
+                currentImageIndexInFiltered = allLoadedImages.findIndex(img => img.id === item.dataset.id);
                 if (currentImageIndexInFiltered === -1) return;
                 updateLightbox();
-                lightbox.classList.add('active'); document.body.classList.add('lightbox-open');
+                lightbox.classList.add('active');
+                document.body.classList.add('lightbox-open');
+                lightbox.querySelector('.lb-close').focus();
+                document.addEventListener('keydown', trapFocusInLightbox);
             }
         });
-        function updateLightbox() { const currentItem = filteredData[currentImageIndexInFiltered]; if (!currentItem) return; lightboxImage.src = currentItem.src; lightboxImage.alt = currentItem.description; lbCounter.textContent = `${currentImageIndexInFiltered + 1} / ${filteredData.length}`; lbDownloadLink.href = currentItem.src; lbDownloadLink.download = currentItem.originalFilename; }
-        function showPrevImage() { currentImageIndexInFiltered = (currentImageIndexInFiltered - 1 + filteredData.length) % filteredData.length; updateLightbox(); }
-        function showNextImage() { currentImageIndexInFiltered = (currentImageIndexInFiltered + 1) % filteredData.length; updateLightbox(); }
-        function closeLightbox() { lightbox.classList.remove('active'); document.body.classList.remove('lightbox-open'); }
-        lightbox.addEventListener('click', (e) => { const target = e.target; if (target.matches('.lb-next')) showNextImage(); else if (target.matches('.lb-prev')) showPrevImage(); else if (target.matches('.lb-close') || target === lightbox) closeLightbox(); });
-        document.addEventListener('keydown', (e) => { if (lightbox.classList.contains('active')) { if (e.key === 'ArrowLeft') showPrevImage(); if (e.key === 'ArrowRight') showNextImage(); if (e.key === 'Escape') closeLightbox(); } });
-        filterButtonsContainer.addEventListener('click', (e) => { const target = e.target.closest('.filter-btn'); if (!target) return; currentFilter = target.dataset.filter; document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active')); target.classList.add('active'); applyFiltersAndRender(); });
-        searchInput.addEventListener('input', () => { clearTimeout(debounceTimer); debounceTimer = setTimeout(() => { currentSearch = searchInput.value; applyFiltersAndRender(); }, 300); });
-        const backToTopBtn = document.querySelector('.back-to-top'); 
+
+        const updateLightbox = () => {
+            const currentItem = allLoadedImages[currentImageIndexInFiltered];
+            if (!currentItem) return;
+            lightboxImage.src = currentItem.src;
+            lightboxImage.alt = currentItem.description;
+            lbCounter.textContent = `${currentImageIndexInFiltered + 1} / ${allLoadedImages.length}`;
+            lbDownloadLink.href = currentItem.src;
+            lbDownloadLink.download = currentItem.originalFilename;
+        };
+        
+        const showPrevImage = () => { currentImageIndexInFiltered = (currentImageIndexInFiltered - 1 + allLoadedImages.length) % allLoadedImages.length; updateLightbox(); };
+        const showNextImage = () => { currentImageIndexInFiltered = (currentImageIndexInFiltered + 1) % allLoadedImages.length; updateLightbox(); };
+        const closeLightbox = () => {
+            lightbox.classList.remove('active');
+            document.body.classList.remove('lightbox-open');
+            document.removeEventListener('keydown', trapFocusInLightbox);
+            if(lastFocusedElement) lastFocusedElement.focus();
+        };
+
+        lightbox.addEventListener('click', (e) => {
+            const target = e.target;
+            if (target.matches('.lb-next')) showNextImage();
+            else if (target.matches('.lb-prev')) showPrevImage();
+            else if (target.matches('.lb-close') || target === lightbox) closeLightbox();
+        });
+        document.addEventListener('keydown', (e) => {
+            if (lightbox.classList.contains('active')) {
+                if (e.key === 'ArrowLeft') showPrevImage();
+                else if (e.key === 'ArrowRight') showNextImage();
+                else if (e.key === 'Escape') closeLightbox();
+            }
+        });
+
+        const trapFocusInLightbox = (e) => {
+            if (e.key !== 'Tab') return;
+            const focusableElements = lightbox.querySelectorAll('button, [href]');
+            const firstElement = focusableElements[0];
+            const lastElement = focusableElements[focusableElements.length - 1];
+            if (e.shiftKey) {
+                if (document.activeElement === firstElement) {
+                    lastElement.focus();
+                    e.preventDefault();
+                }
+            } else {
+                if (document.activeElement === lastElement) {
+                    firstElement.focus();
+                    e.preventDefault();
+                }
+            }
+        };
+
+        // --- Scroll Handlers ---
+        const backToTopBtn = document.querySelector('.back-to-top');
+        let ticking = false;
+        const handleScroll = () => {
+            const scrollY = window.scrollY;
+            if (!ticking) {
+                window.requestAnimationFrame(() => {
+                    // Back to top button
+                    backToTopBtn.classList.toggle('visible', scrollY > 300);
+
+                    // Header shrink effect
+                    if (scrollY > 50) {
+                        header.classList.add('state-scrolled-fully');
+                        header.classList.remove('state-scrolled-partially');
+                    } else if (scrollY > 0) {
+                        header.classList.add('state-scrolled-partially');
+                        header.classList.remove('state-scrolled-fully');
+                    } else {
+                        header.classList.remove('state-scrolled-fully', 'state-scrolled-partially');
+                    }
+                    
+                    // Infinite scroll trigger
+                    if (window.innerHeight + scrollY >= document.body.offsetHeight - 400) {
+                        fetchAndRenderImages();
+                    }
+                    ticking = false;
+                });
+                ticking = true;
+            }
+        };
+        
+        window.addEventListener('scroll', handleScroll, { passive: true });
         backToTopBtn.addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
-        window.addEventListener('scroll', () => { backToTopBtn.classList.toggle('visible', window.scrollY > 300); });
-        window.addEventListener('resize', () => { clearTimeout(debounceTimer); debounceTimer = setTimeout(applyFiltersAndRender, 200); });
-        (async function init() { await createFilterButtons(); await initializeGallery(); })();
+
+        // --- Initialization ---
+        (async function init() {
+            await createFilterButtons();
+            await fetchAndRenderImages();
+        })();
     });
     </script>
 </body>
@@ -547,7 +852,6 @@ cat << 'EOF' > public/admin.html
             e.preventDefault();
             DOMElements.uploadBtn.disabled = true;
             
-            // 1. 预检查所有待上传文件
             const pendingFiles = filesToUpload.filter(f => f.status === 'pending');
             if (pendingFiles.length === 0) { showToast("没有需要上传的新文件。", "error"); DOMElements.uploadBtn.disabled = filesToUpload.length === 0; return; }
             
@@ -555,13 +859,11 @@ cat << 'EOF' > public/admin.html
             const checkRes = await apiRequest('/api/admin/check-filenames', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({filenames: filenamesToCheck}) });
             const { duplicates } = await checkRes.json();
             
-            // 2. 对重名文件进行交互式确认
             for (const item of pendingFiles) {
                 if (duplicates.includes(item.file.name)) {
                     const userConfirmed = await showConfirmationModal('文件已存在', `文件 "<strong>${item.file.name}</strong>" 已存在。是否仍然继续上传？<br>(新文件将被自动重命名)`, '继续上传', '取消此文件');
-                    if (userConfirmed) {
-                        item.shouldRename = true;
-                    } else {
+                    if (userConfirmed) { item.shouldRename = true; } 
+                    else {
                         item.status = 'cancelled';
                         const previewItem = DOMElements.filePreviewList.querySelector(`[data-file-index="${filesToUpload.indexOf(item)}"]`);
                         if(previewItem) previewItem.querySelector('.upload-status').textContent = '已取消';
@@ -569,12 +871,10 @@ cat << 'EOF' > public/admin.html
                 }
             }
 
-            // 3. 开始上传处理
             const uploadableFiles = filesToUpload.filter(f => f.status === 'pending');
-            const originalQueueLength = uploadableFiles.length;
             let processedCount = 0;
-            const updateButtonText = () => { DOMElements.uploadBtn.textContent = `正在处理 (${processedCount}/${originalQueueLength})...`; };
-            if (originalQueueLength > 0) updateButtonText();
+            const updateButtonText = () => { DOMElements.uploadBtn.textContent = `正在上传 (${processedCount}/${uploadableFiles.length})...`; };
+            if (uploadableFiles.length > 0) updateButtonText();
 
             for (const item of uploadableFiles) {
                 const originalIndex = filesToUpload.indexOf(item);
@@ -593,7 +893,7 @@ cat << 'EOF' > public/admin.html
             }
             
             showToast(`所有任务处理完成。`); DOMElements.uploadBtn.textContent = '上传文件'; 
-            filesToUpload = []; // 清空队列
+            filesToUpload = [];
             DOMElements.imageInput.value = ''; 
             DOMElements.unifiedDescription.value = '';
             setTimeout(() => { DOMElements.filePreviewContainer.classList.add('hidden'); DOMElements.uploadBtn.disabled = true; }, 3000);
@@ -607,8 +907,8 @@ cat << 'EOF' > public/admin.html
         async function loadImages(category = 'all', categoryName = '全部图片') {
             DOMElements.imageList.innerHTML = ''; DOMElements.imageLoader.classList.remove('hidden');
             try {
-                const url = `/api/images?category=${category}&search=${encodeURIComponent(currentSearchTerm)}`;
-                const response = await apiRequest(url); adminLoadedImages = await response.json();
+                const url = `/api/images?category=${category}&search=${encodeURIComponent(currentSearchTerm)}&limit=1000`; // Load all for admin panel
+                const response = await apiRequest(url); adminLoadedImages = (await response.json()).images;
                 DOMElements.imageLoader.classList.add('hidden');
                 const totalSize = adminLoadedImages.reduce((acc, img) => acc + (img.size || 0), 0);
                 const titleText = currentSearchTerm ? `搜索 "${currentSearchTerm}" 的结果` : categoryName;
@@ -697,7 +997,7 @@ check_and_install_deps() {
     if command -v apt-get &> /dev/null; then
         pm_cmd="apt-get install -y"
         echo "--> 检测到 APT 包管理器，正在更新..."
-        ${sudo_cmd} apt-get update
+        ${sudo_cmd} apt-get update -y
     elif command -v dnf &> /dev/null; then
         pm_cmd="dnf install -y"
         echo "--> 检测到 DNF 包管理器..."
@@ -847,15 +1147,14 @@ start_app() {
     [ ! -d "${INSTALL_DIR}" ] || [ ! -f "${INSTALL_DIR}/.env" ] && { echo -e "${RED}错误: 应用未安装或 .env 文件不存在。请先运行安装程序 (选项1)。${NC}"; return 1; }
     cd "${INSTALL_DIR}" || return 1
     
-    # 智能判断使用 sudo 启动 pm2
     local sudo_cmd=""
     if [ "$EUID" -ne 0 ]; then
-        sudo_cmd="sudo"
+        if command -v sudo &> /dev/null; then sudo_cmd="sudo"; fi
     fi
     
     ${sudo_cmd} pm2 start server.js --name "$APP_NAME"
     ${sudo_cmd} pm2 startup
-    ${sudo_cmd} pm2 save
+    ${sudo_cmd} pm2 save --force
     echo -e "${GREEN}--- 应用已启动！---${NC}"
 }
 
@@ -865,7 +1164,7 @@ stop_app() {
     
     local sudo_cmd=""
     if [ "$EUID" -ne 0 ]; then
-        sudo_cmd="sudo"
+        if command -v sudo &> /dev/null; then sudo_cmd="sudo"; fi
     fi
     
     ${sudo_cmd} pm2 stop "$APP_NAME"
@@ -878,7 +1177,7 @@ restart_app() {
     
     local sudo_cmd=""
     if [ "$EUID" -ne 0 ]; then
-        sudo_cmd="sudo"
+        if command -v sudo &> /dev/null; then sudo_cmd="sudo"; fi
     fi
     
     ${sudo_cmd} pm2 restart "$APP_NAME"
@@ -891,7 +1190,7 @@ view_logs() {
     
     local sudo_cmd=""
     if [ "$EUID" -ne 0 ]; then
-        sudo_cmd="sudo"
+        if command -v sudo &> /dev/null; then sudo_cmd="sudo"; fi
     fi
     
     ${sudo_cmd} pm2 logs "$APP_NAME"
@@ -948,7 +1247,7 @@ uninstall_app() {
         
         local sudo_cmd=""
         if [ "$EUID" -ne 0 ]; then
-            sudo_cmd="sudo"
+            if command -v sudo &> /dev/null; then sudo_cmd="sudo"; fi
         fi
         
         if command -v pm2 &> /dev/null; then
@@ -1005,8 +1304,6 @@ show_menu() {
 }
 
 # --- 脚本主入口 ---
-# 在所有PM2操作中也加入sudo判断
-# （已在各个函数内部单独处理，更为健壮）
 while true; do
     show_menu
 done
