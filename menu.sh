@@ -728,13 +728,13 @@ check_and_install_deps() {
 }
 
 display_status() {
-    echo -e "${YELLOW}======================= 应用状态速览 =======================${NC}"
-    echo -e " 管理脚本版本: ${BLUE}v${SCRIPT_VERSION}${NC}"
-    echo -e " 应用名称: ${BLUE}${APP_NAME}${NC}"
-    echo -e " 安装路径: ${BLUE}${INSTALL_DIR}${NC}"
+    echo -e "${YELLOW}========================= 应用状态速览 ==========================${NC}"
+    printf "  %-15s %b%s%b\n" "管理脚本版本:" "${BLUE}" "v${SCRIPT_VERSION}" "${NC}"
+    printf "  %-15s %b%s%b\n" "应用名称:" "${BLUE}" "${APP_NAME}" "${NC}"
+    printf "  %-15s %b%s%b\n" "安装路径:" "${BLUE}" "${INSTALL_DIR}" "${NC}"
 
     if [ -d "${INSTALL_DIR}" ] && [ -f "${INSTALL_DIR}/.env" ]; then
-        echo -e " 安装状态: ${GREEN}已安装${NC}"
+        printf "  %-15s %b%s%b\n" "安装状态:" "${GREEN}" "已安装" "${NC}"
         
         # 进入目录读取配置
         cd "${INSTALL_DIR}" >/dev/null 2>&1
@@ -748,24 +748,26 @@ display_status() {
         if command -v pm2 &> /dev/null && pm2 id "$APP_NAME" &> /dev/null; then
             local pm2_status; pm2_status=$(pm2 show "$APP_NAME" | grep 'status' | awk '{print $4}')
             if [ "$pm2_status" == "online" ]; then
-                echo -e " 运行状态: ${GREEN}在线 (Online)${NC}"
+                printf "  %-15s %b%s%b\n" "运行状态:" "${GREEN}" "在线 (Online)" "${NC}"
             else
-                echo -e " 运行状态: ${RED}离线 (Offline)${NC}"
+                printf "  %-15s %b%s%b\n" "运行状态:" "${RED}" "离线 (Offline)" "${NC}"
             fi
+            local log_path; log_path=$(pm2 show "$APP_NAME" | grep 'out log path' | awk '{print $6}')
+            printf "  %-15s %b%s%b\n" "日志文件:" "${BLUE}" "${log_path}" "${NC}"
         else
-            echo -e " 运行状态: ${YELLOW}未知 (PM2未运行或应用未被管理)${NC}"
+            printf "  %-15s %b%s%b\n" "运行状态:" "${YELLOW}" "未知 (PM2未运行或应用未被管理)" "${NC}"
+            printf "  %-15s %b%s%b\n" "日志文件:" "${YELLOW}" "未知 (PM2未管理)" "${NC}"
         fi
 
-        echo -e " 前台画廊: ${GREEN}http://${SERVER_IP}:${PORT}${NC}"
-        echo -e " 后台管理: ${GREEN}http://${SERVER_IP}:${PORT}/admin${NC}"
-        echo -e " 后台用户: ${BLUE}${ADMIN_USER}${NC}"
-        echo -e " 数据目录: ${BLUE}${INSTALL_DIR}/data${NC}"
-        echo -e " 日志文件: ${BLUE}$(pm2 show "$APP_NAME" | grep 'out log path' | awk '{print $6}')${NC}"
+        printf "  %-15s %bhttp://%s:%s%b\n" "前台画廊:" "${GREEN}" "${SERVER_IP}" "${PORT}" "${NC}"
+        printf "  %-15s %bhttp://%s:%s/admin%b\n" "后台管理:" "${GREEN}" "${SERVER_IP}" "${PORT}" "${NC}"
+        printf "  %-15s %b%s%b\n" "后台用户:" "${BLUE}" "${ADMIN_USER}" "${NC}"
+        printf "  %-15s %b%s/data%b\n" "数据目录:" "${BLUE}" "${INSTALL_DIR}" "${NC}"
         cd - >/dev/null 2>&1 # 返回原目录
     else
-        echo -e " 安装状态: ${RED}未安装${NC}"
+        printf "  %-15s %b%s%b\n" "安装状态:" "${RED}" "未安装" "${NC}"
     fi
-    echo -e "${YELLOW}==========================================================${NC}"
+    echo -e "${YELLOW}==============================================================${NC}"
 }
 
 install_app() {
@@ -913,20 +915,20 @@ show_menu() {
     clear
     display_status
     echo " "
-    echo -e "${YELLOW}---------------------- 可用操作 ----------------------${NC}"
-    echo " 【基础操作】"
-    echo "   1. 安装或修复应用"
-    echo "   2. 启动应用"
-    echo "   3. 停止应用"
-    echo "   4. 重启应用"
+    echo -e "${YELLOW}-------------------------- 可用操作 --------------------------${NC}"
+    echo " ${YELLOW}【基础操作】${NC}"
+    printf "   %-2s. %s\n" "1" "安装或修复应用"
+    printf "   %-2s. %s\n" "2" "启动应用"
+    printf "   %-2s. %s\n" "3" "停止应用"
+    printf "   %-2s. %s\n" "4" "重启应用"
     echo ""
-    echo " 【维护与管理】"
-    echo "   5. 查看应用状态 (刷新信息)"
-    echo "   6. 修改后台配置 (用户名/密码)"
-    echo "   7. 查看实时日志"
-    echo "   8. ${RED}彻底卸载应用${NC}"
+    echo " ${YELLOW}【维护与管理】${NC}"
+    printf "   %-2s. %s\n" "5" "查看应用状态 (刷新信息)"
+    printf "   %-2s. %s\n" "6" "修改后台配置 (用户名/密码)"
+    printf "   %-2s. %s\n" "7" "查看实时日志"
+    printf "   %-2s. %b%s%b\n" "8" "${RED}" "彻底卸载应用" "${NC}"
     echo ""
-    echo "   0. 退出脚本"
+    printf "   %-2s. %s\n" "0" "退出脚本"
     echo -e "${YELLOW}------------------------------------------------------${NC}"
     read -p "请输入你的选择 [0-8]: " choice
     
