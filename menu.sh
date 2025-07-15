@@ -1414,7 +1414,6 @@ show_menu() {
         1) install_app ;;
         2) start_app ;;
         3) stop_app ;;
-        4.
         4) restart_app ;;
         5) show_menu ;;
         6) manage_credentials ;;
