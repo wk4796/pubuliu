@@ -1,11 +1,15 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v17.3 旗舰版)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v18.0 自动化增强版)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
 #   功能: 全面重构，包含可移植性依赖检查、交互式重名上传、
 #         高级瀑布流布局、以及强化的菜单和状态显示系统。
+#   v18.0 更新:
+#   - 优化: PM2 安装逻辑，强制使用 NPM 以确保版本一致性。
+#   - 增强: 实现核心依赖自动安装，无需用户手动确认。
+#   - 优化: 统一并美化所有 y/n 确认提示的颜色，提升用户体验。
 # =================================================================
 
 # --- 配置 ---
@@ -14,8 +18,10 @@ RED='\033[0;31m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
+# 为 y/n 提示定义更具体的颜色
+PROMPT_Y="(${GREEN}y${NC}/${RED}n${NC})"
 
-SCRIPT_VERSION="17.3"
+SCRIPT_VERSION="18.0"
 APP_NAME="image-gallery"
 
 # --- 路径设置 (核心改进：路径将基于脚本自身位置，确保唯一性) ---
@@ -679,50 +685,47 @@ check_and_install_deps() {
     local command_to_check=$3
     
     if command -v "$command_to_check" &> /dev/null; then
-        return 0
+        return 0 # 依赖已存在，直接返回
     fi
     
-    echo -e "${YELLOW}--> 检测到核心依赖 '${dep_to_check}' 未安装。${NC}"
+    echo -e "${YELLOW}--> 检测到核心依赖 '${dep_to_check}' 未安装，正在尝试自动安装...${NC}"
     
     local pm_cmd=""
     local sudo_cmd=""
 
+    # 检查 sudo 权限
     if [ "$EUID" -ne 0 ]; then
         if command -v sudo &> /dev/null; then
             sudo_cmd="sudo"
         else
-            echo -e "${RED}错误：需要 root 或 sudo 权限来安装依赖，但两者都不可用。${NC}"
+            echo -e "${RED}错误：需要 root 或 sudo 权限来安装依赖，但两者都不可用。请手动安装 '${package_name}'。${NC}"
             return 1
         fi
     fi
 
+    # 确定包管理器
     if command -v apt-get &> /dev/null; then
         pm_cmd="apt-get install -y"
-        echo "--> 使用 apt-get 进行安装..."
+        echo "--> 检测到 APT 包管理器，正在更新..."
         $sudo_cmd apt-get update
     elif command -v dnf &> /dev/null; then
         pm_cmd="dnf install -y"
-        echo "--> 使用 dnf 进行安装..."
+        echo "--> 检测到 DNF 包管理器..."
     elif command -v yum &> /dev/null; then
         pm_cmd="yum install -y"
-        echo "--> 使用 yum 进行安装..."
+        echo "--> 检测到 YUM 包管理器..."
     else
-        echo -e "${RED}错误: 未找到 apt, dnf 或 yum 包管理器。请手动安装 '${dep_to_check}'。${NC}"
+        echo -e "${RED}错误: 未找到 apt, dnf 或 yum 包管理器。请手动安装 '${dep_to_check}' (${package_name})。${NC}"
         return 1
     fi
 
-    read -p "是否尝试使用 '${pm_cmd}' 自动安装 '${package_name}'? (y/n): " confirm
-    if [[ "$confirm" == "y" || "$confirm" == "Y" ]]; then
-        echo "--> 准备执行: ${sudo_cmd} ${pm_cmd} ${package_name}"
-        if eval "${sudo_cmd} ${pm_cmd} ${package_name}"; then
-            echo -e "${GREEN}'${dep_to_check}' 安装成功！${NC}"
-            return 0
-        else
-            echo -e "${RED}自动安装 '${dep_to_check}' 失败。请检查错误并手动安装。${NC}"
-            return 1
-        fi
+    # 执行安装
+    echo "--> 准备执行: ${sudo_cmd} ${pm_cmd} ${package_name}"
+    if eval "${sudo_cmd} ${pm_cmd} ${package_name}"; then
+        echo -e "${GREEN}--> '${dep_to_check}' 安装成功！${NC}"
+        return 0
     else
-        echo -e "${YELLOW}已取消自动安装。请手动安装 '${dep_to_check}'。${NC}"
+        echo -e "${RED}--> 自动安装 '${dep_to_check}' 失败。请检查错误并手动安装。${NC}"
         return 1
     fi
 }
@@ -774,9 +777,23 @@ install_app() {
     echo -e "${GREEN}--- 1. 开始安装或修复应用 ---${NC}"
     echo "--> 正在检查系统环境..."
     
+    # 检查核心系统依赖
     check_and_install_deps "Node.js & npm" "nodejs npm" "node" || return 1
-    check_and_install_deps "PM2" "pm2" "pm2" || { echo "--> 将通过npm全局安装pm2..."; sudo npm install -g pm2; } || return 1
     check_and_install_deps "编译工具(for sharp)" "build-essential" "make" || return 1
+
+    # 专门处理 PM2 (通过 npm 安装)
+    echo -e "${YELLOW}--> 正在检查 PM2...${NC}"
+    if ! command -v pm2 &> /dev/null; then
+        echo -e "${YELLOW}--> 检测到 PM2 未安装，将通过 npm 全局安装...${NC}"
+        if sudo npm install -g pm2; then
+            echo -e "${GREEN}--> PM2 安装成功！${NC}"
+        else
+            echo -e "${RED}--> PM2 安装失败，请检查 npm 是否配置正确。${NC}"
+            return 1
+        fi
+    else
+        echo -e "${GREEN}--> PM2 已安装。${NC}"
+    fi
 
     echo -e "${GREEN}--> 所有核心依赖均已满足。${NC}"
     generate_files || return 1
@@ -896,8 +913,9 @@ uninstall_app() {
     echo -e "目标删除路径: ${YELLOW}${INSTALL_DIR}${NC}"
     echo -e "${RED}==============================================================${NC}"
     
-    read -p "您是否完全理解以上后果并确认要彻底卸载? (请输入 'yes' 以确认): " confirm
-    if [[ "$confirm" == "yes" ]]; then
+    local confirm
+    read -p "$(echo -e "${YELLOW}您是否完全理解以上后果并确认要彻底卸载? ${PROMPT_Y}: ")" confirm
+    if [[ "$confirm" == "y" || "$confirm" == "Y" ]]; then
         echo "--> 正在从 PM2 中删除应用..."
         if command -v pm2 &> /dev/null; then
             pm2 delete "$APP_NAME" &> /dev/null
@@ -907,7 +925,7 @@ uninstall_app() {
         rm -rf "${INSTALL_DIR}"
         echo -e "${GREEN}应用已彻底卸载。所有相关文件和进程已被移除。${NC}"
     else
-        echo "操作已取消。"
+        echo -e "${YELLOW}操作已取消。${NC}"
     fi
 }
 
@@ -926,10 +944,11 @@ show_menu() {
     printf "   %-2s. %s\n" "5" "查看应用状态 (刷新信息)"
     printf "   %-2s. %s\n" "6" "修改后台配置 (用户名/密码)"
     printf "   %-2s. %s\n" "7" "查看实时日志"
-    printf "   %-2s. %b%s%b\n" "8" "${RED}" "彻底卸载应用" "${NC}"
+    printf "   %-2s. %b%s%b\n" "8" "${RED}" "彻底卸载应用 (危险操作)" "${NC}"
     echo ""
     printf "   %-2s. %s\n" "0" "退出脚本"
-    echo -e "${YELLOW}------------------------------------------------------${NC}"
+    echo -e "${YELLOW}--------------------------------------------------------------${NC}"
+    local choice
     read -p "请输入你的选择 [0-8]: " choice
     
     case $choice in
