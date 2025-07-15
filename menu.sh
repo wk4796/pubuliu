@@ -1,13 +1,11 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v18.6 交互优化版)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v18.9.8 UI融合版)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
-#   v18.6 更新:
-#   - 重大更新: 搜索功能改为全屏覆盖式界面，风格统一，体验更佳。
-#   - 优化: 移除宽图片特殊处理逻辑，所有瀑布流卡片宽度保持一致。
-#   - 优化: 统一顶部功能图标颜色，使其在不同主题下与文字颜色保持一致。
+#   v18.9.8 更新:
+#   - 重大更新(用户需求): 融合新的UI模板。保留原版所有动态功能(API加载、分类、搜索、暗黑模式)，但将前端外观替换为用户指定的新版HTML/CSS样式。
 # =================================================================
 
 # --- 配置 ---
@@ -19,7 +17,7 @@ NC='\033[0m' # No Color
 # 为 y/n 提示定义更具体的颜色
 PROMPT_Y="(${GREEN}y${NC}/${RED}n${NC})"
 
-SCRIPT_VERSION="18.6"
+SCRIPT_VERSION="18.9.8"
 APP_NAME="image-gallery"
 
 # --- 路径设置 (核心改进：路径将基于脚本自身位置，确保唯一性) ---
@@ -48,7 +46,7 @@ EOF
 cat << 'EOF' > package.json
 {
   "name": "image-gallery-pro",
-  "version": "8.0.0",
+  "version": "8.1.0",
   "description": "A high-performance, full-stack image gallery application with all features.",
   "main": "server.js",
   "scripts": {
@@ -332,7 +330,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 })();
 EOF
 
-    echo "--> 正在生成主画廊 public/index.html (v18.6 交互优化版)..."
+    echo "--> 正在生成主画廊 public/index.html (UI融合版)..."
 cat << 'EOF' > public/index.html
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -348,74 +346,70 @@ cat << 'EOF' > public/index.html
     <script src="https://cdn.tailwindcss.com"></script>
 
     <style>
+        /* --- 核心颜色变量 (移植自旧版，用于支持暗黑模式) --- */
         :root {
-            --bg-color: #f8fafc;
-            --text-color: #1f2937;
-            --text-color-light: #6b7280;
-            --header-bg: rgba(248, 250, 252, 0);
-            --header-bg-scrolled: rgba(248, 250, 252, 0.85);
-            --header-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.05), 0 2px 4px -2px rgb(0 0 0 / 0.05);
-            --filter-btn-color: #374151;
-            --filter-btn-hover-bg: #e5e7eb;
+            --bg-color: #f0fdf4;
+            --text-color: #14532d;
+            --text-color-light: #166534;
+            --header-bg: rgba(240, 253, 244, 0);
+            --header-bg-scrolled: rgba(240, 253, 244, 0.85);
+            --filter-btn-color: #166534;
+            --filter-btn-hover-bg: #dcfce7;
             --filter-btn-active-bg: #22c55e;
             --filter-btn-active-border: #16a34a;
-            --grid-item-bg: #e5e7eb;
-            --grid-item-border: #d1d5db;
-            --search-bg: white;
-            --search-border: #d1d5db;
-            --search-placeholder: #6b7280;
-            --search-text: #111827;
-            --theme-icon-color: #f59e0b;
+            --grid-item-bg: #e4e4e7;
+            --divider-color: #dcfce7;
+            --search-bg: #ffffff;
+            --search-placeholder-color: #9ca3af;
         }
 
         body.dark {
             --bg-color: #111827;
-            --text-color: #d1d5db;
-            --text-color-light: #9ca3af;
+            --text-color: #a7f3d0;
+            --text-color-light: #6ee7b7;
             --header-bg: rgba(17, 24, 39, 0);
             --header-bg-scrolled: rgba(17, 24, 39, 0.85);
-            --header-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.2), 0 2px 4px -2px rgb(0 0 0 / 0.2);
-            --filter-btn-color: #d1d5db;
-            --filter-btn-hover-bg: #374151;
+            --filter-btn-color: #a7f3d0;
+            --filter-btn-hover-bg: #1f2937;
             --filter-btn-active-bg: #16a34a;
             --filter-btn-active-border: #15803d;
             --grid-item-bg: #374151;
-            --grid-item-border: #4b5563;
+            --divider-color: #166534;
             --search-bg: #1f2937;
-            --search-border: #4b5563;
-            --search-placeholder: #9ca3af;
-            --search-text: #f9fafb;
-            --theme-icon-color: #fde047;
+            --search-placeholder-color: #6b7280;
         }
         
-        body { font-family: 'Inter', 'Noto Sans SC', sans-serif; background-color: var(--bg-color); color: var(--text-color); display: flex; flex-direction: column; min-height: 100vh; transition: background-color 0.3s ease, color 0.3s ease; }
+        body { font-family: 'Inter', 'Noto Sans SC', sans-serif; background-color: var(--bg-color); color: var(--text-color); display: flex; flex-direction: column; min-height: 100vh; }
         body.overflow-hidden { overflow: hidden; }
 
-        .header-sticky { padding-top: 1rem; padding-bottom: 1rem; background-color: var(--header-bg); position: sticky; top: 0; z-index: 40; transition: all 0.3s ease-in-out; }
-        .header-sticky.is-scrolled { background-color: var(--header-bg-scrolled); backdrop-filter: blur(8px); box-shadow: var(--header-shadow); padding-top: 0.5rem; padding-bottom: 0.5rem; }
+        /* --- Header 样式 (融合新旧版本逻辑) --- */
+        .header-sticky { padding-top: 1rem; padding-bottom: 1rem; background-color: var(--header-bg); position: sticky; top: 0; z-index: 40; box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05); transition: padding 0.3s ease-in-out, background-color 0.3s ease-in-out; }
+        .header-sticky.state-scrolled-partially { background-color: var(--header-bg-scrolled); backdrop-filter: blur(8px); }
+        .header-sticky.state-scrolled-fully { padding-top: 0.5rem; padding-bottom: 0.5rem; background-color: var(--header-bg-scrolled); backdrop-filter: blur(8px); }
+        .header-sticky #header-top { transition: opacity 0.3s ease-in-out, height 0.3s ease-in-out, margin-bottom 0.3s ease-in-out; }
+        .header-sticky.state-scrolled-fully #header-top { opacity: 0; height: 0; margin-bottom: 0; pointer-events: none; overflow: hidden; }
         
-        .theme-toggle-btn svg, .search-toggle-btn svg { color: var(--text-color); transition: color 0.3s ease, transform 0.4s ease; } /* 图标颜色统一 */
-        .theme-toggle-btn:hover svg { transform: scale(1.1) rotate(15deg); }
-        .search-toggle-btn:hover svg { transform: scale(1.1); }
-
-        /* 全屏搜索界面样式 */
-        #search-overlay { background-color: rgba(0, 0, 0, 0.5); backdrop-filter: blur(4px); transition: opacity 0.3s ease-in-out; }
-        #search-box { background-color: var(--search-bg); color: var(--search-text); transition: transform 0.3s ease-in-out; }
-        #search-input { background-color: transparent; border-color: var(--search-border); }
-        #search-input::placeholder { color: var(--search-placeholder); }
-        #search-input:focus { border-color: #22c55e; box-shadow: 0 0 0 1px #22c55e; }
-        .search-submit-btn { background-color: #22c55e; transition: background-color 0.2s ease; }
-        .search-submit-btn:hover { background-color: #16a34a; }
-
-        .grid-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); grid-auto-rows: 10px; gap: 1.25rem; }
-        .grid-item { position: relative; border-radius: 0.5rem; overflow: hidden; background-color: var(--grid-item-bg); border: 1px solid var(--grid-item-border); box-shadow: 0 2px 4px -1px rgb(0 0 0 / 0.06), 0 1px 2px -1px rgb(0 0 0 / 0.06); opacity: 0; transform: translateY(20px); transition: opacity 0.5s ease-out, transform 0.5s ease-out, box-shadow 0.3s ease, border-color 0.3s ease; }
+        /* --- 搜索浮层样式 (移植自旧版) --- */
+        #search-overlay { opacity: 0; visibility: hidden; transition: opacity 0.3s ease, visibility 0s 0.3s; }
+        #search-overlay.active { opacity: 1; visibility: visible; transition: opacity 0.3s ease, visibility 0s 0s; }
+        #search-box { transform: scale(0.95); opacity: 0; transition: transform 0.3s ease, opacity 0.3s ease; }
+        #search-overlay.active #search-box { transform: scale(1); opacity: 1; }
+        
+        /* --- 主体网格样式 (采用新版) --- */
+        .grid-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); grid-auto-rows: 10px; gap: 1rem; }
+        .grid-item { position: relative; border-radius: 0.5rem; overflow: hidden; background-color: var(--grid-item-bg); box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1); opacity: 0; transform: translateY(20px); transition: opacity 0.5s ease-out, transform 0.5s ease-out, box-shadow 0.3s ease; }
+        .grid-item-wide { grid-column: span 2; }
+        @media (max-width: 400px) { .grid-item-wide { grid-column: span 1; } }
         .grid-item.is-visible { opacity: 1; transform: translateY(0); }
         .grid-item img { cursor: pointer; width: 100%; height: 100%; object-fit: cover; display: block; transition: transform 0.4s ease; }
         .grid-item:hover img { transform: scale(1.05); }
 
+        /* --- 过滤按钮样式 (采用新版并使用变量) --- */
         .filter-btn { padding: 0.5rem 1rem; border-radius: 9999px; font-weight: 500; transition: all 0.2s ease; border: 1px solid transparent; cursor: pointer; background-color: transparent; color: var(--filter-btn-color); }
         .filter-btn:hover { background-color: var(--filter-btn-hover-bg); }
         .filter-btn.active { background-color: var(--filter-btn-active-bg); color: white; border-color: var(--filter-btn-active-border); }
+        
+        /* --- Lightbox 及其他组件样式 (采用新版并微调) --- */
         .lightbox { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.9); display: flex; justify-content: center; align-items: center; z-index: 1000; opacity: 0; visibility: hidden; transition: opacity 0.3s ease; }
         .lightbox.active { opacity: 1; visibility: visible; }
         .lightbox-image { max-width: 85%; max-height: 85%; display: block; object-fit: contain; }
@@ -427,111 +421,94 @@ cat << 'EOF' > public/index.html
         .lb-download:hover { background-color: #16a34a; }
         .back-to-top { position: fixed; bottom: 2rem; right: 2rem; background-color: #22c55e; color: white; width: 3rem; height: 3rem; border-radius: 9999px; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 8px rgba(0,0,0,0.2); cursor: pointer; opacity: 0; visibility: hidden; transform: translateY(20px); transition: all 0.3s ease; }
         .back-to-top.visible { opacity: 1; visibility: visible; transform: translateY(0); }
-        .footer { border-top: 1px solid var(--grid-item-border); transition: border-color 0.3s ease; }
     </style>
 </head>
 <body class="antialiased">
 
-    <header class="header-sticky">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative flex items-center h-16">
-            <h1 class="text-3xl font-bold absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 whitespace-nowrap">图片画廊</h1>
-            <div class="flex items-center gap-2 ml-auto">
-                <button id="search-toggle-btn" title="搜索" class="search-toggle-btn p-2 rounded-full hover:bg-gray-500/10">
+    <header class="header-sticky text-center">
+        <div id="header-top" class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between mb-4 h-auto md:h-14">
+             <div class="w-1/3"></div> 
+             <h1 class="text-4xl md:text-5xl font-bold w-1/3">图片画廊</h1>
+             <div class="w-1/3 flex items-center justify-end gap-1">
+                <button id="search-toggle-btn" title="搜索" class="p-2 rounded-full text-[var(--text-color)] hover:bg-gray-500/10">
                     <svg class="w-6 h-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg>
                 </button>
-                <button id="theme-toggle" title="切换主题" class="theme-toggle-btn p-2 rounded-full hover:bg-gray-500/10">
+                <button id="theme-toggle" title="切换主题" class="p-2 rounded-full text-[var(--text-color)] hover:bg-gray-500/10">
                     <svg id="theme-icon-sun" class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
                     <svg id="theme-icon-moon" class="w-6 h-6 hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" /></svg>
                 </button>
-            </div>
+             </div>
         </div>
-        <div id="filter-buttons" class="max-w-4xl mx-auto flex justify-center flex-wrap gap-2 px-4 pt-4">
+        <div id="filter-buttons" class="flex justify-center flex-wrap gap-2 px-4">
             <button class="filter-btn active" data-filter="all">全部</button>
             <button class="filter-btn" data-filter="random">随机</button>
         </div>
     </header>
-
+    
     <main class="container mx-auto px-6 py-8 md:py-10 flex-grow">
         <div id="gallery-container" class="max-w-7xl mx-auto grid-gallery"></div>
-        <div id="loader" class="text-center py-8 hidden">正在加载...</div>
+        <div id="loader" class="text-center py-8 hidden">正在加载更多...</div>
     </main>
     
-    <footer class="text-center py-8 mt-auto footer">
+    <footer class="text-center py-8 mt-auto border-t" style="border-color: var(--divider-color);">
         <p>© 2025 图片画廊</p>
     </footer>
 
-    <div class="lightbox"><span class="lb-counter"></span><button class="lightbox-btn lb-close">&times;</button><button class="lightbox-btn lb-prev">&lsaquo;</button><img class="lightbox-image" alt=""><button class="lightbox-btn lb-next">&rsaquo;</button><a href="#" id="lightbox-download-link" download class="lb-download">下载</a></div>
-    <a class="back-to-top" title="返回顶部"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></a>
-
-    <div id="search-overlay" class="fixed inset-0 z-50 flex items-center justify-center p-4 hidden">
-        <div id="search-overlay-bg" class="absolute inset-0"></div>
-        <div id="search-box" class="w-full max-w-xl p-4 rounded-xl shadow-2xl relative transform -translate-y-12">
-            <button id="search-close-btn" class="absolute top-3 right-3 text-[var(--text-color-light)] hover:text-[var(--text-color)] transition-colors">
+    <div id="search-overlay" class="fixed inset-0 z-50 flex items-start justify-center pt-24 md:pt-32 p-4 bg-black/30 backdrop-blur-sm">
+        <div id="search-box" class="w-full max-w-lg relative">
+            <div class="absolute top-1/2 left-5 -translate-y-1/2 text-gray-400">
+                <svg class="w-6 h-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg>
+            </div>
+            <input type="search" id="search-input" placeholder="输入关键词，然后按 Enter 搜索..." class="w-full py-4 pl-14 pr-8 text-xl rounded-xl border-0 shadow-2xl focus:ring-2 focus:ring-green-500" style="background-color: var(--search-bg); color: var(--text-color);">
+            <button id="search-close-btn" class="absolute top-1/2 right-4 -translate-y-1/2 text-gray-400 hover:text-gray-600">
                 <svg class="w-6 h-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" /></svg>
             </button>
-            <div class="flex items-center space-x-2 border-b-2 pb-3 mb-3" style="border-color: var(--grid-item-border);">
-                <svg class="w-6 h-6 text-[var(--text-color-light)]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg>
-                <h2 class="text-xl font-semibold">搜索图片</h2>
-            </div>
-            <div class="relative flex items-center">
-                <input type="search" id="search-input" placeholder="输入关键词，按 Enter 键搜索" class="w-full pl-4 pr-14 py-3 border rounded-full text-lg focus:outline-none">
-                <button class="search-submit-btn absolute right-1.5 top-1/2 -translate-y-1/2 w-11 h-11 rounded-full flex items-center justify-center text-white">
-                    <svg class="w-6 h-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" /></svg>
-                </button>
-            </div>
         </div>
     </div>
+    
+    <div class="lightbox"><span class="lb-counter"></span><button class="lightbox-btn lb-close">&times;</button><button class="lightbox-btn lb-prev">&lsaquo;</button><img class="lightbox-image" alt=""><button class="lightbox-btn lb-next">&rsaquo;</button><a href="#" id="lightbox-download-link" download class="lb-download">下载</a></div>
+    
+    <a class="back-to-top" title="返回顶部"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></a>
 
     <script>
     document.addEventListener('DOMContentLoaded', function () {
         const body = document.body;
-        const themeToggleBtn = document.getElementById('theme-toggle');
-        const themeIconSun = document.getElementById('theme-icon-sun');
-        const themeIconMoon = document.getElementById('theme-icon-moon');
         const galleryContainer = document.getElementById('gallery-container');
         const loader = document.getElementById('loader');
         const filterButtonsContainer = document.getElementById('filter-buttons');
         const header = document.querySelector('.header-sticky');
         let allLoadedImages = []; let currentFilter = 'all'; let currentSearch = ''; let currentPage = 1; let isLoading = false; let hasMoreImages = true; let debounceTimer; let lastFocusedElement;
         
-        // --- 全新/修改的元素和逻辑 ---
+        // --- 主题和搜索功能 (从旧版移植) ---
         const searchToggleBtn = document.getElementById('search-toggle-btn');
+        const themeToggleBtn = document.getElementById('theme-toggle');
+        const themeIconSun = document.getElementById('theme-icon-sun');
+        const themeIconMoon = document.getElementById('theme-icon-moon');
         const searchOverlay = document.getElementById('search-overlay');
-        const searchOverlayBg = document.getElementById('search-overlay-bg');
         const searchInput = document.getElementById('search-input');
-        const searchCloseBtn = document.getElementById('search-close-btn');
-        const searchSubmitBtn = document.querySelector('.search-submit-btn');
-
-        const openSearch = () => { searchOverlay.classList.remove('hidden'); body.classList.add('overflow-hidden'); setTimeout(() => searchInput.focus(), 50); };
-        const closeSearch = () => { searchOverlay.classList.add('hidden'); body.classList.remove('overflow-hidden'); };
         
+        const openSearch = () => { searchOverlay.classList.add('active'); body.classList.add('overflow-hidden'); setTimeout(() => searchInput.focus(), 50); };
+        const closeSearch = () => { searchOverlay.classList.remove('active'); body.classList.remove('overflow-hidden'); };
         searchToggleBtn.addEventListener('click', openSearch);
-        searchCloseBtn.addEventListener('click', closeSearch);
-        searchOverlayBg.addEventListener('click', closeSearch);
-        document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !searchOverlay.classList.contains('hidden')) closeSearch(); });
+        document.getElementById('search-close-btn').addEventListener('click', closeSearch);
+        searchOverlay.addEventListener('click', (e) => { if (e.target === searchOverlay) closeSearch(); });
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && searchOverlay.classList.contains('active')) closeSearch(); });
         
         const performSearch = () => {
             const newSearchTerm = searchInput.value.trim();
-            if (allLoadedImages.length > 0 && newSearchTerm === currentSearch) { closeSearch(); return; } // 如果结果已显示且关键词未变，则直接关闭
             currentSearch = newSearchTerm;
             document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
             filterButtonsContainer.querySelector('[data-filter="all"]').classList.add('active');
             currentFilter = 'all';
-            closeSearch();
-            resetGallery();
-            fetchAndRenderImages();
+            closeSearch(); resetGallery(); fetchAndRenderImages();
         };
-        
         searchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') performSearch(); });
-        searchSubmitBtn.addEventListener('click', performSearch);
         
-        // 主题管理
         const applyTheme = (theme) => { if (theme === 'dark') { body.classList.add('dark'); themeIconSun.classList.add('hidden'); themeIconMoon.classList.remove('hidden'); } else { body.classList.remove('dark'); themeIconSun.classList.remove('hidden'); themeIconMoon.classList.add('hidden'); } };
         themeToggleBtn.addEventListener('click', () => { const newTheme = body.classList.contains('dark') ? 'light' : 'dark'; localStorage.setItem('theme', newTheme); applyTheme(newTheme); });
-        const savedTheme = localStorage.getItem('theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-        applyTheme(savedTheme);
+        applyTheme(localStorage.getItem('theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
 
-        // --- API & 数据获取 ---
+        // --- 核心数据获取与渲染逻辑 (从旧版移植) ---
         const fetchJSON = async (url) => { const response = await fetch(url); if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`); return response.json(); };
         const resetGallery = () => { galleryContainer.innerHTML = ''; allLoadedImages = []; currentPage = 1; hasMoreImages = true; window.scrollTo(0, 0); };
         const fetchAndRenderImages = async () => {
@@ -541,19 +518,19 @@ cat << 'EOF' > public/index.html
             try {
                 const url = `/api/images?page=${currentPage}&limit=12&category=${currentFilter}&search=${encodeURIComponent(currentSearch)}`;
                 const data = await fetchJSON(url);
+                loader.classList.add('hidden');
                 if (data.images && data.images.length > 0) { renderItems(data.images); allLoadedImages.push(...data.images); currentPage++; hasMoreImages = data.hasMore; } 
                 else { hasMoreImages = false; if (allLoadedImages.length === 0) loader.textContent = '没有找到符合条件的图片。'; }
             } catch (error) { console.error('获取图片数据失败:', error); loader.textContent = '加载失败，请刷新页面。'; } 
             finally { isLoading = false; if (!hasMoreImages && allLoadedImages.length > 0) loader.classList.add('hidden'); }
         };
 
-        // --- 渲染与布局 ---
         const renderItems = (images) => {
             images.forEach(image => {
                 const item = document.createElement('div');
                 item.className = 'grid-item'; item.dataset.id = image.id;
                 const img = document.createElement('img');
-                img.src = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"; // Placeholder
+                img.src = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
                 img.dataset.src = `/image-proxy/${image.filename}?w=400`; img.alt = image.description || image.originalFilename;
                 img.onerror = () => { item.remove(); };
                 item.appendChild(img); galleryContainer.appendChild(item); imageObserver.observe(item);
@@ -567,23 +544,23 @@ cat << 'EOF' > public/index.html
                     observer.unobserve(item);
                 }
             });
-        }, { rootMargin: '0px 0px 300px 0px' });
+        }, { rootMargin: '0px 0px 200px 0px' });
         
+        // --- 瀑布流布局逻辑 (从旧版移植) ---
         const resizeSingleGridItem = (item) => {
-            const img = item.querySelector('img'); if (!img || !img.complete || img.naturalHeight === 0) return;
+            const img = item.querySelector('img');
+            if (!img || !img.complete || img.naturalHeight === 0) return;
             const imageInData = allLoadedImages.find(i => i.id === item.dataset.id); if (!imageInData) return;
-            const rowHeight = 10; const rowGap = 20; // 对应 gap-5, 即 1.25rem
+            const rowHeight = 10; const rowGap = 16;
             const ratio = imageInData.width / imageInData.height;
-            // --- 优化：移除了使宽图片占据两列的逻辑 ---
-            // if (ratio > 1.5) item.classList.add('grid-item-wide'); 
+            if (ratio > 1.2) item.classList.add('grid-item-wide'); else item.classList.remove('grid-item-wide');
             const clientWidth = item.clientWidth;
             if (clientWidth > 0) { const scaledHeight = clientWidth / ratio; const rowSpan = Math.ceil((scaledHeight + rowGap) / (rowHeight + rowGap)); item.style.gridRowEnd = `span ${rowSpan}`; }
         };
-        
         const resizeAllGridItems = () => { const items = galleryContainer.querySelectorAll('.grid-item.is-visible'); items.forEach(resizeSingleGridItem); };
-
-        // --- 事件监听 ---
         window.addEventListener('resize', () => { clearTimeout(debounceTimer); debounceTimer = setTimeout(resizeAllGridItems, 200); });
+        
+        // --- 分类按钮逻辑 (从旧版移植) ---
         const createFilterButtons = async () => {
             try {
                 const categories = await fetchJSON('/api/public/categories');
@@ -596,28 +573,44 @@ cat << 'EOF' > public/index.html
         };
         filterButtonsContainer.addEventListener('click', (e) => {
             const target = e.target.closest('.filter-btn');
-            if (!target || target.classList.contains('active')) return;
+            if (!target) return;
             currentFilter = target.dataset.filter; currentSearch = ''; searchInput.value = '';
             document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
             target.classList.add('active');
             resetGallery(); fetchAndRenderImages();
         });
 
-        // Lightbox
+        // --- 灯箱逻辑 (从旧版移植并适配新HTML) ---
         const lightbox = document.querySelector('.lightbox'); const lightboxImage = lightbox.querySelector('.lightbox-image'); const lbCounter = lightbox.querySelector('.lb-counter'); const lbDownloadLink = document.getElementById('lightbox-download-link'); let currentImageIndexInFiltered = 0;
-        galleryContainer.addEventListener('click', (e) => { const item = e.target.closest('.grid-item'); if (item) { lastFocusedElement = document.activeElement; currentImageIndexInFiltered = allLoadedImages.findIndex(img => img.id === item.dataset.id); if (currentImageIndexInFiltered === -1) return; updateLightbox(); lightbox.classList.add('active'); body.classList.add('overflow-hidden'); } });
+        galleryContainer.addEventListener('click', (e) => { const item = e.target.closest('.grid-item'); if (item) { lastFocusedElement = document.activeElement; currentImageIndexInFiltered = allLoadedImages.findIndex(img => img.id === item.dataset.id); if (currentImageIndexInFiltered === -1) return; updateLightbox(); lightbox.classList.add('active'); document.body.classList.add('overflow-hidden'); } });
         const updateLightbox = () => { const currentItem = allLoadedImages[currentImageIndexInFiltered]; if (!currentItem) return; lightboxImage.src = currentItem.src; lightboxImage.alt = currentItem.description; lbCounter.textContent = `${currentImageIndexInFiltered + 1} / ${allLoadedImages.length}`; lbDownloadLink.href = currentItem.src; lbDownloadLink.download = currentItem.originalFilename; };
         const showPrevImage = () => { currentImageIndexInFiltered = (currentImageIndexInFiltered - 1 + allLoadedImages.length) % allLoadedImages.length; updateLightbox(); };
         const showNextImage = () => { currentImageIndexInFiltered = (currentImageIndexInFiltered + 1) % allLoadedImages.length; updateLightbox(); };
-        const closeLightbox = () => { lightbox.classList.remove('active'); body.classList.remove('overflow-hidden'); if(lastFocusedElement) lastFocusedElement.focus(); };
+        const closeLightbox = () => { lightbox.classList.remove('active'); document.body.classList.remove('overflow-hidden'); if(lastFocusedElement) lastFocusedElement.focus(); };
         lightbox.addEventListener('click', (e) => { const target = e.target; if (target.matches('.lb-next')) showNextImage(); else if (target.matches('.lb-prev')) showPrevImage(); else if (target.matches('.lb-close') || target === lightbox) closeLightbox(); });
         document.addEventListener('keydown', (e) => { if (lightbox.classList.contains('active')) { if (e.key === 'ArrowLeft') showPrevImage(); else if (e.key === 'ArrowRight') showNextImage(); else if (e.key === 'Escape') closeLightbox(); } });
         
-        // 滚动处理
+        // --- 滚动事件与返回顶部逻辑 (从旧版移植) ---
         const backToTopBtn = document.querySelector('.back-to-top'); let ticking = false;
-        const handleScroll = () => { const scrollY = window.scrollY; if (!ticking) { window.requestAnimationFrame(() => { backToTopBtn.classList.toggle('visible', scrollY > 300); header.classList.toggle('is-scrolled', scrollY > 0); if (window.innerHeight + scrollY >= document.body.offsetHeight - 400) fetchAndRenderImages(); ticking = false; }); ticking = true; } };
-        window.addEventListener('scroll', handleScroll, { passive: true });
-        backToTopBtn.addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
+        backToTopBtn.addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' })); 
+        
+        function handleScroll() {
+            const currentScrollY = window.scrollY;
+            if (currentScrollY > 300) { backToTopBtn.classList.add('visible'); } 
+            else { backToTopBtn.classList.remove('visible'); } 
+            
+            // Header 动画
+            if (currentScrollY > 50) { header.classList.add('state-scrolled-fully'); header.classList.remove('state-scrolled-partially'); } 
+            else if (currentScrollY > 0) { header.classList.add('state-scrolled-partially'); header.classList.remove('state-scrolled-fully'); } 
+            else { header.classList.remove('state-scrolled-fully', 'state-scrolled-partially'); }
+            
+            // 无限滚动
+            if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 500) { fetchAndRenderImages(); } 
+        }
+
+        window.addEventListener('scroll', () => { 
+            if (!ticking) { window.requestAnimationFrame(() => { handleScroll(); ticking = false; }); ticking = true; }
+        }); 
 
         (async function init() { await createFilterButtons(); await fetchAndRenderImages(); })();
     });
@@ -631,17 +624,29 @@ cat << 'EOF' > public/login.html
 <!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>后台登录 - 图片画廊</title><script src="https://cdn.tailwindcss.com"></script><style> body { background-color: #f0fdf4; } </style></head><body class="antialiased text-green-900"><div class="min-h-screen flex items-center justify-center"><div class="max-w-md w-full bg-white p-8 rounded-lg shadow-lg"><h1 class="text-3xl font-bold text-center text-green-900 mb-6">后台管理登录</h1><div id="error-message" class="hidden bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4" role="alert"><strong class="font-bold">登录失败！</strong><span class="block sm:inline">用户名或密码不正确。</span></div><form action="/api/login" method="POST"><div class="mb-4"><label for="username" class="block text-green-800 text-sm font-bold mb-2">用户名</label><input type="text" id="username" name="username" required class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-green-500"></div><div class="mb-6"><label for="password" class="block text-green-800 text-sm font-bold mb-2">密码</label><input type="password" id="password" name="password" required class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 mb-3 leading-tight focus:outline-none focus:ring-2 focus:ring-green-500"></div><div class="flex items-center justify-between"><button type="submit" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg focus:outline-none focus:shadow-outline transition-colors"> 登 录 </button></div></form></div></div><script> const urlParams = new URLSearchParams(window.location.search); if (urlParams.has('error')) { document.getElementById('error-message').classList.remove('hidden'); } </script></body></html>
 EOF
 
-    echo "--> 正在生成后台管理页 public/admin.html (集成交互式重名上传)..."
+    echo "--> 正在生成后台管理页 public/admin.html (v18.9.6 UI优化版)..."
 cat << 'EOF' > public/admin.html
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>后台管理 - 图片画廊</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <style> body { background-color: #f8fafc; } .modal, .toast, .lightbox { display: none; } .modal.active, .lightbox.active { display: flex; } body.lightbox-open { overflow: hidden; } .category-item.active { background-color: #dcfce7; font-weight: bold; } .toast { position: fixed; top: 1.5rem; right: 1.5rem; z-index: 9999; transform: translateX(120%); transition: transform 0.3s ease-in-out; } .toast.show { transform: translateX(0); } .file-preview-item.upload-success { background-color: #f0fdf4; } .file-preview-item.upload-error { background-color: #fef2f2; } .lightbox { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.9); justify-content: center; align-items: center; z-index: 1000; opacity: 0; visibility: hidden; transition: opacity 0.3s ease; } .lightbox.active { opacity: 1; visibility: visible; } .lightbox-image { max-width: 85%; max-height: 85%; display: block; object-fit: contain; } .lightbox-btn { position: absolute; top: 50%; transform: translateY(-50%); background-color: rgba(255,255,255,0.1); color: white; border: none; font-size: 2.5rem; cursor: pointer; padding: 0.5rem 1rem; border-radius: 0.5rem; transition: background-color 0.2s; } .lb-prev { left: 1rem; } .lb-next { right: 1rem; } .lb-close { top: 1rem; right: 1rem; font-size: 2rem; } .lb-download { position: absolute; bottom: 1rem; right: 1rem; background-color: #22c55e; color: white; border: none; padding: 0.5rem 1rem; border-radius: 0.5rem; cursor: pointer; transition: background-color 0.2s; font-size: 1rem; text-decoration: none; } .lb-download:hover { background-color: #16a34a; } #file-preview-list { resize: vertical; } </style>
+    <style> body { background-color: #f8fafc; } .modal, .toast, .lightbox { display: none; } .modal.active, .lightbox.active { display: flex; } body.lightbox-open { overflow: hidden; } .category-item.active { background-color: #dcfce7; font-weight: bold; } .toast { position: fixed; top: 1.5rem; right: 1.5rem; z-index: 9999; transform: translateX(120%); transition: transform 0.3s ease-in-out; } .toast.show { transform: translateX(0); } .file-preview-item.upload-success { background-color: #f0fdf4; } .file-preview-item.upload-error { background-color: #fef2f2; } .lightbox { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.9); justify-content: center; align-items: center; z-index: 1000; opacity: 0; visibility: hidden; transition: opacity 0.3s ease; } .lightbox.active { opacity: 1; visibility: visible; } .lightbox-image { max-width: 85%; max-height: 85%; display: block; object-fit: contain; } .lightbox-btn { position: absolute; top: 50%; transform: translateY(-50%); background-color: rgba(255,255,255,0.1); color: white; border: none; font-size: 2.5rem; cursor: pointer; padding: 0.5rem 1rem; border-radius: 0.5rem; transition: background-color 0.2s; } .lb-prev { left: 1rem; } .lb-next { right: 1rem; } .lb-close { top: 1rem; right: 1rem; font-size: 2rem; } .lb-download { position: absolute; bottom: 1rem; right: 1rem; background-color: #22c55e; color: white; border: none; padding: 0.5rem 1rem; border-radius: 0.5rem; cursor: pointer; transition: background-color 0.2s; font-size: 1rem; text-decoration: none; } .lb-download:hover { background-color: #16a34a; } #file-preview-list { resize: vertical; } .category-item { outline: none !important; } .category-item:focus { box-shadow: none !important; ring: 0 !important; } </style>
 </head>
 <body class="antialiased text-slate-800">
-    <header class="bg-white shadow-md p-4 flex justify-between items-center sticky top-0 z-20"><h1 class="text-2xl font-bold text-slate-900">内容管理系统</h1><div><a href="/" target="_blank" class="text-green-600 hover:text-green-800 mr-4">查看前台</a><a href="/api/logout" class="bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded transition-colors">退出登录</a></div></header>
+    <header class="bg-white shadow-md p-4 flex justify-between items-center sticky top-0 z-20">
+        <h1 class="text-2xl font-bold text-slate-900">内容管理系统</h1>
+        <div class="flex items-center gap-2">
+            <a href="/" target="_blank" title="查看前台" class="flex items-center gap-2 bg-white border border-gray-300 text-gray-700 font-semibold py-2 px-4 rounded-lg hover:bg-gray-50 transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-4.5 0V6.375c0-.621.504-1.125 1.125-1.125h1.125c.621 0 1.125.504 1.125 1.125V10.5m-4.5 0h4.5m-4.5 0a2.25 2.25 0 01-2.25-2.25V8.25c0-.621.504-1.125 1.125-1.125h1.125c.621 0 1.125.504 1.125 1.125v3.375M3 11.25h1.5m1.5 0h1.5m-1.5 0l1.5-1.5m-1.5 1.5l-1.5-1.5m9 6.75l1.5-1.5m-1.5 1.5l-1.5-1.5" /></svg>
+                <span class="hidden sm:inline">查看前台</span>
+            </a>
+            <a href="/api/logout" title="退出登录" class="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75" /></svg>
+                <span class="hidden sm:inline">退出登录</span>
+            </a>
+        </div>
+    </header>
     <main class="container mx-auto p-4 md:p-6 grid grid-cols-1 xl:grid-cols-12 gap-8">
         <div class="xl:col-span-4 space-y-8">
             <section id="upload-section" class="bg-white p-6 rounded-lg shadow-md">
@@ -739,7 +744,7 @@ cat << 'EOF' > public/admin.html
 
         async function refreshCategories() { const currentVal = DOMElements.categorySelect.value; await loadAndPopulateCategories(currentVal); await loadAndDisplayCategoriesForManagement(); }
         async function loadAndPopulateCategories(selectedCategory = null) { try { const response = await apiRequest('/api/categories'); const categories = await response.json(); [DOMElements.categorySelect, DOMElements.editCategorySelect].forEach(select => { const currentVal = select.value; select.innerHTML = ''; categories.forEach(cat => select.add(new Option(cat, cat))); select.value = categories.includes(currentVal) ? currentVal : selectedCategory || categories[0]; }); } catch (error) { if (error.message !== 'Unauthorized') console.error('加载分类失败:', error); } }
-        async function loadAndDisplayCategoriesForManagement() { try { const response = await apiRequest('/api/categories'); const categories = await response.json(); DOMElements.categoryManagementList.innerHTML = ''; const allCatItem = document.createElement('div'); allCatItem.className = 'category-item flex items-center justify-between p-2 rounded cursor-pointer hover:bg-gray-50 active'; allCatItem.innerHTML = `<span class="category-name flex-grow">全部图片</span>`; DOMElements.categoryManagementList.appendChild(allCatItem); categories.forEach(cat => { const isUncategorized = cat === UNCATEGORIZED; const item = document.createElement('div'); item.className = 'category-item flex items-center justify-between p-2 rounded'; item.innerHTML = `<span class="category-name flex-grow ${isUncategorized ? 'text-slate-500' : 'cursor-pointer hover:bg-gray-50'}">${cat}</span>` + (isUncategorized ? '' : `<div class="space-x-2 flex-shrink-0"><button data-name="${cat}" class="rename-cat-btn text-blue-500 hover:text-blue-700 text-sm">重命名</button><button data-name="${cat}" class="delete-cat-btn text-red-500 hover:red-700 text-sm">删除</button></div>`); DOMElements.categoryManagementList.appendChild(item); }); } catch (error) { if (error.message !== 'Unauthorized') console.error('加载分类管理列表失败:', error); } }
+        async function loadAndDisplayCategoriesForManagement() { try { const response = await apiRequest('/api/categories'); const categories = await response.json(); DOMElements.categoryManagementList.innerHTML = ''; const allCatItem = document.createElement('div'); allCatItem.className = 'category-item flex items-center justify-between p-2 rounded cursor-pointer hover:bg-gray-100 active focus:outline-none focus:ring-0'; allCatItem.innerHTML = `<span class="category-name flex-grow">全部图片</span>`; DOMElements.categoryManagementList.appendChild(allCatItem); categories.forEach(cat => { const isUncategorized = cat === UNCATEGORIZED; const item = document.createElement('div'); item.className = 'category-item flex items-center justify-between p-2 rounded focus:outline-none focus:ring-0'; item.innerHTML = `<span class="category-name flex-grow ${isUncategorized ? 'text-slate-500' : 'cursor-pointer hover:bg-gray-100'}">${cat}</span>` + (isUncategorized ? '' : `<div class="space-x-2 flex-shrink-0"><button data-name="${cat}" class="rename-cat-btn text-blue-500 hover:text-blue-700 text-sm">重命名</button><button data-name="${cat}" class="delete-cat-btn text-red-500 hover:red-700 text-sm">删除</button></div>`); DOMElements.categoryManagementList.appendChild(item); }); } catch (error) { if (error.message !== 'Unauthorized') console.error('加载分类管理列表失败:', error); } }
         async function loadImages(category = 'all', categoryName = '全部图片') {
             DOMElements.imageList.innerHTML = ''; DOMElements.imageLoader.classList.remove('hidden');
             try {
@@ -753,12 +758,38 @@ cat << 'EOF' > public/admin.html
                 else { adminLoadedImages.forEach(renderImageCard); }
             } catch (error) { if(error.message !== 'Unauthorized') DOMElements.imageLoader.textContent = '加载图片失败。'; }
         }
+        
         function renderImageCard(image) {
             const card = document.createElement('div');
             card.className = 'border rounded-lg shadow-sm bg-white overflow-hidden flex flex-col';
-            card.innerHTML = `<a class="preview-btn h-40 bg-slate-100 flex items-center justify-center cursor-pointer" data-id="${image.id}"><img src="/image-proxy/${image.filename}?w=400" alt="${image.description}" class="max-h-full max-w-full object-contain"></a><div class="p-3 flex-grow flex flex-col"><p class="font-bold text-sm truncate" title="${image.originalFilename}">${image.originalFilename}</p><p class="text-xs text-slate-500 -mt-1 mb-2">${formatBytes(image.size)}</p><p class="text-xs text-slate-500 mb-2">${image.category}</p><p class="text-xs text-slate-600 flex-grow mb-3 break-words">${image.description || '无描述'}</p></div><div class="bg-slate-50 p-2 flex justify-around flex-wrap gap-2"><button data-id="${image.id}" class="preview-btn text-sm bg-gray-500 hover:bg-gray-600 text-white font-bold py-1 px-3 rounded transition-colors whitespace-nowrap">预览</button><a href="${image.src}" download="${image.originalFilename}" class="download-btn text-sm bg-green-600 hover:bg-green-700 text-white font-bold py-1 px-3 rounded transition-colors inline-block whitespace-nowrap" title="下载">下载</a><button data-image='${JSON.stringify(image)}' class="edit-btn text-sm bg-blue-500 hover:bg-blue-600 text-white font-bold py-1 px-3 rounded whitespace-nowrap">编辑</button><button data-id="${image.id}" class="delete-btn text-sm bg-red-500 hover:bg-red-600 text-white font-bold py-1 px-3 rounded whitespace-nowrap">删除</button></div>`;
+            card.innerHTML = `
+                <a class="preview-btn h-40 bg-slate-100 flex items-center justify-center cursor-pointer group" data-id="${image.id}">
+                    <img src="/image-proxy/${image.filename}?w=400" alt="${image.description}" class="max-h-full max-w-full object-contain group-hover:scale-105 transition-transform duration-300">
+                </a>
+                <div class="p-3 flex-grow flex flex-col">
+                    <p class="font-bold text-sm truncate" title="${image.originalFilename}">${image.originalFilename}</p>
+                    <p class="text-xs text-slate-500 -mt-1 mb-2">${formatBytes(image.size)}</p>
+                    <p class="text-xs text-slate-500 mb-2">${image.category}</p>
+                    <p class="text-xs text-slate-600 flex-grow mb-3 break-words">${image.description || '无描述'}</p>
+                </div>
+                <div class="bg-slate-50 p-2 flex justify-end items-center gap-1">
+                    <button title="预览" data-id="${image.id}" class="preview-btn p-2 rounded-full text-slate-600 hover:bg-slate-200 hover:text-slate-800 transition-colors">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                    </button>
+                    <a href="${image.src}" download="${image.originalFilename}" title="下载" class="download-btn p-2 rounded-full text-slate-600 hover:bg-slate-200 hover:text-slate-800 transition-colors">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>
+                    </a>
+                    <button title="编辑" data-image='${JSON.stringify(image)}' class="edit-btn p-2 rounded-full text-slate-600 hover:bg-slate-200 hover:text-slate-800 transition-colors">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487zm0 0L19.5 7.125" /></svg>
+                    </button>
+                    <button title="删除" data-id="${image.id}" class="delete-btn p-2 rounded-full text-red-500 hover:bg-red-100 hover:text-red-700 transition-colors">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.134-2.036-2.134H8.718c-1.126 0-2.037.955-2.037 2.134v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>
+                    </button>
+                </div>
+            `;
             DOMElements.imageList.appendChild(card);
         }
+
         function updateAdminLightbox() { const item = adminLoadedImages[currentAdminLightboxIndex]; if (!item) return; const lightbox = DOMElements.adminLightbox; lightbox.querySelector('.lightbox-image').src = item.src; lightbox.querySelector('#admin-lightbox-download-link').href = item.src; lightbox.querySelector('#admin-lightbox-download-link').download = item.originalFilename; }
         function showNextAdminImage() { currentAdminLightboxIndex = (currentAdminLightboxIndex + 1) % adminLoadedImages.length; updateAdminLightbox(); }
         function showPrevAdminImage() { currentAdminLightboxIndex = (currentAdminLightboxIndex - 1 + adminLoadedImages.length) % adminLoadedImages.length; updateAdminLightbox(); }
@@ -775,11 +806,12 @@ cat << 'EOF' > public/admin.html
             } else if (target.classList.contains('delete-cat-btn')) {
                 const confirmed = await showConfirmationModal('确认删除', `<p>确定要删除分类 "<strong>${catName}</strong>" 吗？<br>此分类下的图片将归入 "未分类"。</p>`, '确认删除');
                 if(confirmed) { try { const response = await apiRequest('/api/admin/categories', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: catName }) }); if (!response.ok) throw new Error((await response.json()).message); showToast('删除成功'); await Promise.all([refreshCategories(), loadImages('all', '全部图片')]); } catch (error) { showToast(`删除失败: ${error.message}`, 'error'); } }
-            } else if (target.classList.contains('category-name')) {
+            } else if (target.closest('.category-item')) {
                 document.querySelectorAll('.category-item').forEach(el => el.classList.remove('active'));
-                target.closest('.category-item').classList.add('active');
+                const parentItem = target.closest('.category-item');
+                parentItem.classList.add('active');
                 DOMElements.searchInput.value = ''; currentSearchTerm = '';
-                const category = target.textContent; await loadImages(category === '全部图片' ? 'all' : category, category);
+                const category = parentItem.querySelector('.category-name').textContent; await loadImages(category === '全部图片' ? 'all' : category, category);
             }
         });
         DOMElements.searchInput.addEventListener('input', () => { clearTimeout(debounceTimer); debounceTimer = setTimeout(() => { currentSearchTerm = DOMElements.searchInput.value; document.querySelectorAll('.category-item').forEach(el => el.classList.remove('active')); DOMElements.categoryManagementList.firstElementChild.classList.add('active'); loadImages('all', '全部图片'); }, 300); });
