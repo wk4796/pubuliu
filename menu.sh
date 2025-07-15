@@ -1,11 +1,13 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v18.9.9 最终修正版)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v19.0.0 体验优化版)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
-#   v18.9.9 更新:
-#   - 细节修复(用户需求): 精确修正头部和页脚下方的两条分割线样式，使其与用户源文件100%匹配，同时保留所有动态功能。
+#   v19.0.0 更新:
+#   - UI/UX(用户需求): 调整头部布局，功能按钮与标题同行并同步隐藏。
+#   - UI/UX(用户需求): 移除搜索背景模糊，增加搜索执行按钮，优化移动端体验。
+#   - 修复(用户需求): 简化滚动处理逻辑，彻底修复头部在滚动时闪烁的问题。
 # =================================================================
 
 # --- 配置 ---
@@ -17,7 +19,7 @@ NC='\033[0m' # No Color
 # 为 y/n 提示定义更具体的颜色
 PROMPT_Y="(${GREEN}y${NC}/${RED}n${NC})"
 
-SCRIPT_VERSION="18.9.9"
+SCRIPT_VERSION="19.0.0"
 APP_NAME="image-gallery"
 
 # --- 路径设置 (核心改进：路径将基于脚本自身位置，确保唯一性) ---
@@ -42,11 +44,11 @@ cat << 'EOF' > data/categories.json
 ]
 EOF
 
-    echo "--> 正在生成 package.json (已增加 sharp 依赖)..."
+    echo "--> 正在生成 package.json..."
 cat << 'EOF' > package.json
 {
   "name": "image-gallery-pro",
-  "version": "8.1.0",
+  "version": "9.0.0",
   "description": "A high-performance, full-stack image gallery application with all features.",
   "main": "server.js",
   "scripts": {
@@ -65,7 +67,7 @@ cat << 'EOF' > package.json
 }
 EOF
 
-    echo "--> 正在生成后端服务器 server.js (已增加分页API)..."
+    echo "--> 正在生成后端服务器 server.js..."
 cat << 'EOF' > server.js
 const express = require('express');
 const multer = require('multer');
@@ -330,7 +332,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 })();
 EOF
 
-    echo "--> 正在生成主画廊 public/index.html (v18.9.9 最终修正版)..."
+    echo "--> 正在生成主画廊 public/index.html (v19.0.0 体验优化版)..."
 cat << 'EOF' > public/index.html
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -346,7 +348,6 @@ cat << 'EOF' > public/index.html
     <script src="https://cdn.tailwindcss.com"></script>
 
     <style>
-        /* --- 核心颜色变量 (用于支持暗黑模式) --- */
         :root {
             --bg-color: #f0fdf4;
             --text-color: #14532d;
@@ -358,6 +359,7 @@ cat << 'EOF' > public/index.html
             --grid-item-bg: #e4e4e7;
             --search-bg: #ffffff;
             --search-placeholder-color: #9ca3af;
+            --divider-color: #dcfce7; /* 页脚边框颜色 */
         }
 
         body.dark {
@@ -371,19 +373,19 @@ cat << 'EOF' > public/index.html
             --grid-item-bg: #374151;
             --search-bg: #1f2937;
             --search-placeholder-color: #6b7280;
+            --divider-color: #166534;
         }
         
-        body { font-family: 'Inter', 'Noto Sans SC', sans-serif; background-color: var(--bg-color); color: var(--text-color); display: flex; flex-direction: column; min-height: 100vh; }
+        body { font-family: 'Inter', 'Noto Sans SC', sans-serif; background-color: var(--bg-color); color: var(--text-color); }
         body.overflow-hidden { overflow: hidden; }
 
-        /* --- Header 样式 (修正版) --- */
-        .header-sticky { padding-top: 1rem; padding-bottom: 1rem; background-color: rgba(240, 253, 244, 0); position: sticky; top: 0; z-index: 40; /* 修正 #1: 采用用户源文件的阴影样式 */ box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1); transition: padding 0.3s ease-in-out, background-color 0.3s ease-in-out; }
-        .header-sticky h1 { opacity: 1; margin-bottom: 0.75rem; transition: opacity 0.3s ease-in-out, margin-bottom 0.3s ease-in-out; }
-        .header-sticky.state-scrolled-partially { padding-top: 0.75rem; padding-bottom: 0.75rem; background-color: var(--header-bg-scrolled); backdrop-filter: blur(8px); }
-        .header-sticky.state-scrolled-fully { padding-top: 0.5rem; padding-bottom: 0.5rem; background-color: var(--header-bg-scrolled); backdrop-filter: blur(8px); }
-        .header-sticky.state-scrolled-fully h1 { opacity: 0; margin-bottom: 0; height: 0; overflow: hidden; pointer-events: none; }
+        /* 修正 #4: 简化的滚动样式，修复闪烁 */
+        .header-sticky { padding-top: 1rem; padding-bottom: 1rem; background-color: rgba(240, 253, 244, 0); position: sticky; top: 0; z-index: 40; box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05); transition: padding 0.3s ease-in-out, background-color 0.3s ease-in-out; }
+        .header-sticky #header-top { transition: opacity 0.3s ease-in-out, height 0.3s ease-in-out, margin-bottom 0.3s ease-in-out; }
+        .header-sticky.is-scrolled { padding-top: 0.5rem; padding-bottom: 0.5rem; background-color: var(--header-bg-scrolled); backdrop-filter: blur(8px); }
+        .header-sticky.is-scrolled #header-top { opacity: 0; height: 0; margin-bottom: 0; pointer-events: none; overflow: hidden; }
         
-        /* --- 搜索浮层样式 --- */
+        /* 修正 #2: 搜索浮层样式，移除背景模糊 */
         #search-overlay { opacity: 0; visibility: hidden; transition: opacity 0.3s ease, visibility 0s 0.3s; }
         #search-overlay.active { opacity: 1; visibility: visible; transition: opacity 0.3s ease, visibility 0s 0s; }
         #search-box { transform: scale(0.95); opacity: 0; transition: transform 0.3s ease, opacity 0.3s ease; }
@@ -416,41 +418,45 @@ cat << 'EOF' > public/index.html
 </head>
 <body class="antialiased">
 
-    <div class="fixed top-4 right-4 z-50 flex items-center gap-1">
-        <button id="search-toggle-btn" title="搜索" class="p-2 rounded-full text-[var(--text-color)] bg-[var(--bg-color)] hover:bg-gray-500/10 shadow-md">
-            <svg class="w-6 h-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg>
-        </button>
-        <button id="theme-toggle" title="切换主题" class="p-2 rounded-full text-[var(--text-color)] bg-[var(--bg-color)] hover:bg-gray-500/10 shadow-md">
-            <svg id="theme-icon-sun" class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
-            <svg id="theme-icon-moon" class="w-6 h-6 hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" /></svg>
-        </button>
-    </div>
-
     <header class="text-center header-sticky">
-        <h1 class="text-4xl md:text-5xl font-bold">图片画廊</h1>
+        <div id="header-top" class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between h-auto md:h-14 mb-4">
+            <div class="w-1/3"></div>
+            <h1 class="text-4xl md:text-5xl font-bold w-1/3 whitespace-nowrap">图片画廊</h1>
+            <div class="w-1/3 flex items-center justify-end gap-1">
+                <button id="search-toggle-btn" title="搜索" class="p-2 rounded-full text-[var(--text-color)] hover:bg-gray-500/10">
+                    <svg class="w-6 h-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg>
+                </button>
+                <button id="theme-toggle" title="切换主题" class="p-2 rounded-full text-[var(--text-color)] hover:bg-gray-500/10">
+                    <svg id="theme-icon-sun" class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
+                    <svg id="theme-icon-moon" class="w-6 h-6 hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" /></svg>
+                </button>
+            </div>
+        </div>
         <div id="filter-buttons" class="flex justify-center flex-wrap gap-2 px-4">
             <button class="filter-btn active" data-filter="all">全部</button>
             <button class="filter-btn" data-filter="random">随机</button>
         </div>
     </header>
+    
+    <div class="border-b-2" style="border-color: var(--divider-color);"></div>
 
-    <main class="container mx-auto px-6 py-8 md:py-10 flex-grow">
+    <main class="container mx-auto px-6 py-8 md:py-10">
         <div id="gallery-container" class="max-w-7xl mx-auto grid-gallery"></div>
         <div id="loader" class="text-center py-8 hidden">正在加载更多...</div>
     </main>
     
-    <footer class="text-center py-8 mt-auto border-t border-green-200">
+    <footer class="text-center py-8 mt-auto border-t" style="border-color: var(--divider-color);">
         <p>© 2025 图片画廊</p>
     </footer>
 
-    <div id="search-overlay" class="fixed inset-0 z-50 flex items-start justify-center pt-24 md:pt-32 p-4 bg-black/30 backdrop-blur-sm">
-        <div id="search-box" class="w-full max-w-lg relative">
+    <div id="search-overlay" class="fixed inset-0 z-50 flex items-start justify-center pt-24 md:pt-32 p-4 bg-black/30">
+        <div id="search-box" class="w-full max-w-lg relative flex items-center gap-2">
             <div class="absolute top-1/2 left-5 -translate-y-1/2 text-gray-400">
                 <svg class="w-6 h-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg>
             </div>
-            <input type="search" id="search-input" placeholder="输入关键词，然后按 Enter 搜索..." class="w-full py-4 pl-14 pr-8 text-xl rounded-xl border-0 shadow-2xl focus:ring-2 focus:ring-green-500" style="background-color: var(--search-bg); color: var(--text-color);">
-            <button id="search-close-btn" class="absolute top-1/2 right-4 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-                <svg class="w-6 h-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" /></svg>
+            <input type="search" id="search-input" placeholder="输入关键词，按 Enter 或点击按钮..." class="w-full py-4 pl-14 pr-5 text-lg rounded-lg border-0 shadow-2xl focus:ring-2 focus:ring-green-500" style="background-color: var(--search-bg); color: var(--text-color);">
+            <button id="search-exec-btn" class="bg-green-600 hover:bg-green-700 text-white font-bold py-4 px-5 rounded-lg transition-colors absolute right-0 top-0 h-full">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg>
             </button>
         </div>
     </div>
@@ -473,11 +479,11 @@ cat << 'EOF' > public/index.html
         const themeIconMoon = document.getElementById('theme-icon-moon');
         const searchOverlay = document.getElementById('search-overlay');
         const searchInput = document.getElementById('search-input');
+        const searchExecBtn = document.getElementById('search-exec-btn'); // 修正 #3
         
         const openSearch = () => { searchOverlay.classList.add('active'); body.classList.add('overflow-hidden'); setTimeout(() => searchInput.focus(), 50); };
         const closeSearch = () => { searchOverlay.classList.remove('active'); body.classList.remove('overflow-hidden'); };
         searchToggleBtn.addEventListener('click', openSearch);
-        document.getElementById('search-close-btn').addEventListener('click', closeSearch);
         searchOverlay.addEventListener('click', (e) => { if (e.target === searchOverlay) closeSearch(); });
         document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && searchOverlay.classList.contains('active')) closeSearch(); });
         
@@ -490,6 +496,7 @@ cat << 'EOF' > public/index.html
             closeSearch(); resetGallery(); fetchAndRenderImages();
         };
         searchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') performSearch(); });
+        searchExecBtn.addEventListener('click', performSearch); // 修正 #3
         
         const applyTheme = (theme) => { if (theme === 'dark') { body.classList.add('dark'); themeIconSun.classList.add('hidden'); themeIconMoon.classList.remove('hidden'); } else { body.classList.remove('dark'); themeIconSun.classList.remove('hidden'); themeIconMoon.classList.add('hidden'); } };
         themeToggleBtn.addEventListener('click', () => { const newTheme = body.classList.contains('dark') ? 'light' : 'dark'; localStorage.setItem('theme', newTheme); applyTheme(newTheme); });
@@ -576,15 +583,22 @@ cat << 'EOF' > public/index.html
         const backToTopBtn = document.querySelector('.back-to-top'); let ticking = false;
         backToTopBtn.addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' })); 
         
+        // 修正 #4: 简化的滚动处理函数
         function handleScroll() {
             const currentScrollY = window.scrollY;
+            
+            // 返回顶部按钮
             if (currentScrollY > 300) { backToTopBtn.classList.add('visible'); } 
             else { backToTopBtn.classList.remove('visible'); } 
             
-            if (currentScrollY > 50) { header.classList.add('state-scrolled-fully'); header.classList.remove('state-scrolled-partially'); } 
-            else if (currentScrollY > 0) { header.classList.add('state-scrolled-partially'); header.classList.remove('state-scrolled-fully'); } 
-            else { header.classList.remove('state-scrolled-fully', 'state-scrolled-partially'); }
+            // 头部动画
+            if (currentScrollY > 10) { // 使用一个固定的、简单的阈值
+                header.classList.add('is-scrolled');
+            } else {
+                header.classList.remove('is-scrolled');
+            }
             
+            // 无限滚动
             if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 500) { fetchAndRenderImages(); } 
         }
 
@@ -834,14 +848,13 @@ check_and_install_deps() {
     local sudo_cmd=$4
     
     if command -v "$command_to_check" &> /dev/null; then
-        return 0 # 依赖已存在，直接返回
+        return 0
     fi
     
     echo -e "${YELLOW}--> 检测到核心依赖 '${dep_to_check}' 未安装，正在尝试自动安装...${NC}"
     
     local pm_cmd=""
 
-    # 确定包管理器
     if command -v apt-get &> /dev/null; then
         pm_cmd="apt-get install -y"
         echo "--> 检测到 APT 包管理器，正在更新..."
@@ -857,7 +870,6 @@ check_and_install_deps() {
         return 1
     fi
 
-    # 执行安装
     echo "--> 准备执行: ${sudo_cmd} ${pm_cmd} ${package_name}"
     if eval "${sudo_cmd} ${pm_cmd} ${package_name}"; then
         echo -e "${GREEN}--> '${dep_to_check}' 安装成功！${NC}"
@@ -877,7 +889,6 @@ display_status() {
     if [ -d "${INSTALL_DIR}" ] && [ -f "${INSTALL_DIR}/.env" ]; then
         printf "  %-15s %b%s%b\n" "安装状态:" "${GREEN}" "已安装" "${NC}"
         
-        # 进入目录读取配置
         cd "${INSTALL_DIR}" >/dev/null 2>&1
         local SERVER_IP; SERVER_IP=$(hostname -I | awk '{print $1}')
         if [ -z "${SERVER_IP}" ]; then SERVER_IP="127.0.0.1"; fi
@@ -885,7 +896,6 @@ display_status() {
         local PORT; PORT=$(grep 'PORT=' .env | cut -d '=' -f2)
         local ADMIN_USER; ADMIN_USER=$(grep 'ADMIN_USERNAME=' .env | cut -d '=' -f2)
         
-        # 检查 PM2 进程状态
         if command -v pm2 &> /dev/null && pm2 id "$APP_NAME" &> /dev/null; then
             local pm2_status; pm2_status=$(pm2 show "$APP_NAME" | grep 'status' | awk '{print $4}')
             if [ "$pm2_status" == "online" ]; then
@@ -904,7 +914,7 @@ display_status() {
         printf "  %-15s %bhttp://%s:%s/admin%b\n" "后台管理:" "${GREEN}" "${SERVER_IP}" "${PORT}" "${NC}"
         printf "  %-15s %b%s%b\n" "后台用户:" "${BLUE}" "${ADMIN_USER}" "${NC}"
         printf "  %-15s %b%s/data%b\n" "数据目录:" "${BLUE}" "${INSTALL_DIR}" "${NC}"
-        cd - >/dev/null 2>&1 # 返回原目录
+        cd - >/dev/null 2>&1
     else
         printf "  %-15s %b%s%b\n" "安装状态:" "${RED}" "未安装" "${NC}"
     fi
@@ -928,11 +938,9 @@ install_app() {
         echo -e "${GREEN}--> 检测到以 root 用户身份运行。${NC}"
     fi
 
-    # 检查核心系统依赖
     check_and_install_deps "Node.js & npm" "nodejs npm" "node" "${sudo_cmd}" || return 1
     check_and_install_deps "编译工具(for sharp)" "build-essential" "make" "${sudo_cmd}" || return 1
 
-    # 专门处理 PM2 (通过 npm 安装)
     echo -e "${YELLOW}--> 正在检查 PM2...${NC}"
     if ! command -v pm2 &> /dev/null; then
         echo -e "${YELLOW}--> 检测到 PM2 未安装，将通过 npm 全局安装...${NC}"
@@ -1113,20 +1121,20 @@ uninstall_app() {
 show_menu() {
     clear
     display_status
-    echo "" # blank line for spacing
+    echo ""
     echo -e "${YELLOW}-------------------------- 可用操作 --------------------------${NC}"
     echo -e " ${YELLOW}【基础操作】${NC}"
     printf "   %-2s. %s\n" "1" "安装或修复应用"
     printf "   %-2s. %s\n" "2" "启动应用"
     printf "   %-2s. %s\n" "3" "停止应用"
     printf "   %-2s. %s\n" "4" "重启应用"
-    echo "" # blank line for spacing
+    echo ""
     echo -e " ${YELLOW}【维护与管理】${NC}"
     printf "   %-2s. %s\n" "5" "查看应用状态 (刷新信息)"
     printf "   %-2s. %s\n" "6" "修改后台配置 (用户名/密码)"
     printf "   %-2s. %s\n" "7" "查看实时日志"
     printf "   %-2s. %b%s%b\n" "8" "${RED}" "彻底卸载应用 (危险操作)" "${NC}"
-    echo "" # blank line for spacing
+    echo ""
     printf "   %-2s. %s\n" "0" "退出脚本"
     echo -e "${YELLOW}--------------------------------------------------------------${NC}"
     local choice
@@ -1137,7 +1145,7 @@ show_menu() {
         2) start_app ;;
         3) stop_app ;;
         4) restart_app ;;
-        5) show_menu ;; # 刷新状态就是重新调用菜单
+        5) show_menu ;;
         6) manage_credentials ;;
         7) view_logs ;;
         8) uninstall_app ;;
@@ -1145,7 +1153,6 @@ show_menu() {
         *) echo -e "${RED}无效输入...${NC}" ;;
     esac
 
-    # 在执行完一个动作后（除了退出和刷新），暂停并等待用户输入
     if [[ "$choice" != "0" && "$choice" != "5" ]]; then
         read -n 1 -s -r -p "按任意键返回主菜单..."
     fi
