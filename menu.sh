@@ -1,13 +1,13 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v18.4 主题切换版)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v18.6 交互优化版)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
-#   v18.4 更新:
-#   - 新增: 在画廊主页右上角添加日夜主题切换功能。
-#   - 优化: 调整顶栏布局，将搜索框和主题切换按钮置于同一行。
-#   - 动画: 主题切换具有平滑的颜色过渡动画。
+#   v18.6 更新:
+#   - 重大更新: 搜索功能改为全屏覆盖式界面，风格统一，体验更佳。
+#   - 优化: 移除宽图片特殊处理逻辑，所有瀑布流卡片宽度保持一致。
+#   - 优化: 统一顶部功能图标颜色，使其在不同主题下与文字颜色保持一致。
 # =================================================================
 
 # --- 配置 ---
@@ -19,7 +19,7 @@ NC='\033[0m' # No Color
 # 为 y/n 提示定义更具体的颜色
 PROMPT_Y="(${GREEN}y${NC}/${RED}n${NC})"
 
-SCRIPT_VERSION="18.4"
+SCRIPT_VERSION="18.6"
 APP_NAME="image-gallery"
 
 # --- 路径设置 (核心改进：路径将基于脚本自身位置，确保唯一性) ---
@@ -332,7 +332,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 })();
 EOF
 
-    echo "--> 正在生成主画廊 public/index.html (全新高级版)..."
+    echo "--> 正在生成主画廊 public/index.html (v18.6 交互优化版)..."
 cat << 'EOF' > public/index.html
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -349,16 +349,18 @@ cat << 'EOF' > public/index.html
 
     <style>
         :root {
-            --bg-color: #f0fdf4;
-            --text-color: #14532d;
-            --header-bg: rgba(240, 253, 244, 0);
-            --header-bg-scrolled: rgba(240, 253, 244, 0.85);
+            --bg-color: #f8fafc;
+            --text-color: #1f2937;
+            --text-color-light: #6b7280;
+            --header-bg: rgba(248, 250, 252, 0);
+            --header-bg-scrolled: rgba(248, 250, 252, 0.85);
             --header-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.05), 0 2px 4px -2px rgb(0 0 0 / 0.05);
-            --filter-btn-color: #14532d;
-            --filter-btn-hover-bg: #dcfce7;
+            --filter-btn-color: #374151;
+            --filter-btn-hover-bg: #e5e7eb;
             --filter-btn-active-bg: #22c55e;
             --filter-btn-active-border: #16a34a;
-            --grid-item-bg: #e4e4e7;
+            --grid-item-bg: #e5e7eb;
+            --grid-item-border: #d1d5db;
             --search-bg: white;
             --search-border: #d1d5db;
             --search-placeholder: #6b7280;
@@ -369,6 +371,7 @@ cat << 'EOF' > public/index.html
         body.dark {
             --bg-color: #111827;
             --text-color: #d1d5db;
+            --text-color-light: #9ca3af;
             --header-bg: rgba(17, 24, 39, 0);
             --header-bg-scrolled: rgba(17, 24, 39, 0.85);
             --header-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.2), 0 2px 4px -2px rgb(0 0 0 / 0.2);
@@ -377,6 +380,7 @@ cat << 'EOF' > public/index.html
             --filter-btn-active-bg: #16a34a;
             --filter-btn-active-border: #15803d;
             --grid-item-bg: #374151;
+            --grid-item-border: #4b5563;
             --search-bg: #1f2937;
             --search-border: #4b5563;
             --search-placeholder: #9ca3af;
@@ -385,21 +389,33 @@ cat << 'EOF' > public/index.html
         }
         
         body { font-family: 'Inter', 'Noto Sans SC', sans-serif; background-color: var(--bg-color); color: var(--text-color); display: flex; flex-direction: column; min-height: 100vh; transition: background-color 0.3s ease, color 0.3s ease; }
-        body.lightbox-open { overflow: hidden; }
-        .filter-btn { padding: 0.5rem 1rem; border-radius: 9999px; font-weight: 500; transition: all 0.2s ease; border: 1px solid transparent; cursor: pointer; background-color: transparent; color: var(--filter-btn-color); }
-        .filter-btn:hover { background-color: var(--filter-btn-hover-bg); }
-        .filter-btn.active { background-color: var(--filter-btn-active-bg); color: white; border-color: var(--filter-btn-active-border); }
+        body.overflow-hidden { overflow: hidden; }
+
+        .header-sticky { padding-top: 1rem; padding-bottom: 1rem; background-color: var(--header-bg); position: sticky; top: 0; z-index: 40; transition: all 0.3s ease-in-out; }
+        .header-sticky.is-scrolled { background-color: var(--header-bg-scrolled); backdrop-filter: blur(8px); box-shadow: var(--header-shadow); padding-top: 0.5rem; padding-bottom: 0.5rem; }
         
-        /* Grid Waterfall Layout */
-        .grid-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); grid-auto-rows: 10px; gap: 1rem; }
-        .grid-item { position: relative; border-radius: 0.5rem; overflow: hidden; background-color: var(--grid-item-bg); box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1); opacity: 0; transform: translateY(20px); transition: opacity 0.5s ease-out, transform 0.5s ease-out, box-shadow 0.3s ease; }
-        .grid-item-wide { grid-column: span 2; }
-        @media (max-width: 480px) { .grid-item-wide { grid-column: span 1; } }
+        .theme-toggle-btn svg, .search-toggle-btn svg { color: var(--text-color); transition: color 0.3s ease, transform 0.4s ease; } /* 图标颜色统一 */
+        .theme-toggle-btn:hover svg { transform: scale(1.1) rotate(15deg); }
+        .search-toggle-btn:hover svg { transform: scale(1.1); }
+
+        /* 全屏搜索界面样式 */
+        #search-overlay { background-color: rgba(0, 0, 0, 0.5); backdrop-filter: blur(4px); transition: opacity 0.3s ease-in-out; }
+        #search-box { background-color: var(--search-bg); color: var(--search-text); transition: transform 0.3s ease-in-out; }
+        #search-input { background-color: transparent; border-color: var(--search-border); }
+        #search-input::placeholder { color: var(--search-placeholder); }
+        #search-input:focus { border-color: #22c55e; box-shadow: 0 0 0 1px #22c55e; }
+        .search-submit-btn { background-color: #22c55e; transition: background-color 0.2s ease; }
+        .search-submit-btn:hover { background-color: #16a34a; }
+
+        .grid-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); grid-auto-rows: 10px; gap: 1.25rem; }
+        .grid-item { position: relative; border-radius: 0.5rem; overflow: hidden; background-color: var(--grid-item-bg); border: 1px solid var(--grid-item-border); box-shadow: 0 2px 4px -1px rgb(0 0 0 / 0.06), 0 1px 2px -1px rgb(0 0 0 / 0.06); opacity: 0; transform: translateY(20px); transition: opacity 0.5s ease-out, transform 0.5s ease-out, box-shadow 0.3s ease, border-color 0.3s ease; }
         .grid-item.is-visible { opacity: 1; transform: translateY(0); }
         .grid-item img { cursor: pointer; width: 100%; height: 100%; object-fit: cover; display: block; transition: transform 0.4s ease; }
         .grid-item:hover img { transform: scale(1.05); }
 
-        /* Lightbox */
+        .filter-btn { padding: 0.5rem 1rem; border-radius: 9999px; font-weight: 500; transition: all 0.2s ease; border: 1px solid transparent; cursor: pointer; background-color: transparent; color: var(--filter-btn-color); }
+        .filter-btn:hover { background-color: var(--filter-btn-hover-bg); }
+        .filter-btn.active { background-color: var(--filter-btn-active-bg); color: white; border-color: var(--filter-btn-active-border); }
         .lightbox { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.9); display: flex; justify-content: center; align-items: center; z-index: 1000; opacity: 0; visibility: hidden; transition: opacity 0.3s ease; }
         .lightbox.active { opacity: 1; visibility: visible; }
         .lightbox-image { max-width: 85%; max-height: 85%; display: block; object-fit: contain; }
@@ -409,44 +425,27 @@ cat << 'EOF' > public/index.html
         .lb-counter { position: absolute; top: 1.5rem; left: 50%; transform: translateX(-50%); color: white; font-size: 1rem; background-color: rgba(0,0,0,0.3); padding: 0.25rem 0.75rem; border-radius: 9999px; }
         .lb-download { position: absolute; bottom: 1rem; right: 1rem; background-color: #22c55e; color: white; border: none; padding: 0.5rem 1rem; border-radius: 0.5rem; cursor: pointer; transition: background-color 0.2s; font-size: 1rem; text-decoration: none; }
         .lb-download:hover { background-color: #16a34a; }
-        
-        /* Header Scroll Effect */
-        .header-sticky { padding-top: 1.5rem; padding-bottom: 1.5rem; background-color: var(--header-bg); position: sticky; top: 0; z-index: 40; transition: padding 0.3s ease-in-out, background-color 0.3s ease-in-out; }
-        .header-sticky.state-scrolled-partially, .header-sticky.state-scrolled-fully { background-color: var(--header-bg-scrolled); backdrop-filter: blur(8px); box-shadow: var(--header-shadow); }
-        .header-sticky h1 { opacity: 1; transition: opacity 0.3s ease-in-out, margin-bottom 0.3s ease-in-out, height 0.3s ease-in-out; }
-        .header-sticky.state-scrolled-partially { padding-top: 0.75rem; padding-bottom: 0.75rem; }
-        .header-sticky.state-scrolled-fully { padding-top: 0.5rem; padding-bottom: 0.5rem; }
-        .header-sticky.state-scrolled-fully h1 { opacity: 0; margin-bottom: 0 !important; height: 0; overflow: hidden; pointer-events: none; }
-
-        /* Search Bar & Theme Toggle */
-        #search-input { background-color: var(--search-bg); border-color: var(--search-border); color: var(--search-text); }
-        #search-input::placeholder { color: var(--search-placeholder); }
-        .theme-toggle-btn svg { color: var(--theme-icon-color); transition: color 0.3s ease, transform 0.4s ease; }
-        .theme-toggle-btn:hover svg { transform: scale(1.1) rotate(15deg); }
-        
-        /* Misc */
         .back-to-top { position: fixed; bottom: 2rem; right: 2rem; background-color: #22c55e; color: white; width: 3rem; height: 3rem; border-radius: 9999px; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 8px rgba(0,0,0,0.2); cursor: pointer; opacity: 0; visibility: hidden; transform: translateY(20px); transition: all 0.3s ease; }
         .back-to-top.visible { opacity: 1; visibility: visible; transform: translateY(0); }
-        .footer { border-top: 1px solid var(--search-border); transition: border-color 0.3s ease; }
+        .footer { border-top: 1px solid var(--grid-item-border); transition: border-color 0.3s ease; }
     </style>
 </head>
 <body class="antialiased">
 
-    <header class="text-center header-sticky">
-        <h1 class="text-4xl md:text-5xl font-bold mb-6">图片画廊</h1>
-        <div class="max-w-4xl mx-auto flex items-center justify-center gap-4 px-4">
-            <div class="relative flex-grow">
-                <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
-                    <svg class="w-5 h-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd" /></svg>
-                </div>
-                <input type="search" id="search-input" placeholder="搜索图片描述或文件名..." class="block w-full pl-10 pr-3 py-2 border rounded-full leading-5 sm:text-sm focus:outline-none focus:ring-1 focus:ring-green-500">
+    <header class="header-sticky">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative flex items-center h-16">
+            <h1 class="text-3xl font-bold absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 whitespace-nowrap">图片画廊</h1>
+            <div class="flex items-center gap-2 ml-auto">
+                <button id="search-toggle-btn" title="搜索" class="search-toggle-btn p-2 rounded-full hover:bg-gray-500/10">
+                    <svg class="w-6 h-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg>
+                </button>
+                <button id="theme-toggle" title="切换主题" class="theme-toggle-btn p-2 rounded-full hover:bg-gray-500/10">
+                    <svg id="theme-icon-sun" class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
+                    <svg id="theme-icon-moon" class="w-6 h-6 hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" /></svg>
+                </button>
             </div>
-            <button id="theme-toggle" title="切换主题" class="theme-toggle-btn flex-shrink-0 p-2 rounded-full hover:bg-gray-500/10">
-                <svg id="theme-icon-sun" class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
-                <svg id="theme-icon-moon" class="w-6 h-6 hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" /></svg>
-            </button>
         </div>
-        <div id="filter-buttons" class="flex justify-center flex-wrap gap-2 px-4 mt-6">
+        <div id="filter-buttons" class="max-w-4xl mx-auto flex justify-center flex-wrap gap-2 px-4 pt-4">
             <button class="filter-btn active" data-filter="all">全部</button>
             <button class="filter-btn" data-filter="random">随机</button>
         </div>
@@ -461,329 +460,166 @@ cat << 'EOF' > public/index.html
         <p>© 2025 图片画廊</p>
     </footer>
 
-    <div class="lightbox">
-        <span class="lb-counter"></span>
-        <button class="lightbox-btn lb-close">&times;</button>
-        <button class="lightbox-btn lb-prev">&lsaquo;</button>
-        <img class="lightbox-image" alt="">
-        <button class="lightbox-btn lb-next">&rsaquo;</button>
-        <a href="#" id="lightbox-download-link" download class="lb-download">下载</a>
-    </div>
+    <div class="lightbox"><span class="lb-counter"></span><button class="lightbox-btn lb-close">&times;</button><button class="lightbox-btn lb-prev">&lsaquo;</button><img class="lightbox-image" alt=""><button class="lightbox-btn lb-next">&rsaquo;</button><a href="#" id="lightbox-download-link" download class="lb-download">下载</a></div>
+    <a class="back-to-top" title="返回顶部"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></a>
 
-    <a class="back-to-top" title="返回顶部">
-        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
-    </a>
+    <div id="search-overlay" class="fixed inset-0 z-50 flex items-center justify-center p-4 hidden">
+        <div id="search-overlay-bg" class="absolute inset-0"></div>
+        <div id="search-box" class="w-full max-w-xl p-4 rounded-xl shadow-2xl relative transform -translate-y-12">
+            <button id="search-close-btn" class="absolute top-3 right-3 text-[var(--text-color-light)] hover:text-[var(--text-color)] transition-colors">
+                <svg class="w-6 h-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" /></svg>
+            </button>
+            <div class="flex items-center space-x-2 border-b-2 pb-3 mb-3" style="border-color: var(--grid-item-border);">
+                <svg class="w-6 h-6 text-[var(--text-color-light)]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg>
+                <h2 class="text-xl font-semibold">搜索图片</h2>
+            </div>
+            <div class="relative flex items-center">
+                <input type="search" id="search-input" placeholder="输入关键词，按 Enter 键搜索" class="w-full pl-4 pr-14 py-3 border rounded-full text-lg focus:outline-none">
+                <button class="search-submit-btn absolute right-1.5 top-1/2 -translate-y-1/2 w-11 h-11 rounded-full flex items-center justify-center text-white">
+                    <svg class="w-6 h-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" /></svg>
+                </button>
+            </div>
+        </div>
+    </div>
 
     <script>
     document.addEventListener('DOMContentLoaded', function () {
-        // DOM Elements
         const body = document.body;
         const themeToggleBtn = document.getElementById('theme-toggle');
         const themeIconSun = document.getElementById('theme-icon-sun');
         const themeIconMoon = document.getElementById('theme-icon-moon');
         const galleryContainer = document.getElementById('gallery-container');
         const loader = document.getElementById('loader');
-        const searchInput = document.getElementById('search-input');
         const filterButtonsContainer = document.getElementById('filter-buttons');
         const header = document.querySelector('.header-sticky');
+        let allLoadedImages = []; let currentFilter = 'all'; let currentSearch = ''; let currentPage = 1; let isLoading = false; let hasMoreImages = true; let debounceTimer; let lastFocusedElement;
         
-        // State
-        let allLoadedImages = [];
-        let currentFilter = 'all';
-        let currentSearch = '';
-        let currentPage = 1;
-        let isLoading = false;
-        let hasMoreImages = true;
-        let debounceTimer;
-        let lastFocusedElement;
+        // --- 全新/修改的元素和逻辑 ---
+        const searchToggleBtn = document.getElementById('search-toggle-btn');
+        const searchOverlay = document.getElementById('search-overlay');
+        const searchOverlayBg = document.getElementById('search-overlay-bg');
+        const searchInput = document.getElementById('search-input');
+        const searchCloseBtn = document.getElementById('search-close-btn');
+        const searchSubmitBtn = document.querySelector('.search-submit-btn');
 
-        // --- Theme Management ---
-        const applyTheme = (theme) => {
-            if (theme === 'dark') {
-                body.classList.add('dark');
-                themeIconSun.classList.add('hidden');
-                themeIconMoon.classList.remove('hidden');
-            } else {
-                body.classList.remove('dark');
-                themeIconSun.classList.remove('hidden');
-                themeIconMoon.classList.add('hidden');
-            }
-        };
-
-        themeToggleBtn.addEventListener('click', () => {
-            const newTheme = body.classList.contains('dark') ? 'light' : 'dark';
-            localStorage.setItem('theme', newTheme);
-            applyTheme(newTheme);
-        });
-
-        // Initialize theme on page load
-        const savedTheme = localStorage.getItem('theme');
-        if (savedTheme) {
-            applyTheme(savedTheme);
-        } else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-            applyTheme('dark');
-        }
-
-        // --- API & Data ---
-        const fetchJSON = async (url) => {
-            const response = await fetch(url);
-            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-            return response.json();
+        const openSearch = () => { searchOverlay.classList.remove('hidden'); body.classList.add('overflow-hidden'); setTimeout(() => searchInput.focus(), 50); };
+        const closeSearch = () => { searchOverlay.classList.add('hidden'); body.classList.remove('overflow-hidden'); };
+        
+        searchToggleBtn.addEventListener('click', openSearch);
+        searchCloseBtn.addEventListener('click', closeSearch);
+        searchOverlayBg.addEventListener('click', closeSearch);
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !searchOverlay.classList.contains('hidden')) closeSearch(); });
+        
+        const performSearch = () => {
+            const newSearchTerm = searchInput.value.trim();
+            if (allLoadedImages.length > 0 && newSearchTerm === currentSearch) { closeSearch(); return; } // 如果结果已显示且关键词未变，则直接关闭
+            currentSearch = newSearchTerm;
+            document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
+            filterButtonsContainer.querySelector('[data-filter="all"]').classList.add('active');
+            currentFilter = 'all';
+            closeSearch();
+            resetGallery();
+            fetchAndRenderImages();
         };
         
-        const resetGallery = () => {
-            galleryContainer.innerHTML = '';
-            allLoadedImages = [];
-            currentPage = 1;
-            hasMoreImages = true;
-            window.scrollTo(0, 0);
-        };
+        searchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') performSearch(); });
+        searchSubmitBtn.addEventListener('click', performSearch);
+        
+        // 主题管理
+        const applyTheme = (theme) => { if (theme === 'dark') { body.classList.add('dark'); themeIconSun.classList.add('hidden'); themeIconMoon.classList.remove('hidden'); } else { body.classList.remove('dark'); themeIconSun.classList.remove('hidden'); themeIconMoon.classList.add('hidden'); } };
+        themeToggleBtn.addEventListener('click', () => { const newTheme = body.classList.contains('dark') ? 'light' : 'dark'; localStorage.setItem('theme', newTheme); applyTheme(newTheme); });
+        const savedTheme = localStorage.getItem('theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        applyTheme(savedTheme);
 
+        // --- API & 数据获取 ---
+        const fetchJSON = async (url) => { const response = await fetch(url); if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`); return response.json(); };
+        const resetGallery = () => { galleryContainer.innerHTML = ''; allLoadedImages = []; currentPage = 1; hasMoreImages = true; window.scrollTo(0, 0); };
         const fetchAndRenderImages = async () => {
             if (isLoading || !hasMoreImages) return;
             isLoading = true;
             loader.classList.remove('hidden');
-
             try {
                 const url = `/api/images?page=${currentPage}&limit=12&category=${currentFilter}&search=${encodeURIComponent(currentSearch)}`;
                 const data = await fetchJSON(url);
-                
-                if (data.images && data.images.length > 0) {
-                    renderItems(data.images);
-                    allLoadedImages.push(...data.images);
-                    currentPage++;
-                    hasMoreImages = data.hasMore;
-                } else {
-                    hasMoreImages = false;
-                    if (allLoadedImages.length === 0) {
-                        loader.textContent = '没有找到符合条件的图片。';
-                    }
-                }
-            } catch (error) {
-                console.error('获取图片数据失败:', error);
-                loader.textContent = '加载失败，请刷新页面。';
-            } finally {
-                isLoading = false;
-                if (!hasMoreImages && allLoadedImages.length > 0) {
-                    loader.classList.add('hidden');
-                }
-            }
+                if (data.images && data.images.length > 0) { renderItems(data.images); allLoadedImages.push(...data.images); currentPage++; hasMoreImages = data.hasMore; } 
+                else { hasMoreImages = false; if (allLoadedImages.length === 0) loader.textContent = '没有找到符合条件的图片。'; }
+            } catch (error) { console.error('获取图片数据失败:', error); loader.textContent = '加载失败，请刷新页面。'; } 
+            finally { isLoading = false; if (!hasMoreImages && allLoadedImages.length > 0) loader.classList.add('hidden'); }
         };
 
-        // --- Rendering & Layout ---
+        // --- 渲染与布局 ---
         const renderItems = (images) => {
             images.forEach(image => {
                 const item = document.createElement('div');
-                item.className = 'grid-item';
-                item.dataset.id = image.id;
-                
+                item.className = 'grid-item'; item.dataset.id = image.id;
                 const img = document.createElement('img');
                 img.src = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"; // Placeholder
-                img.dataset.src = `/image-proxy/${image.filename}?w=400`;
-                img.alt = image.description || image.originalFilename;
+                img.dataset.src = `/image-proxy/${image.filename}?w=400`; img.alt = image.description || image.originalFilename;
                 img.onerror = () => { item.remove(); };
-
-                item.appendChild(img);
-                galleryContainer.appendChild(item);
-                imageObserver.observe(item);
+                item.appendChild(img); galleryContainer.appendChild(item); imageObserver.observe(item);
             });
         };
-
         const imageObserver = new IntersectionObserver((entries, observer) => {
             entries.forEach(entry => {
                 if (entry.isIntersecting) {
-                    const item = entry.target;
-                    const img = item.querySelector('img');
-                    img.src = img.dataset.src;
-                    img.onload = () => {
-                        item.style.backgroundColor = 'transparent';
-                        item.classList.add('is-visible');
-                        resizeSingleGridItem(item);
-                    };
+                    const item = entry.target; const img = item.querySelector('img'); img.src = img.dataset.src;
+                    img.onload = () => { item.style.backgroundColor = 'transparent'; item.classList.add('is-visible'); resizeSingleGridItem(item); };
                     observer.unobserve(item);
                 }
             });
         }, { rootMargin: '0px 0px 300px 0px' });
-
+        
         const resizeSingleGridItem = (item) => {
-            const img = item.querySelector('img');
-            if (!img || !img.complete || img.naturalHeight === 0) return;
-
-            const imageInData = allLoadedImages.find(i => i.id === item.dataset.id);
-            if (!imageInData) return;
-
-            const rowHeight = 10;
-            const rowGap = 16;
+            const img = item.querySelector('img'); if (!img || !img.complete || img.naturalHeight === 0) return;
+            const imageInData = allLoadedImages.find(i => i.id === item.dataset.id); if (!imageInData) return;
+            const rowHeight = 10; const rowGap = 20; // 对应 gap-5, 即 1.25rem
             const ratio = imageInData.width / imageInData.height;
-            
-            if (ratio > 1.5) item.classList.add('grid-item-wide');
-            
+            // --- 优化：移除了使宽图片占据两列的逻辑 ---
+            // if (ratio > 1.5) item.classList.add('grid-item-wide'); 
             const clientWidth = item.clientWidth;
-            if (clientWidth > 0) {
-                const scaledHeight = clientWidth / ratio;
-                const rowSpan = Math.ceil((scaledHeight + rowGap) / (rowHeight + rowGap));
-                item.style.gridRowEnd = `span ${rowSpan}`;
-            }
+            if (clientWidth > 0) { const scaledHeight = clientWidth / ratio; const rowSpan = Math.ceil((scaledHeight + rowGap) / (rowHeight + rowGap)); item.style.gridRowEnd = `span ${rowSpan}`; }
         };
+        
+        const resizeAllGridItems = () => { const items = galleryContainer.querySelectorAll('.grid-item.is-visible'); items.forEach(resizeSingleGridItem); };
 
-        const resizeAllGridItems = () => {
-            const items = galleryContainer.querySelectorAll('.grid-item.is-visible');
-            items.forEach(resizeSingleGridItem);
-        };
-        
-        // --- Event Listeners ---
-        window.addEventListener('resize', () => {
-            clearTimeout(debounceTimer);
-            debounceTimer = setTimeout(resizeAllGridItems, 200);
-        });
-        
+        // --- 事件监听 ---
+        window.addEventListener('resize', () => { clearTimeout(debounceTimer); debounceTimer = setTimeout(resizeAllGridItems, 200); });
         const createFilterButtons = async () => {
             try {
                 const categories = await fetchJSON('/api/public/categories');
                 filterButtonsContainer.querySelectorAll('.dynamic-filter').forEach(btn => btn.remove());
                 categories.forEach(category => {
-                    const button = document.createElement('button');
-                    button.className = 'filter-btn dynamic-filter';
-                    button.dataset.filter = category;
-                    button.textContent = category;
+                    const button = document.createElement('button'); button.className = 'filter-btn dynamic-filter'; button.dataset.filter = category; button.textContent = category;
                     filterButtonsContainer.appendChild(button);
                 });
             } catch (error) { console.error('无法加载分类按钮:', error); }
         };
-
         filterButtonsContainer.addEventListener('click', (e) => {
             const target = e.target.closest('.filter-btn');
             if (!target || target.classList.contains('active')) return;
-            currentFilter = target.dataset.filter;
+            currentFilter = target.dataset.filter; currentSearch = ''; searchInput.value = '';
             document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
             target.classList.add('active');
-            resetGallery();
-            fetchAndRenderImages();
+            resetGallery(); fetchAndRenderImages();
         });
 
-        searchInput.addEventListener('input', () => {
-            clearTimeout(debounceTimer);
-            debounceTimer = setTimeout(() => {
-                currentSearch = searchInput.value;
-                document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
-                filterButtonsContainer.querySelector('[data-filter="all"]').classList.add('active');
-                currentFilter = 'all';
-                resetGallery();
-                fetchAndRenderImages();
-            }, 300);
-        });
-
-        // --- Lightbox Logic ---
-        const lightbox = document.querySelector('.lightbox');
-        const lightboxImage = lightbox.querySelector('.lightbox-image');
-        const lbCounter = lightbox.querySelector('.lb-counter');
-        const lbDownloadLink = document.getElementById('lightbox-download-link');
-        let currentImageIndexInFiltered = 0;
-        
-        galleryContainer.addEventListener('click', (e) => {
-            const item = e.target.closest('.grid-item');
-            if (item) {
-                lastFocusedElement = document.activeElement;
-                currentImageIndexInFiltered = allLoadedImages.findIndex(img => img.id === item.dataset.id);
-                if (currentImageIndexInFiltered === -1) return;
-                updateLightbox();
-                lightbox.classList.add('active');
-                document.body.classList.add('lightbox-open');
-                lightbox.querySelector('.lb-close').focus();
-                document.addEventListener('keydown', trapFocusInLightbox);
-            }
-        });
-
-        const updateLightbox = () => {
-            const currentItem = allLoadedImages[currentImageIndexInFiltered];
-            if (!currentItem) return;
-            lightboxImage.src = currentItem.src;
-            lightboxImage.alt = currentItem.description;
-            lbCounter.textContent = `${currentImageIndexInFiltered + 1} / ${allLoadedImages.length}`;
-            lbDownloadLink.href = currentItem.src;
-            lbDownloadLink.download = currentItem.originalFilename;
-        };
-        
+        // Lightbox
+        const lightbox = document.querySelector('.lightbox'); const lightboxImage = lightbox.querySelector('.lightbox-image'); const lbCounter = lightbox.querySelector('.lb-counter'); const lbDownloadLink = document.getElementById('lightbox-download-link'); let currentImageIndexInFiltered = 0;
+        galleryContainer.addEventListener('click', (e) => { const item = e.target.closest('.grid-item'); if (item) { lastFocusedElement = document.activeElement; currentImageIndexInFiltered = allLoadedImages.findIndex(img => img.id === item.dataset.id); if (currentImageIndexInFiltered === -1) return; updateLightbox(); lightbox.classList.add('active'); body.classList.add('overflow-hidden'); } });
+        const updateLightbox = () => { const currentItem = allLoadedImages[currentImageIndexInFiltered]; if (!currentItem) return; lightboxImage.src = currentItem.src; lightboxImage.alt = currentItem.description; lbCounter.textContent = `${currentImageIndexInFiltered + 1} / ${allLoadedImages.length}`; lbDownloadLink.href = currentItem.src; lbDownloadLink.download = currentItem.originalFilename; };
         const showPrevImage = () => { currentImageIndexInFiltered = (currentImageIndexInFiltered - 1 + allLoadedImages.length) % allLoadedImages.length; updateLightbox(); };
         const showNextImage = () => { currentImageIndexInFiltered = (currentImageIndexInFiltered + 1) % allLoadedImages.length; updateLightbox(); };
-        const closeLightbox = () => {
-            lightbox.classList.remove('active');
-            document.body.classList.remove('lightbox-open');
-            document.removeEventListener('keydown', trapFocusInLightbox);
-            if(lastFocusedElement) lastFocusedElement.focus();
-        };
-
-        lightbox.addEventListener('click', (e) => {
-            const target = e.target;
-            if (target.matches('.lb-next')) showNextImage();
-            else if (target.matches('.lb-prev')) showPrevImage();
-            else if (target.matches('.lb-close') || target === lightbox) closeLightbox();
-        });
-        document.addEventListener('keydown', (e) => {
-            if (lightbox.classList.contains('active')) {
-                if (e.key === 'ArrowLeft') showPrevImage();
-                else if (e.key === 'ArrowRight') showNextImage();
-                else if (e.key === 'Escape') closeLightbox();
-            }
-        });
-
-        const trapFocusInLightbox = (e) => {
-            if (e.key !== 'Tab') return;
-            const focusableElements = lightbox.querySelectorAll('button, [href]');
-            const firstElement = focusableElements[0];
-            const lastElement = focusableElements[focusableElements.length - 1];
-            if (e.shiftKey) {
-                if (document.activeElement === firstElement) {
-                    lastElement.focus();
-                    e.preventDefault();
-                }
-            } else {
-                if (document.activeElement === lastElement) {
-                    firstElement.focus();
-                    e.preventDefault();
-                }
-            }
-        };
-
-        // --- Scroll Handlers ---
-        const backToTopBtn = document.querySelector('.back-to-top');
-        let ticking = false;
-        const handleScroll = () => {
-            const scrollY = window.scrollY;
-            if (!ticking) {
-                window.requestAnimationFrame(() => {
-                    // Back to top button
-                    backToTopBtn.classList.toggle('visible', scrollY > 300);
-
-                    // Header shrink effect
-                    if (scrollY > 50) {
-                        header.classList.add('state-scrolled-fully');
-                        header.classList.remove('state-scrolled-partially');
-                    } else if (scrollY > 0) {
-                        header.classList.add('state-scrolled-partially');
-                        header.classList.remove('state-scrolled-fully');
-                    } else {
-                        header.classList.remove('state-scrolled-fully', 'state-scrolled-partially');
-                    }
-                    
-                    // Infinite scroll trigger
-                    if (window.innerHeight + scrollY >= document.body.offsetHeight - 400) {
-                        fetchAndRenderImages();
-                    }
-                    ticking = false;
-                });
-                ticking = true;
-            }
-        };
+        const closeLightbox = () => { lightbox.classList.remove('active'); body.classList.remove('overflow-hidden'); if(lastFocusedElement) lastFocusedElement.focus(); };
+        lightbox.addEventListener('click', (e) => { const target = e.target; if (target.matches('.lb-next')) showNextImage(); else if (target.matches('.lb-prev')) showPrevImage(); else if (target.matches('.lb-close') || target === lightbox) closeLightbox(); });
+        document.addEventListener('keydown', (e) => { if (lightbox.classList.contains('active')) { if (e.key === 'ArrowLeft') showPrevImage(); else if (e.key === 'ArrowRight') showNextImage(); else if (e.key === 'Escape') closeLightbox(); } });
         
+        // 滚动处理
+        const backToTopBtn = document.querySelector('.back-to-top'); let ticking = false;
+        const handleScroll = () => { const scrollY = window.scrollY; if (!ticking) { window.requestAnimationFrame(() => { backToTopBtn.classList.toggle('visible', scrollY > 300); header.classList.toggle('is-scrolled', scrollY > 0); if (window.innerHeight + scrollY >= document.body.offsetHeight - 400) fetchAndRenderImages(); ticking = false; }); ticking = true; } };
         window.addEventListener('scroll', handleScroll, { passive: true });
         backToTopBtn.addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
 
-        // --- Initialization ---
-        (async function init() {
-            await createFilterButtons();
-            await fetchAndRenderImages();
-        })();
+        (async function init() { await createFilterButtons(); await fetchAndRenderImages(); })();
     });
     </script>
 </body>
