@@ -1,15 +1,15 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v18.0 自动化增强版)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v18.1 稳定版)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
 #   功能: 全面重构，包含可移植性依赖检查、交互式重名上传、
 #         高级瀑布流布局、以及强化的菜单和状态显示系统。
-#   v18.0 更新:
-#   - 优化: PM2 安装逻辑，强制使用 NPM 以确保版本一致性。
-#   - 增强: 实现核心依赖自动安装，无需用户手动确认。
-#   - 优化: 统一并美化所有 y/n 确认提示的颜色，提升用户体验。
+#   v18.1 更新:
+#   - 修复: 菜单标题行格式与颜色代码的显示错误。
+#   - 修复: 增强权限处理逻辑，智能判断是否需要 sudo，
+#           完美兼容 root 用户和普通用户的环境。
 # =================================================================
 
 # --- 配置 ---
@@ -21,7 +21,7 @@ NC='\033[0m' # No Color
 # 为 y/n 提示定义更具体的颜色
 PROMPT_Y="(${GREEN}y${NC}/${RED}n${NC})"
 
-SCRIPT_VERSION="18.0"
+SCRIPT_VERSION="18.1"
 APP_NAME="image-gallery"
 
 # --- 路径设置 (核心改进：路径将基于脚本自身位置，确保唯一性) ---
@@ -683,6 +683,7 @@ check_and_install_deps() {
     local dep_to_check=$1
     local package_name=$2
     local command_to_check=$3
+    local sudo_cmd=$4
     
     if command -v "$command_to_check" &> /dev/null; then
         return 0 # 依赖已存在，直接返回
@@ -691,23 +692,12 @@ check_and_install_deps() {
     echo -e "${YELLOW}--> 检测到核心依赖 '${dep_to_check}' 未安装，正在尝试自动安装...${NC}"
     
     local pm_cmd=""
-    local sudo_cmd=""
-
-    # 检查 sudo 权限
-    if [ "$EUID" -ne 0 ]; then
-        if command -v sudo &> /dev/null; then
-            sudo_cmd="sudo"
-        else
-            echo -e "${RED}错误：需要 root 或 sudo 权限来安装依赖，但两者都不可用。请手动安装 '${package_name}'。${NC}"
-            return 1
-        fi
-    fi
 
     # 确定包管理器
     if command -v apt-get &> /dev/null; then
         pm_cmd="apt-get install -y"
         echo "--> 检测到 APT 包管理器，正在更新..."
-        $sudo_cmd apt-get update
+        ${sudo_cmd} apt-get update
     elif command -v dnf &> /dev/null; then
         pm_cmd="dnf install -y"
         echo "--> 检测到 DNF 包管理器..."
@@ -775,17 +765,30 @@ display_status() {
 
 install_app() {
     echo -e "${GREEN}--- 1. 开始安装或修复应用 ---${NC}"
-    echo "--> 正在检查系统环境..."
+    echo "--> 正在检查系统环境和权限..."
     
+    local sudo_cmd=""
+    if [ "$EUID" -ne 0 ]; then
+        if command -v sudo &> /dev/null; then
+            sudo_cmd="sudo"
+            echo -e "${GREEN}--> 检测到 sudo，将使用 sudo 执行需要权限的命令。${NC}"
+        else
+            echo -e "${RED}错误：此脚本需要以 root 用户身份运行，或者需要安装 'sudo' 工具才能继续。${NC}"
+            return 1
+        fi
+    else
+        echo -e "${GREEN}--> 检测到以 root 用户身份运行。${NC}"
+    fi
+
     # 检查核心系统依赖
-    check_and_install_deps "Node.js & npm" "nodejs npm" "node" || return 1
-    check_and_install_deps "编译工具(for sharp)" "build-essential" "make" || return 1
+    check_and_install_deps "Node.js & npm" "nodejs npm" "node" "${sudo_cmd}" || return 1
+    check_and_install_deps "编译工具(for sharp)" "build-essential" "make" "${sudo_cmd}" || return 1
 
     # 专门处理 PM2 (通过 npm 安装)
     echo -e "${YELLOW}--> 正在检查 PM2...${NC}"
     if ! command -v pm2 &> /dev/null; then
         echo -e "${YELLOW}--> 检测到 PM2 未安装，将通过 npm 全局安装...${NC}"
-        if sudo npm install -g pm2; then
+        if ${sudo_cmd} npm install -g pm2; then
             echo -e "${GREEN}--> PM2 安装成功！${NC}"
         else
             echo -e "${RED}--> PM2 安装失败，请检查 npm 是否配置正确。${NC}"
@@ -843,30 +846,55 @@ start_app() {
     echo -e "${GREEN}--- 正在启动应用... ---${NC}"
     [ ! -d "${INSTALL_DIR}" ] || [ ! -f "${INSTALL_DIR}/.env" ] && { echo -e "${RED}错误: 应用未安装或 .env 文件不存在。请先运行安装程序 (选项1)。${NC}"; return 1; }
     cd "${INSTALL_DIR}" || return 1
-    pm2 start server.js --name "$APP_NAME"
-    pm2 startup
-    pm2 save
+    
+    # 智能判断使用 sudo 启动 pm2
+    local sudo_cmd=""
+    if [ "$EUID" -ne 0 ]; then
+        sudo_cmd="sudo"
+    fi
+    
+    ${sudo_cmd} pm2 start server.js --name "$APP_NAME"
+    ${sudo_cmd} pm2 startup
+    ${sudo_cmd} pm2 save
     echo -e "${GREEN}--- 应用已启动！---${NC}"
 }
 
 stop_app() {
     echo -e "${YELLOW}--- 正在停止应用... ---${NC}"
     [ ! -d "${INSTALL_DIR}" ] && { echo -e "${RED}错误: 应用未安装。${NC}"; return 1; }
-    pm2 stop "$APP_NAME"
+    
+    local sudo_cmd=""
+    if [ "$EUID" -ne 0 ]; then
+        sudo_cmd="sudo"
+    fi
+    
+    ${sudo_cmd} pm2 stop "$APP_NAME"
     echo -e "${GREEN}--- 应用已停止！---${NC}"
 }
 
 restart_app() {
     echo -e "${GREEN}--- 正在重启应用... ---${NC}"
     [ ! -d "${INSTALL_DIR}" ] && { echo -e "${RED}错误: 应用未安装。${NC}"; return 1; }
-    pm2 restart "$APP_NAME"
+    
+    local sudo_cmd=""
+    if [ "$EUID" -ne 0 ]; then
+        sudo_cmd="sudo"
+    fi
+    
+    ${sudo_cmd} pm2 restart "$APP_NAME"
     echo -e "${GREEN}--- 应用已重启！---${NC}"
 }
 
 view_logs() {
     echo -e "${YELLOW}--- 显示应用日志 (按 Ctrl+C 退出)... ---${NC}"
     [ ! -d "${INSTALL_DIR}" ] && { echo -e "${RED}错误: 应用未安装。${NC}"; return 1; }
-    pm2 logs "$APP_NAME"
+    
+    local sudo_cmd=""
+    if [ "$EUID" -ne 0 ]; then
+        sudo_cmd="sudo"
+    fi
+    
+    ${sudo_cmd} pm2 logs "$APP_NAME"
 }
 
 manage_credentials() {
@@ -917,9 +945,15 @@ uninstall_app() {
     read -p "$(echo -e "${YELLOW}您是否完全理解以上后果并确认要彻底卸载? ${PROMPT_Y}: ")" confirm
     if [[ "$confirm" == "y" || "$confirm" == "Y" ]]; then
         echo "--> 正在从 PM2 中删除应用..."
+        
+        local sudo_cmd=""
+        if [ "$EUID" -ne 0 ]; then
+            sudo_cmd="sudo"
+        fi
+        
         if command -v pm2 &> /dev/null; then
-            pm2 delete "$APP_NAME" &> /dev/null
-            pm2 save --force &> /dev/null
+            ${sudo_cmd} pm2 delete "$APP_NAME" &> /dev/null
+            ${sudo_cmd} pm2 save --force &> /dev/null
         fi
         echo "--> 正在永久删除项目文件夹: ${INSTALL_DIR}..."
         rm -rf "${INSTALL_DIR}"
@@ -932,20 +966,20 @@ uninstall_app() {
 show_menu() {
     clear
     display_status
-    echo " "
+    echo "" # blank line for spacing
     echo -e "${YELLOW}-------------------------- 可用操作 --------------------------${NC}"
-    echo " ${YELLOW}【基础操作】${NC}"
+    echo -e " ${YELLOW}【基础操作】${NC}"
     printf "   %-2s. %s\n" "1" "安装或修复应用"
     printf "   %-2s. %s\n" "2" "启动应用"
     printf "   %-2s. %s\n" "3" "停止应用"
     printf "   %-2s. %s\n" "4" "重启应用"
-    echo ""
-    echo " ${YELLOW}【维护与管理】${NC}"
+    echo "" # blank line for spacing
+    echo -e " ${YELLOW}【维护与管理】${NC}"
     printf "   %-2s. %s\n" "5" "查看应用状态 (刷新信息)"
     printf "   %-2s. %s\n" "6" "修改后台配置 (用户名/密码)"
     printf "   %-2s. %s\n" "7" "查看实时日志"
     printf "   %-2s. %b%s%b\n" "8" "${RED}" "彻底卸载应用 (危险操作)" "${NC}"
-    echo ""
+    echo "" # blank line for spacing
     printf "   %-2s. %s\n" "0" "退出脚本"
     echo -e "${YELLOW}--------------------------------------------------------------${NC}"
     local choice
@@ -966,11 +1000,13 @@ show_menu() {
 
     # 在执行完一个动作后（除了退出和刷新），暂停并等待用户输入
     if [[ "$choice" != "0" && "$choice" != "5" ]]; then
-        read -p "按任意键返回主菜单..."
+        read -n 1 -s -r -p "按任意键返回主菜单..."
     fi
 }
 
 # --- 脚本主入口 ---
+# 在所有PM2操作中也加入sudo判断
+# （已在各个函数内部单独处理，更为健壮）
 while true; do
     show_menu
 done
