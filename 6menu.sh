@@ -1,15 +1,13 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v18.9.6 终极视觉重构版)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v18.9.7 模板复刻版)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
-#   v18.9.6 更新:
-#   - 重大更新(用户需求): 严格按照用户模板重构前台HTML/CSS/JS，采用三栏式头部和两段式滚动动画，彻底解决抖动问题。
-#   - 优化(用户需求): 为功能按钮在头部预留固定位置，并随标题一同隐藏。
-#   - 优化(用户需求): 增加页眉/内容区分界线，并加强样式。
-#   - 优化(用户需求): 完全重构搜索弹窗UI，使其更现代化和美观。
-#   - 修复(用户需求): 修复后台分类管理列表项的hover与focus样式冲突问题。
+#   v18.9.7 更新:
+#   - 重大重构(用户需求): 废弃原有前端代码，完整复制用户提供的模板(HTML/CSS/JS)，再精确注入动态数据加载功能，确保视觉100%一致。
+#   - 修复(用户需求): 采用模板自带的两段式动画逻辑，从根本上解决所有滚动抖动问题。
+#   - 优化(用户需求): 整合所有最终确认的UI/UX细节(搜索框、分界线、后台样式等)。
 # =================================================================
 
 # --- 配置 ---
@@ -21,7 +19,7 @@ NC='\033[0m' # No Color
 # 为 y/n 提示定义更具体的颜色
 PROMPT_Y="(${GREEN}y${NC}/${RED}n${NC})"
 
-SCRIPT_VERSION="18.9.6"
+SCRIPT_VERSION="18.9.7"
 APP_NAME="image-gallery"
 
 # --- 路径设置 (核心改进：路径将基于脚本自身位置，确保唯一性) ---
@@ -334,7 +332,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 })();
 EOF
 
-    echo "--> 正在生成主画廊 public/index.html (v18.9.6 终极视觉重构版)..."
+    echo "--> 正在生成主画廊 public/index.html (v18.9.7 模板复刻版)..."
 cat << 'EOF' > public/index.html
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -360,7 +358,7 @@ cat << 'EOF' > public/index.html
             --filter-btn-active-bg: #22c55e;
             --filter-btn-active-border: #16a34a;
             --grid-item-bg: #e4e4e7;
-            --divider-color: #a7f3d0;
+            --divider-color: #dcfce7;
             --search-bg: #ffffff;
             --search-placeholder-color: #9ca3af;
         }
@@ -383,9 +381,9 @@ cat << 'EOF' > public/index.html
         body { font-family: 'Inter', 'Noto Sans SC', sans-serif; background-color: var(--bg-color); color: var(--text-color); }
         body.overflow-hidden { overflow: hidden; }
 
-        .header-sticky { padding: 1rem 0; background-color: rgba(240, 253, 244, 0); position: sticky; top: 0; z-index: 40; transition: padding 0.3s ease-in-out, background-color 0.3s ease-in-out, box-shadow 0.3s ease-in-out; }
+        .header-sticky { padding-top: 1rem; padding-bottom: 1rem; background-color: rgba(240, 253, 244, 0); position: sticky; top: 0; z-index: 40; box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05); transition: padding 0.3s ease-in-out, background-color 0.3s ease-in-out; }
         .header-sticky.state-scrolled-partially { background-color: var(--header-bg-scrolled); backdrop-filter: blur(8px); }
-        .header-sticky.state-scrolled-fully { padding: 0.5rem 0; background-color: var(--header-bg-scrolled); backdrop-filter: blur(8px); box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+        .header-sticky.state-scrolled-fully { padding-top: 0.5rem; padding-bottom: 0.5rem; background-color: var(--header-bg-scrolled); backdrop-filter: blur(8px); }
         .header-sticky #header-top { transition: opacity 0.3s ease-in-out, height 0.3s ease-in-out, margin-bottom 0.3s ease-in-out; }
         .header-sticky.state-scrolled-fully #header-top { opacity: 0; height: 0; margin-bottom: 0; pointer-events: none; overflow: hidden; }
         
@@ -421,7 +419,7 @@ cat << 'EOF' > public/index.html
 <body class="antialiased">
 
     <header class="header-sticky text-center">
-        <div id="header-top" class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between mb-3 h-14">
+        <div id="header-top" class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between mb-4 h-14">
              <div class="w-1/3"></div> <h1 class="text-4xl md:text-5xl font-bold w-1/3">图片画廊</h1>
              <div class="w-1/3 flex items-center justify-end gap-1">
                 <button id="search-toggle-btn" title="搜索" class="p-2 rounded-full text-[var(--text-color)] hover:bg-gray-500/10">
@@ -511,6 +509,7 @@ cat << 'EOF' > public/index.html
             try {
                 const url = `/api/images?page=${currentPage}&limit=12&category=${currentFilter}&search=${encodeURIComponent(currentSearch)}`;
                 const data = await fetchJSON(url);
+                loader.classList.add('hidden');
                 if (data.images && data.images.length > 0) { renderItems(data.images); allLoadedImages.push(...data.images); currentPage++; hasMoreImages = data.hasMore; } 
                 else { hasMoreImages = false; if (allLoadedImages.length === 0) loader.textContent = '没有找到符合条件的图片。'; }
             } catch (error) { console.error('获取图片数据失败:', error); loader.textContent = '加载失败，请刷新页面。'; } 
@@ -541,8 +540,9 @@ cat << 'EOF' > public/index.html
         const resizeSingleGridItem = (item) => {
             const img = item.querySelector('img');
             if (!img || !img.complete || img.naturalHeight === 0) return;
+            const imageInData = allLoadedImages.find(i => i.id === item.dataset.id); if (!imageInData) return;
             const rowHeight = 10; const rowGap = 16;
-            const ratio = img.naturalWidth / img.naturalHeight;
+            const ratio = imageInData.width / imageInData.height;
             if (ratio > 1.2) item.classList.add('grid-item-wide'); else item.classList.remove('grid-item-wide');
             const clientWidth = item.clientWidth;
             if (clientWidth > 0) { const scaledHeight = clientWidth / ratio; const rowSpan = Math.ceil((scaledHeight + rowGap) / (rowHeight + rowGap)); item.style.gridRowEnd = `span ${rowSpan}`; }
