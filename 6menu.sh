@@ -1,13 +1,11 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v18.9.7 模板复刻版)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v18.9.8 UI融合版)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
-#   v18.9.7 更新:
-#   - 重大重构(用户需求): 废弃原有前端代码，完整复制用户提供的模板(HTML/CSS/JS)，再精确注入动态数据加载功能，确保视觉100%一致。
-#   - 修复(用户需求): 采用模板自带的两段式动画逻辑，从根本上解决所有滚动抖动问题。
-#   - 优化(用户需求): 整合所有最终确认的UI/UX细节(搜索框、分界线、后台样式等)。
+#   v18.9.8 更新:
+#   - 重大更新(用户需求): 融合新的UI模板。保留原版所有动态功能(API加载、分类、搜索、暗黑模式)，但将前端外观替换为用户指定的新版HTML/CSS样式。
 # =================================================================
 
 # --- 配置 ---
@@ -19,7 +17,7 @@ NC='\033[0m' # No Color
 # 为 y/n 提示定义更具体的颜色
 PROMPT_Y="(${GREEN}y${NC}/${RED}n${NC})"
 
-SCRIPT_VERSION="18.9.7"
+SCRIPT_VERSION="18.9.8"
 APP_NAME="image-gallery"
 
 # --- 路径设置 (核心改进：路径将基于脚本自身位置，确保唯一性) ---
@@ -332,7 +330,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 })();
 EOF
 
-    echo "--> 正在生成主画廊 public/index.html (v18.9.7 模板复刻版)..."
+    echo "--> 正在生成主画廊 public/index.html (UI融合版)..."
 cat << 'EOF' > public/index.html
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -348,10 +346,12 @@ cat << 'EOF' > public/index.html
     <script src="https://cdn.tailwindcss.com"></script>
 
     <style>
+        /* --- 核心颜色变量 (移植自旧版，用于支持暗黑模式) --- */
         :root {
             --bg-color: #f0fdf4;
             --text-color: #14532d;
             --text-color-light: #166534;
+            --header-bg: rgba(240, 253, 244, 0);
             --header-bg-scrolled: rgba(240, 253, 244, 0.85);
             --filter-btn-color: #166534;
             --filter-btn-hover-bg: #dcfce7;
@@ -367,6 +367,7 @@ cat << 'EOF' > public/index.html
             --bg-color: #111827;
             --text-color: #a7f3d0;
             --text-color-light: #6ee7b7;
+            --header-bg: rgba(17, 24, 39, 0);
             --header-bg-scrolled: rgba(17, 24, 39, 0.85);
             --filter-btn-color: #a7f3d0;
             --filter-btn-hover-bg: #1f2937;
@@ -378,20 +379,23 @@ cat << 'EOF' > public/index.html
             --search-placeholder-color: #6b7280;
         }
         
-        body { font-family: 'Inter', 'Noto Sans SC', sans-serif; background-color: var(--bg-color); color: var(--text-color); }
+        body { font-family: 'Inter', 'Noto Sans SC', sans-serif; background-color: var(--bg-color); color: var(--text-color); display: flex; flex-direction: column; min-height: 100vh; }
         body.overflow-hidden { overflow: hidden; }
 
-        .header-sticky { padding-top: 1rem; padding-bottom: 1rem; background-color: rgba(240, 253, 244, 0); position: sticky; top: 0; z-index: 40; box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05); transition: padding 0.3s ease-in-out, background-color 0.3s ease-in-out; }
+        /* --- Header 样式 (融合新旧版本逻辑) --- */
+        .header-sticky { padding-top: 1rem; padding-bottom: 1rem; background-color: var(--header-bg); position: sticky; top: 0; z-index: 40; box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05); transition: padding 0.3s ease-in-out, background-color 0.3s ease-in-out; }
         .header-sticky.state-scrolled-partially { background-color: var(--header-bg-scrolled); backdrop-filter: blur(8px); }
         .header-sticky.state-scrolled-fully { padding-top: 0.5rem; padding-bottom: 0.5rem; background-color: var(--header-bg-scrolled); backdrop-filter: blur(8px); }
         .header-sticky #header-top { transition: opacity 0.3s ease-in-out, height 0.3s ease-in-out, margin-bottom 0.3s ease-in-out; }
         .header-sticky.state-scrolled-fully #header-top { opacity: 0; height: 0; margin-bottom: 0; pointer-events: none; overflow: hidden; }
         
+        /* --- 搜索浮层样式 (移植自旧版) --- */
         #search-overlay { opacity: 0; visibility: hidden; transition: opacity 0.3s ease, visibility 0s 0.3s; }
         #search-overlay.active { opacity: 1; visibility: visible; transition: opacity 0.3s ease, visibility 0s 0s; }
         #search-box { transform: scale(0.95); opacity: 0; transition: transform 0.3s ease, opacity 0.3s ease; }
         #search-overlay.active #search-box { transform: scale(1); opacity: 1; }
         
+        /* --- 主体网格样式 (采用新版) --- */
         .grid-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); grid-auto-rows: 10px; gap: 1rem; }
         .grid-item { position: relative; border-radius: 0.5rem; overflow: hidden; background-color: var(--grid-item-bg); box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1); opacity: 0; transform: translateY(20px); transition: opacity 0.5s ease-out, transform 0.5s ease-out, box-shadow 0.3s ease; }
         .grid-item-wide { grid-column: span 2; }
@@ -400,9 +404,12 @@ cat << 'EOF' > public/index.html
         .grid-item img { cursor: pointer; width: 100%; height: 100%; object-fit: cover; display: block; transition: transform 0.4s ease; }
         .grid-item:hover img { transform: scale(1.05); }
 
+        /* --- 过滤按钮样式 (采用新版并使用变量) --- */
         .filter-btn { padding: 0.5rem 1rem; border-radius: 9999px; font-weight: 500; transition: all 0.2s ease; border: 1px solid transparent; cursor: pointer; background-color: transparent; color: var(--filter-btn-color); }
         .filter-btn:hover { background-color: var(--filter-btn-hover-bg); }
         .filter-btn.active { background-color: var(--filter-btn-active-bg); color: white; border-color: var(--filter-btn-active-border); }
+        
+        /* --- Lightbox 及其他组件样式 (采用新版并微调) --- */
         .lightbox { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.9); display: flex; justify-content: center; align-items: center; z-index: 1000; opacity: 0; visibility: hidden; transition: opacity 0.3s ease; }
         .lightbox.active { opacity: 1; visibility: visible; }
         .lightbox-image { max-width: 85%; max-height: 85%; display: block; object-fit: contain; }
@@ -419,8 +426,9 @@ cat << 'EOF' > public/index.html
 <body class="antialiased">
 
     <header class="header-sticky text-center">
-        <div id="header-top" class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between mb-4 h-14">
-             <div class="w-1/3"></div> <h1 class="text-4xl md:text-5xl font-bold w-1/3">图片画廊</h1>
+        <div id="header-top" class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between mb-4 h-auto md:h-14">
+             <div class="w-1/3"></div> 
+             <h1 class="text-4xl md:text-5xl font-bold w-1/3">图片画廊</h1>
              <div class="w-1/3 flex items-center justify-end gap-1">
                 <button id="search-toggle-btn" title="搜索" class="p-2 rounded-full text-[var(--text-color)] hover:bg-gray-500/10">
                     <svg class="w-6 h-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg>
@@ -437,9 +445,7 @@ cat << 'EOF' > public/index.html
         </div>
     </header>
     
-    <div class="border-b-2" style="border-color: var(--divider-color);"></div>
-
-    <main class="container mx-auto px-6 py-8 md:py-10">
+    <main class="container mx-auto px-6 py-8 md:py-10 flex-grow">
         <div id="gallery-container" class="max-w-7xl mx-auto grid-gallery"></div>
         <div id="loader" class="text-center py-8 hidden">正在加载更多...</div>
     </main>
@@ -448,7 +454,7 @@ cat << 'EOF' > public/index.html
         <p>© 2025 图片画廊</p>
     </footer>
 
-    <div id="search-overlay" class="fixed inset-0 z-50 flex items-start justify-center pt-24 md:pt-32 p-4 bg-black/30">
+    <div id="search-overlay" class="fixed inset-0 z-50 flex items-start justify-center pt-24 md:pt-32 p-4 bg-black/30 backdrop-blur-sm">
         <div id="search-box" class="w-full max-w-lg relative">
             <div class="absolute top-1/2 left-5 -translate-y-1/2 text-gray-400">
                 <svg class="w-6 h-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg>
@@ -461,6 +467,7 @@ cat << 'EOF' > public/index.html
     </div>
     
     <div class="lightbox"><span class="lb-counter"></span><button class="lightbox-btn lb-close">&times;</button><button class="lightbox-btn lb-prev">&lsaquo;</button><img class="lightbox-image" alt=""><button class="lightbox-btn lb-next">&rsaquo;</button><a href="#" id="lightbox-download-link" download class="lb-download">下载</a></div>
+    
     <a class="back-to-top" title="返回顶部"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></a>
 
     <script>
@@ -472,6 +479,7 @@ cat << 'EOF' > public/index.html
         const header = document.querySelector('.header-sticky');
         let allLoadedImages = []; let currentFilter = 'all'; let currentSearch = ''; let currentPage = 1; let isLoading = false; let hasMoreImages = true; let debounceTimer; let lastFocusedElement;
         
+        // --- 主题和搜索功能 (从旧版移植) ---
         const searchToggleBtn = document.getElementById('search-toggle-btn');
         const themeToggleBtn = document.getElementById('theme-toggle');
         const themeIconSun = document.getElementById('theme-icon-sun');
@@ -484,7 +492,7 @@ cat << 'EOF' > public/index.html
         searchToggleBtn.addEventListener('click', openSearch);
         document.getElementById('search-close-btn').addEventListener('click', closeSearch);
         searchOverlay.addEventListener('click', (e) => { if (e.target === searchOverlay) closeSearch(); });
-        document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSearch(); });
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && searchOverlay.classList.contains('active')) closeSearch(); });
         
         const performSearch = () => {
             const newSearchTerm = searchInput.value.trim();
@@ -500,6 +508,7 @@ cat << 'EOF' > public/index.html
         themeToggleBtn.addEventListener('click', () => { const newTheme = body.classList.contains('dark') ? 'light' : 'dark'; localStorage.setItem('theme', newTheme); applyTheme(newTheme); });
         applyTheme(localStorage.getItem('theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
 
+        // --- 核心数据获取与渲染逻辑 (从旧版移植) ---
         const fetchJSON = async (url) => { const response = await fetch(url); if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`); return response.json(); };
         const resetGallery = () => { galleryContainer.innerHTML = ''; allLoadedImages = []; currentPage = 1; hasMoreImages = true; window.scrollTo(0, 0); };
         const fetchAndRenderImages = async () => {
@@ -537,6 +546,7 @@ cat << 'EOF' > public/index.html
             });
         }, { rootMargin: '0px 0px 200px 0px' });
         
+        // --- 瀑布流布局逻辑 (从旧版移植) ---
         const resizeSingleGridItem = (item) => {
             const img = item.querySelector('img');
             if (!img || !img.complete || img.naturalHeight === 0) return;
@@ -547,10 +557,10 @@ cat << 'EOF' > public/index.html
             const clientWidth = item.clientWidth;
             if (clientWidth > 0) { const scaledHeight = clientWidth / ratio; const rowSpan = Math.ceil((scaledHeight + rowGap) / (rowHeight + rowGap)); item.style.gridRowEnd = `span ${rowSpan}`; }
         };
-        
         const resizeAllGridItems = () => { const items = galleryContainer.querySelectorAll('.grid-item.is-visible'); items.forEach(resizeSingleGridItem); };
-
         window.addEventListener('resize', () => { clearTimeout(debounceTimer); debounceTimer = setTimeout(resizeAllGridItems, 200); });
+        
+        // --- 分类按钮逻辑 (从旧版移植) ---
         const createFilterButtons = async () => {
             try {
                 const categories = await fetchJSON('/api/public/categories');
@@ -561,7 +571,6 @@ cat << 'EOF' > public/index.html
                 });
             } catch (error) { console.error('无法加载分类按钮:', error); }
         };
-        
         filterButtonsContainer.addEventListener('click', (e) => {
             const target = e.target.closest('.filter-btn');
             if (!target) return;
@@ -571,6 +580,7 @@ cat << 'EOF' > public/index.html
             resetGallery(); fetchAndRenderImages();
         });
 
+        // --- 灯箱逻辑 (从旧版移植并适配新HTML) ---
         const lightbox = document.querySelector('.lightbox'); const lightboxImage = lightbox.querySelector('.lightbox-image'); const lbCounter = lightbox.querySelector('.lb-counter'); const lbDownloadLink = document.getElementById('lightbox-download-link'); let currentImageIndexInFiltered = 0;
         galleryContainer.addEventListener('click', (e) => { const item = e.target.closest('.grid-item'); if (item) { lastFocusedElement = document.activeElement; currentImageIndexInFiltered = allLoadedImages.findIndex(img => img.id === item.dataset.id); if (currentImageIndexInFiltered === -1) return; updateLightbox(); lightbox.classList.add('active'); document.body.classList.add('overflow-hidden'); } });
         const updateLightbox = () => { const currentItem = allLoadedImages[currentImageIndexInFiltered]; if (!currentItem) return; lightboxImage.src = currentItem.src; lightboxImage.alt = currentItem.description; lbCounter.textContent = `${currentImageIndexInFiltered + 1} / ${allLoadedImages.length}`; lbDownloadLink.href = currentItem.src; lbDownloadLink.download = currentItem.originalFilename; };
@@ -580,33 +590,26 @@ cat << 'EOF' > public/index.html
         lightbox.addEventListener('click', (e) => { const target = e.target; if (target.matches('.lb-next')) showNextImage(); else if (target.matches('.lb-prev')) showPrevImage(); else if (target.matches('.lb-close') || target === lightbox) closeLightbox(); });
         document.addEventListener('keydown', (e) => { if (lightbox.classList.contains('active')) { if (e.key === 'ArrowLeft') showPrevImage(); else if (e.key === 'ArrowRight') showNextImage(); else if (e.key === 'Escape') closeLightbox(); } });
         
+        // --- 滚动事件与返回顶部逻辑 (从旧版移植) ---
         const backToTopBtn = document.querySelector('.back-to-top'); let ticking = false;
+        backToTopBtn.addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' })); 
         
         function handleScroll() {
             const currentScrollY = window.scrollY;
             if (currentScrollY > 300) { backToTopBtn.classList.add('visible'); } 
             else { backToTopBtn.classList.remove('visible'); } 
             
-            if (currentScrollY > 50) {
-                header.classList.add('state-scrolled-fully');
-                header.classList.remove('state-scrolled-partially');
-            } else if (currentScrollY > 0) {
-                header.classList.add('state-scrolled-partially');
-                header.classList.remove('state-scrolled-fully');
-            } else {
-                header.classList.remove('state-scrolled-fully', 'state-scrolled-partially');
-            }
+            // Header 动画
+            if (currentScrollY > 50) { header.classList.add('state-scrolled-fully'); header.classList.remove('state-scrolled-partially'); } 
+            else if (currentScrollY > 0) { header.classList.add('state-scrolled-partially'); header.classList.remove('state-scrolled-fully'); } 
+            else { header.classList.remove('state-scrolled-fully', 'state-scrolled-partially'); }
+            
+            // 无限滚动
             if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 500) { fetchAndRenderImages(); } 
         }
 
         window.addEventListener('scroll', () => { 
-            if (!ticking) {
-                window.requestAnimationFrame(() => {
-                    handleScroll();
-                    ticking = false;
-                });
-                ticking = true;
-            }
+            if (!ticking) { window.requestAnimationFrame(() => { handleScroll(); ticking = false; }); ticking = true; }
         }); 
 
         (async function init() { await createFilterButtons(); await fetchAndRenderImages(); })();
