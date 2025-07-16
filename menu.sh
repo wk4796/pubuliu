@@ -1,14 +1,12 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v0.0.3 体验优化版)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v0.0.4 布局优化版)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
-#   v0.0.3 更新:
-#   - 新增(瀑布流): 引入 Macy.js 库重建前端瀑布流，布局更紧凑，动画更流畅，并保持时间排序。
-#   - 优化(搜索): 前端搜索框移除背景遮罩，直接悬浮于页面之上。
-#   - 优化(后台): 后台回收站列表增加图片缩略图显示。
-#   - 优化(后台): 后台搜索功能改为由后端处理，极大提升大数据量下的性能和准确性。
+#   v0.0.4 更新:
+#   - 修复(后台): 采用更健壮的Flexbox布局，彻底修复回收站中项目按钮被遮挡的问题。
+#   - 优化(UI): 为前端瀑布流(Macy.js)配置了更精细的响应式断点，实现手机、平板、电脑间更平滑的列数调整。
 # =================================================================
 
 # --- 配置 ---
@@ -19,7 +17,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 PROMPT_Y="(${GREEN}y${NC}/${RED}n${NC})"
 
-SCRIPT_VERSION="0.0.3"
+SCRIPT_VERSION="0.0.4"
 APP_NAME="image-gallery"
 
 # --- 路径设置 ---
@@ -48,7 +46,7 @@ EOF
 cat << 'EOF' > package.json
 {
   "name": "image-gallery-pro",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "description": "A high-performance, full-stack image gallery application with all features.",
   "main": "server.js",
   "scripts": {
@@ -443,7 +441,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 })();
 EOF
 
-    echo "--> 正在生成主画廊 public/index.html (v0.0.3 体验优化版)..."
+    echo "--> 正在生成主画廊 public/index.html (v0.0.4 布局优化版)..."
 cat << 'EOF' > public/index.html
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -508,13 +506,11 @@ cat << 'EOF' > public/index.html
         #search-overlay.active #search-box { transform: translateY(0) scale(1); opacity: 1; }
         #search-input:focus { outline: none; }
         
-        /* 瀑布流容器 */
         #gallery-container {
             width: 100%;
         }
         .grid-item {
             margin-bottom: 1rem;
-            break-inside: avoid; /* 防止元素在列中断开 */
         }
         .grid-item img {
              width: 100%; height: auto; display: block;
@@ -666,7 +662,7 @@ cat << 'EOF' > public/index.html
                 item.dataset.id = image.id;
                 
                 const img = document.createElement('img');
-                img.src = `/image-proxy/${image.filename}?w=500`; // Use a decent resolution for proxy
+                img.src = `/image-proxy/${image.filename}?w=500`;
                 img.alt = image.description || image.originalFilename;
                 img.onerror = () => item.remove();
                 
@@ -674,7 +670,7 @@ cat << 'EOF' > public/index.html
                 fragment.appendChild(item);
             });
             galleryContainer.appendChild(fragment);
-            macyInstance.recalculate(true); // Recalculate layout after adding new items
+            macyInstance.recalculate(true);
         };
         
         const createFilterButtons = async () => {
@@ -730,11 +726,13 @@ cat << 'EOF' > public/index.html
                 container: '#gallery-container',
                 trueOrder: true,
                 waitForImages: false,
-                margin: 16,
-                columns: 2,
+                margin: { x: 16, y: 16 },
+                columns: 2, // 手机默认2列
                 breakAt: {
-                    1024: 5,
-                    768: 3,
+                    1280: 6, // 超大桌面
+                    1024: 5, // 桌面
+                    768: 4,  // 平板横屏
+                    640: 3   // 平板竖屏
                 }
             });
             await createFilterButtons();
@@ -806,7 +804,7 @@ cat << 'EOF' > public/admin.html
         </div>
         <section class="bg-white p-6 rounded-lg shadow-md xl:col-span-8">
             <div class="flex flex-col md:flex-row justify-between items-center mb-4 gap-4"><h2 id="image-list-header" class="text-xl font-semibold text-slate-900 flex-grow"></h2><div class="w-full md:w-64"><input type="search" id="search-input" placeholder="在当前视图下搜索..." class="w-full border rounded-full px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"></div></div>
-            <div id="image-list" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4"></div>
+            <div id="image-list" class="grid grid-cols-1 gap-4"></div>
             <div id="image-loader" class="text-center py-8 text-slate-500 hidden">正在加载...</div>
         </section>
     </main>
@@ -852,6 +850,7 @@ cat << 'EOF' > public/admin.html
         async function refreshNavigation() { try { const response = await apiRequest('/api/categories'); const categories = await response.json(); DOMElements.categoryDynamicList.innerHTML = ''; categories.forEach(cat => { const isUncategorized = cat === UNCATEGORIZED; const item = document.createElement('div'); item.className = 'nav-item flex items-center justify-between p-2 rounded cursor-pointer hover:bg-gray-100'; item.dataset.view = 'category'; item.dataset.categoryName = cat; item.innerHTML = `<span class="category-name flex-grow">${cat}</span>` + (isUncategorized ? '' : `<div class="space-x-2 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"><button data-name="${cat}" class="rename-cat-btn text-blue-500 hover:text-blue-700 text-sm">重命名</button><button data-name="${cat}" class="delete-cat-btn text-red-500 hover:red-700 text-sm">删除</button></div>`); item.addEventListener('mouseenter', () => item.classList.add('group')); item.addEventListener('mouseleave', () => item.classList.remove('group')); DOMElements.categoryDynamicList.appendChild(item); }); await populateCategorySelects(); } catch (error) { if (error.message !== 'Unauthorized') console.error('加载导航列表失败:', error); } }
         
         async function loadImages(category = 'all', name = '所有图片') {
+            DOMElements.imageList.className = 'grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4';
             DOMElements.imageList.innerHTML = ''; DOMElements.imageLoader.classList.remove('hidden');
             try {
                 const url = `/api/images?category=${category}&search=${encodeURIComponent(currentSearchTerm)}&limit=1000`;
@@ -865,6 +864,7 @@ cat << 'EOF' > public/admin.html
             } catch (error) { if(error.message !== 'Unauthorized') DOMElements.imageLoader.textContent = '加载图片失败。'; }
         }
         async function loadRecycleBin() {
+            DOMElements.imageList.className = 'grid grid-cols-1 gap-4';
             DOMElements.imageList.innerHTML = ''; DOMElements.imageLoader.classList.remove('hidden');
             try {
                 const url = `/api/admin/recycle-bin?search=${encodeURIComponent(currentSearchTerm)}`;
@@ -883,8 +883,9 @@ cat << 'EOF' > public/admin.html
             DOMElements.imageList.appendChild(card);
         }
         function renderRecycleBinCard(image) {
-            const card = document.createElement('div'); card.className = 'border rounded-lg shadow-sm bg-white overflow-hidden flex flex-col sm:flex-row';
-            card.innerHTML = `<div class="sm:w-32 flex-shrink-0 bg-slate-100 flex items-center justify-center"><img src="/image-proxy/${image.filename}?w=200" alt="Thumbnail" class="h-24 sm:h-full w-full object-cover"></div><div class="p-3 flex-grow flex flex-col justify-between"><div class="mb-2"><p class="font-bold text-sm truncate" title="${image.originalFilename}">${image.originalFilename}</p><p class="text-xs text-slate-500">删除于: ${new Date(image.deletedAt).toLocaleString()}</p></div><div class="flex justify-end items-center gap-2"><button title="恢复" data-id="${image.id}" class="restore-btn text-sm py-1 px-3 rounded-md text-white bg-green-600 hover:bg-green-700 transition-colors">恢复</button><button title="彻底删除" data-id="${image.id}" class="purge-btn text-sm py-1 px-3 rounded-md text-white bg-red-700 hover:bg-red-800 transition-colors">彻底删除</button></div></div>`;
+            const card = document.createElement('div');
+            card.className = 'border rounded-lg shadow-sm bg-white overflow-hidden';
+            card.innerHTML = `<div class="flex items-center w-full p-3 gap-4"><div class="flex-shrink-0 w-20 h-20 bg-slate-100 rounded-md"><img src="/image-proxy/${image.filename}?w=200" alt="Thumbnail" class="h-full w-full object-cover rounded-md"></div><div class="flex-grow min-w-0"><p class="font-bold text-sm truncate" title="${image.originalFilename}">${image.originalFilename}</p><p class="text-xs text-slate-500">删除于: ${new Date(image.deletedAt).toLocaleString()}</p></div><div class="flex-shrink-0 flex flex-col sm:flex-row gap-2"><button title="恢复" data-id="${image.id}" class="restore-btn text-sm py-1 px-3 rounded-md text-white bg-green-600 hover:bg-green-700 transition-colors">恢复</button><button title="彻底删除" data-id="${image.id}" class="purge-btn text-sm py-1 px-3 rounded-md text-white bg-red-700 hover:bg-red-800 transition-colors">彻底删除</button></div></div>`;
             DOMElements.imageList.appendChild(card);
         }
         
