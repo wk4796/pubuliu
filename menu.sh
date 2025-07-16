@@ -1,11 +1,15 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v0.0.7 智能更新版)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v0.0.8 布局修复版)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
-#   v0.0.7 更新:
-#   - 新增(功能): 为“安装”选项增加了智能判断。如果应用已存在，则提供“覆盖更新(保留数据)”和“全新安装”的选项，使更新更安全。
+#   v0.0.8 更新:
+#   - 修复 (前端): 彻底重构前台画廊的图片渲染逻辑。
+#     - 引入基于图片宽高比的占位容器，解决了图片加载时的堆叠和重叠问题。
+#     - 增加了图片加载时的占位背景和淡入动画，提升用户体验。
+#     - 显著改善了在不同设备（手机、平板、桌面）上的响应式布局稳定性。
+#   - 修复 (脚本): 修正了在部分终端下，菜单颜色代码无法正常显示为颜色的问题。
 # =================================================================
 
 # --- 配置 ---
@@ -16,7 +20,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 PROMPT_Y="(${GREEN}y${NC}/${RED}n${NC})"
 
-SCRIPT_VERSION="0.0.7"
+SCRIPT_VERSION="0.0.8"
 APP_NAME="image-gallery"
 
 # --- 路径设置 ---
@@ -26,6 +30,15 @@ BACKUP_DIR="${SCRIPT_DIR}/backups"
 
 
 # --- 核心功能：文件生成 ---
+generate_files() {
+    echo "--> 正在创建安装目录: ${INSTALL_DIR}"
+    mkdir -p "${INSTALL_DIR}/public"
+    cd "${INSTALL_DIR}" || { echo -e "${RED}错误: 无法进入新创建的安装目录。${NC}"; return 1; }
+
+    # 调用覆盖文件函数
+    overwrite_app_files
+}
+
 overwrite_app_files() {
     # 此函数只覆盖应用逻辑文件，不触及数据和配置
     echo "--> 正在覆盖更新核心应用文件..."
@@ -34,7 +47,7 @@ overwrite_app_files() {
 cat << 'EOF' > package.json
 {
   "name": "image-gallery-pro",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "description": "A high-performance, full-stack image gallery application with all features.",
   "main": "server.js",
   "scripts": {
@@ -429,7 +442,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 })();
 EOF
 
-    echo "--> 正在生成主画廊 public/index.html (v0.0.7 智能更新版)..."
+    echo "--> 正在生成主画廊 public/index.html (v0.0.8 布局修复版)..."
 cat << 'EOF' > public/index.html
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -449,13 +462,13 @@ cat << 'EOF' > public/index.html
         :root {
             --bg-color: #f0fdf4; --text-color: #14532d; --header-bg: rgba(240, 253, 244, 0.85);
             --filter-btn-color: #166534; --filter-btn-hover-bg: #dcfce7; --filter-btn-active-bg: #22c55e;
-            --filter-btn-active-border: #16a34a; --grid-item-bg: #e4e4e7; --search-bg: #ffffff;
+            --filter-btn-active-border: #16a34a; --grid-item-bg: #dcfce7; --search-bg: #ffffff;
             --search-placeholder-color: #9ca3af; --divider-color: #dcfce7;
         }
         body.dark {
             --bg-color: #111827; --text-color: #a7f3d0; --header-bg: rgba(17, 24, 39, 0.85);
             --filter-btn-color: #a7f3d0; --filter-btn-hover-bg: #1f2937; --filter-btn-active-bg: #16a34a;
-            --filter-btn-active-border: #15803d; --grid-item-bg: #374151; --search-bg: #1f2937;
+            --filter-btn-active-border: #15803d; --grid-item-bg: #1f2937; --search-bg: #1f2937;
             --search-placeholder-color: #6b7280; --divider-color: #166534;
         }
         
@@ -499,18 +512,43 @@ cat << 'EOF' > public/index.html
         }
         .grid-item {
             margin-bottom: 1rem;
+            break-inside: avoid; /* Prevents items from breaking across columns */
         }
-        .grid-item img {
-             width: 100%; height: auto; display: block;
-             border-radius: 0.5rem;
-             background-color: var(--grid-item-bg);
-             cursor: pointer;
-             transition: filter 0.3s ease;
+        .grid-item > a {
+            display: block;
+            border-radius: 0.5rem;
+            overflow: hidden;
+            cursor: pointer;
+            text-decoration: none;
         }
-        .grid-item img:hover {
-            filter: brightness(1.1);
+        .image-placeholder {
+            position: relative;
+            width: 100%;
+            height: 0; /* Height is set by padding-bottom */
+            background-color: var(--grid-item-bg);
+            border-radius: 0.5rem;
+            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
         }
-
+        @keyframes pulse {
+            50% { opacity: .7; }
+        }
+        .image-placeholder img {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            opacity: 0;
+            transition: opacity 0.4s ease-in-out;
+        }
+        .image-placeholder img.loaded {
+            opacity: 1;
+        }
+        .image-placeholder img.loaded + .image-placeholder {
+            animation: none; /* Stop pulse animation on parent when image is loaded */
+        }
+        
         .filter-btn { padding: 0.5rem 1rem; border-radius: 9999px; font-weight: 500; transition: all 0.2s ease; border: 1px solid transparent; cursor: pointer; background-color: transparent; color: var(--filter-btn-color); }
         .filter-btn:hover { background-color: var(--filter-btn-hover-bg); }
         .filter-btn.active { background-color: var(--filter-btn-active-bg); color: white; border-color: var(--filter-btn-active-border); }
@@ -648,13 +686,25 @@ cat << 'EOF' > public/index.html
                 const item = document.createElement('div');
                 item.className = 'grid-item';
                 item.dataset.id = image.id;
+
+                const aspectRatio = (image.height && image.width) ? (image.height / image.width) * 100 : 100;
                 
-                const img = document.createElement('img');
-                img.src = `/image-proxy/${image.filename}?w=500`;
-                img.alt = image.description || image.originalFilename;
-                img.onerror = () => item.remove();
+                const link = document.createElement('a');
+                link.href = "#"; // Prevent page jump
+                link.setAttribute('role', 'button');
+                link.setAttribute('aria-label', image.description || image.originalFilename);
+
+                link.innerHTML = `
+                    <div class="image-placeholder" style="padding-bottom: ${aspectRatio}%;">
+                        <img src="/image-proxy/${image.filename}?w=500"
+                             alt="${image.description || image.originalFilename}"
+                             class="gallery-image"
+                             onload="this.classList.add('loaded')"
+                             onerror="this.closest('.grid-item').style.display='none'; macyInstance.recalculate(true);">
+                    </div>
+                `;
                 
-                item.appendChild(img);
+                item.appendChild(link);
                 fragment.appendChild(item);
             });
             galleryContainer.appendChild(fragment);
@@ -713,7 +763,7 @@ cat << 'EOF' > public/index.html
              macyInstance = Macy({
                 container: '#gallery-container',
                 trueOrder: true,
-                waitForImages: true,
+                waitForImages: false, // Set to false, we handle placeholders now
                 margin: { x: 16, y: 16 },
                 columns: 2, // 手机默认2列
                 breakAt: {
@@ -1029,8 +1079,8 @@ install_app() {
     if [ -f "${INSTALL_DIR}/.env" ]; then
         echo -e "${YELLOW}--> 检测到应用已安装。请选择您的操作：${NC}"
         echo ""
-        echo "  [1] ${GREEN}覆盖更新 (推荐)${NC} - 只更新程序，保留所有数据和配置。"
-        echo "  [2] ${RED}全新覆盖安装 (危险)${NC} - 删除现有应用，包括所有数据，然后全新安装。"
+        echo -e "  [1] ${GREEN}覆盖更新 (推荐)${NC} - 只更新程序，保留所有数据和配置。"
+        echo -e "  [2] ${RED}全新覆盖安装 (危险)${NC} - 删除现有应用，包括所有数据，然后全新安装。"
         echo "  [0] 返回主菜单"
         echo ""
         local update_choice
