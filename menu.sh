@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v0.1.3 修复版)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v0.1.3 已验证修复)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
 #   v0.1.3 更新:
@@ -465,7 +465,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 })();
 EOF
 
-    echo "--> 正在生成主画廊 public/index.html (v0.1.2)..."
+    echo "--> 正在生成主画廊 public/index.html..."
 cat << 'EOF' > public/index.html
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -711,7 +711,7 @@ cat << 'EOF' > public/index.html
 </html>
 EOF
 
-    echo "--> 正在生成登录页 public/login.html (v0.1.3)..."
+    echo "--> 正在生成登录页 public/login.html..."
 cat << 'EOF' > public/login.html
 <!DOCTYPE html>
 <html lang="zh-CN">
