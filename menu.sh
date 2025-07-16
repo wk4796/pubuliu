@@ -1,16 +1,14 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v0.0.2 功能优化版)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v0.0.3 体验优化版)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
-#   v0.0.2 更新:
-#   - 优化(菜单): 管理脚本的菜单选项改为单列垂直排列，更清晰。
-#   - 优化(UI): 前端画廊的顶部栏（标题和分类）在向下滚动时会自动隐藏，向上滚动时出现。
-#   - 优化(UI): 美化了前端的搜索弹窗，使用模糊背景和更现代的输入框样式。
-#   - 优化(后台): 登录页面会动态检查2FA状态，仅在启用时才显示2FA输入框。
-#   - 优化(后台): "导航"模块改名为"图库"。
-#   - 修复(后台): 重构了图库的分类和回收站的结构，修复了分类无法点击筛选的BUG。
+#   v0.0.3 更新:
+#   - 新增(瀑布流): 引入 Macy.js 库重建前端瀑布流，布局更紧凑，动画更流畅，并保持时间排序。
+#   - 优化(搜索): 前端搜索框移除背景遮罩，直接悬浮于页面之上。
+#   - 优化(后台): 后台回收站列表增加图片缩略图显示。
+#   - 优化(后台): 后台搜索功能改为由后端处理，极大提升大数据量下的性能和准确性。
 # =================================================================
 
 # --- 配置 ---
@@ -21,7 +19,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 PROMPT_Y="(${GREEN}y${NC}/${RED}n${NC})"
 
-SCRIPT_VERSION="0.0.2"
+SCRIPT_VERSION="0.0.3"
 APP_NAME="image-gallery"
 
 # --- 路径设置 ---
@@ -50,7 +48,7 @@ EOF
 cat << 'EOF' > package.json
 {
   "name": "image-gallery-pro",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "A high-performance, full-stack image gallery application with all features.",
   "main": "server.js",
   "scripts": {
@@ -133,9 +131,7 @@ const authMiddleware = (isApi) => (req, res, next) => {
 const requirePageAuth = authMiddleware(false);
 const requireApiAuth = authMiddleware(true);
 
-// New endpoint to check 2FA status without authentication
 app.get('/api/2fa/is-enabled', async (req, res) => {
-    // We need to read the config fresh here as this is unauthenticated
     const currentConfig = await readDB(configPath, {});
     const isEnabled = !!(currentConfig.tfa && currentConfig.tfa.secret);
     res.json({ enabled: isEnabled });
@@ -150,7 +146,7 @@ app.post('/api/login', async (req, res) => {
     appConfig = await readDB(configPath, {});
     if (appConfig.tfa && appConfig.tfa.secret) {
         if (!tfa_token) {
-             return res.redirect('/login.html?error=2'); // 2 for TFA missing
+             return res.redirect('/login.html?error=2'); 
         }
         const verified = speakeasy.totp.verify({
             secret: appConfig.tfa.secret,
@@ -158,7 +154,7 @@ app.post('/api/login', async (req, res) => {
             token: tfa_token,
         });
         if (!verified) {
-            return res.redirect('/login.html?error=3'); // 3 for TFA incorrect
+            return res.redirect('/login.html?error=3'); 
         }
     }
 
@@ -173,7 +169,6 @@ app.get('/admin', requirePageAuth, (req, res) => res.redirect('/admin.html'));
 
 app.get('/api/images', async (req, res) => {
     let images = await readDB(dbPath);
-    // Filter out deleted images for all public-facing queries
     images = images.filter(img => img.status !== 'deleted');
     
     const { category, search, page = 1, limit = 12 } = req.query;
@@ -304,7 +299,6 @@ apiAdminRouter.post('/upload', upload.single('image'), async (req, res) => {
 });
 
 apiAdminRouter.delete('/images/:id', async (req, res) => {
-    // This is now "soft delete", moves to recycle bin
     let images = await readDB(dbPath);
     const imageIndex = images.findIndex(img => img.id === req.params.id);
     if (imageIndex === -1) return res.status(404).json({ message: '图片未找到' });
@@ -332,7 +326,6 @@ apiAdminRouter.put('/images/:id', async (req, res) => {
     res.json({ message: '更新成功', image: imageToUpdate });
 });
 
-// Category Management
 apiAdminRouter.post('/categories', async (req, res) => {
     const { name } = req.body;
     if (!name || name.trim() === '') return res.status(400).json({ message: '分类名称不能为空。' });
@@ -370,10 +363,18 @@ apiAdminRouter.put('/categories', async (req, res) => {
     res.status(200).json({ message: `分类 '${oldName}' 已重命名为 '${newName}'。` });
 });
 
-// Recycle Bin Management
+// Recycle Bin Management with Search
 apiAdminRouter.get('/recycle-bin', async (req, res) => {
-    const images = await readDB(dbPath);
-    const deletedImages = images.filter(img => img.status === 'deleted').sort((a, b) => new Date(b.deletedAt) - new Date(a.deletedAt));
+    const { search } = req.query;
+    let images = await readDB(dbPath);
+    let deletedImages = images.filter(img => img.status === 'deleted');
+
+    if (search) {
+        const searchTerm = search.toLowerCase();
+        deletedImages = deletedImages.filter(img => (img.originalFilename && img.originalFilename.toLowerCase().includes(searchTerm)) || (img.description && img.description.toLowerCase().includes(searchTerm)));
+    }
+    
+    deletedImages.sort((a, b) => new Date(b.deletedAt) - new Date(a.deletedAt));
     res.json(deletedImages);
 });
 
@@ -394,7 +395,6 @@ apiAdminRouter.delete('/recycle-bin/:id/purge', async (req, res) => {
     
     const filePath = path.join(uploadsDir, imageToDelete.filename);
     try { await fs.unlink(filePath); } catch (error) { console.error(`删除文件失败: ${filePath}`, error); }
-    // Also clear cache for this image
     
     const updatedImages = images.filter(img => img.id !== req.params.id);
     await writeDB(dbPath, updatedImages);
@@ -443,7 +443,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 })();
 EOF
 
-    echo "--> 正在生成主画廊 public/index.html (v0.0.2 功能优化版)..."
+    echo "--> 正在生成主画廊 public/index.html (v0.0.3 体验优化版)..."
 cat << 'EOF' > public/index.html
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -457,6 +457,7 @@ cat << 'EOF' > public/index.html
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/macy@2"></script>
 
     <style>
         :root {
@@ -481,7 +482,6 @@ cat << 'EOF' > public/index.html
         main { flex-grow: 1; }
         body.overflow-hidden { overflow: hidden; }
 
-        /* 优化 #2: 自动隐藏的顶部栏 */
         .header-sticky { 
             background-color: var(--header-bg);
             backdrop-filter: blur(8px);
@@ -494,36 +494,38 @@ cat << 'EOF' > public/index.html
             transform: translateY(-100%);
         }
         
-        /* 优化 #3: 搜索框美化 */
         #search-overlay { 
             opacity: 0; visibility: hidden; transition: opacity 0.3s ease, visibility 0s 0.3s;
-            background-color: rgba(0,0,0,0.3);
-            -webkit-backdrop-filter: blur(8px);
-            backdrop-filter: blur(8px);
+            background-color: transparent;
         }
         #search-overlay.active { opacity: 1; visibility: visible; transition: opacity 0.3s ease, visibility 0s 0s; }
-        #search-box { transform: translateY(-20px) scale(0.98); opacity: 0; transition: transform 0.3s ease, opacity 0.3s ease; }
+        #search-box { 
+            transform: translateY(-20px) scale(0.98); opacity: 0; transition: transform 0.3s ease, opacity 0.3s ease; 
+            background-color: var(--search-bg);
+            color: var(--text-color);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
         #search-overlay.active #search-box { transform: translateY(0) scale(1); opacity: 1; }
-        #search-input {
-             background-color: var(--search-bg); color: var(--text-color);
-             border-width: 1px; border-color: transparent;
-        }
-        #search-input:focus {
-            outline: none;
-            border-color: #22c55e;
-            box-shadow: 0 0 0 2px var(--bg-color), 0 0 0 4px #22c55e;
-        }
+        #search-input:focus { outline: none; }
         
-        /* 响应式瀑布流 */
-        .grid-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); grid-auto-rows: 10px; gap: 0.75rem; }
-        @media (min-width: 768px) { .grid-gallery { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 1rem; } }
-        @media (min-width: 1024px) { .grid-gallery { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; } }
-        .grid-item { position: relative; border-radius: 0.5rem; overflow: hidden; background-color: var(--grid-item-bg); box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1); opacity: 0; transform: translateY(20px); transition: opacity 0.5s ease-out, transform 0.5s ease-out, box-shadow 0.3s ease; }
-        .grid-item-wide { grid-column: span 2; }
-        @media (max-width: 400px) { .grid-item-wide { grid-column: span 1; } }
-        .grid-item.is-visible { opacity: 1; transform: translateY(0); }
-        .grid-item img { cursor: pointer; width: 100%; height: 100%; object-fit: cover; display: block; transition: transform 0.4s ease; }
-        .grid-item:hover img { transform: scale(1.05); }
+        /* 瀑布流容器 */
+        #gallery-container {
+            width: 100%;
+        }
+        .grid-item {
+            margin-bottom: 1rem;
+            break-inside: avoid; /* 防止元素在列中断开 */
+        }
+        .grid-item img {
+             width: 100%; height: auto; display: block;
+             border-radius: 0.5rem;
+             background-color: var(--grid-item-bg);
+             cursor: pointer;
+             transition: filter 0.3s ease;
+        }
+        .grid-item img:hover {
+            filter: brightness(1.1);
+        }
 
         .filter-btn { padding: 0.5rem 1rem; border-radius: 9999px; font-weight: 500; transition: all 0.2s ease; border: 1px solid transparent; cursor: pointer; background-color: transparent; color: var(--filter-btn-color); }
         .filter-btn:hover { background-color: var(--filter-btn-hover-bg); }
@@ -569,7 +571,7 @@ cat << 'EOF' > public/index.html
     <div class="border-b-2" style="border-color: var(--divider-color);"></div>
 
     <main class="container mx-auto px-4 py-8 md:py-10">
-        <div id="gallery-container" class="max-w-7xl mx-auto grid-gallery"></div>
+        <div id="gallery-container" class="max-w-7xl mx-auto"></div>
         <div id="loader" class="text-center py-8 hidden">正在加载更多...</div>
     </main>
     
@@ -578,8 +580,8 @@ cat << 'EOF' > public/index.html
     </footer>
 
     <div id="search-overlay" class="fixed inset-0 z-50 flex items-start justify-center pt-24 md:pt-32 p-4">
-        <div id="search-box" class="w-full max-w-lg relative">
-            <input type="search" id="search-input" placeholder="输入关键词，按 Enter 搜索..." class="w-full py-4 pl-6 pr-16 text-lg rounded-lg shadow-lg">
+        <div id="search-box" class="w-full max-w-lg relative rounded-lg">
+            <input type="search" id="search-input" placeholder="输入关键词，按 Enter 搜索..." class="w-full py-4 pl-6 pr-16 text-lg rounded-lg border-0">
              <button id="search-exec-btn" class="absolute h-full right-0 top-0 text-gray-500 hover:text-green-600 px-5 transition-colors">
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg>
             </button>
@@ -596,12 +598,12 @@ cat << 'EOF' > public/index.html
         const loader = document.getElementById('loader');
         const filterButtonsContainer = document.getElementById('filter-buttons');
         const header = document.querySelector('.header-sticky');
-        let allLoadedImages = []; let currentFilter = 'all'; let currentSearch = ''; let currentPage = 1; let isLoading = false; let hasMoreImages = true; let debounceTimer; let lastFocusedElement;
+        
+        let macyInstance;
+        let allLoadedImages = []; let currentFilter = 'all'; let currentSearch = ''; let currentPage = 1; let isLoading = false; let hasMoreImages = true; let lastFocusedElement;
         
         const searchToggleBtn = document.getElementById('search-toggle-btn');
         const themeToggleBtn = document.getElementById('theme-toggle');
-        const themeIconSun = document.getElementById('theme-icon-sun');
-        const themeIconMoon = document.getElementById('theme-icon-moon');
         const searchOverlay = document.getElementById('search-overlay');
         const searchInput = document.getElementById('search-input');
         const searchExecBtn = document.getElementById('search-exec-btn');
@@ -624,7 +626,12 @@ cat << 'EOF' > public/index.html
         searchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') performSearch(); });
         searchExecBtn.addEventListener('click', performSearch);
         
-        const applyTheme = (theme) => { if (theme === 'dark') { body.classList.add('dark'); themeIconSun.classList.add('hidden'); themeIconMoon.classList.remove('hidden'); } else { body.classList.remove('dark'); themeIconSun.classList.remove('hidden'); themeIconMoon.classList.add('hidden'); } };
+        const applyTheme = (theme) => {
+            const isDark = theme === 'dark';
+            body.classList.toggle('dark', isDark);
+            document.getElementById('theme-icon-sun').classList.toggle('hidden', isDark);
+            document.getElementById('theme-icon-moon').classList.toggle('hidden', !isDark);
+        };
         themeToggleBtn.addEventListener('click', () => { const newTheme = body.classList.contains('dark') ? 'light' : 'dark'; localStorage.setItem('theme', newTheme); applyTheme(newTheme); });
         applyTheme(localStorage.getItem('theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
 
@@ -638,46 +645,37 @@ cat << 'EOF' > public/index.html
                 const url = `/api/images?page=${currentPage}&limit=12&category=${currentFilter}&search=${encodeURIComponent(currentSearch)}`;
                 const data = await fetchJSON(url);
                 loader.classList.add('hidden');
-                if (data.images && data.images.length > 0) { renderItems(data.images); allLoadedImages.push(...data.images); currentPage++; hasMoreImages = data.hasMore; } 
-                else { hasMoreImages = false; if (allLoadedImages.length === 0) loader.textContent = '没有找到符合条件的图片。'; }
+                if (data.images && data.images.length > 0) {
+                    renderItems(data.images);
+                    allLoadedImages.push(...data.images);
+                    currentPage++;
+                    hasMoreImages = data.hasMore;
+                } else {
+                    hasMoreImages = false;
+                    if (allLoadedImages.length === 0) loader.textContent = '没有找到符合条件的图片。';
+                }
             } catch (error) { console.error('获取图片数据失败:', error); loader.textContent = '加载失败，请刷新页面。'; } 
             finally { isLoading = false; if (!hasMoreImages && allLoadedImages.length > 0) loader.classList.add('hidden'); }
         };
 
         const renderItems = (images) => {
+            const fragment = document.createDocumentFragment();
             images.forEach(image => {
                 const item = document.createElement('div');
-                item.className = 'grid-item'; item.dataset.id = image.id;
+                item.className = 'grid-item';
+                item.dataset.id = image.id;
+                
                 const img = document.createElement('img');
-                img.src = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
-                img.dataset.src = `/image-proxy/${image.filename}?w=400`; img.alt = image.description || image.originalFilename;
-                img.onerror = () => { item.remove(); };
-                item.appendChild(img); galleryContainer.appendChild(item); imageObserver.observe(item);
+                img.src = `/image-proxy/${image.filename}?w=500`; // Use a decent resolution for proxy
+                img.alt = image.description || image.originalFilename;
+                img.onerror = () => item.remove();
+                
+                item.appendChild(img);
+                fragment.appendChild(item);
             });
+            galleryContainer.appendChild(fragment);
+            macyInstance.recalculate(true); // Recalculate layout after adding new items
         };
-        const imageObserver = new IntersectionObserver((entries, observer) => {
-            entries.forEach(entry => {
-                if (entry.isIntersecting) {
-                    const item = entry.target; const img = item.querySelector('img'); img.src = img.dataset.src;
-                    img.onload = () => { item.style.backgroundColor = 'transparent'; item.classList.add('is-visible'); resizeSingleGridItem(item); };
-                    observer.unobserve(item);
-                }
-            });
-        }, { rootMargin: '0px 0px 200px 0px' });
-        
-        const resizeSingleGridItem = (item) => {
-            const img = item.querySelector('img');
-            if (!img || !img.complete || img.naturalHeight === 0) return;
-            const imageInData = allLoadedImages.find(i => i.id === item.dataset.id); if (!imageInData) return;
-            const rowHeight = 10; 
-            const rowGap = window.innerWidth < 768 ? 12 : 16;
-            const ratio = imageInData.width / imageInData.height;
-            if (ratio > 1.2) item.classList.add('grid-item-wide'); else item.classList.remove('grid-item-wide');
-            const clientWidth = item.clientWidth;
-            if (clientWidth > 0) { const scaledHeight = clientWidth / ratio; const rowSpan = Math.ceil((scaledHeight + rowGap) / (rowHeight + rowGap)); item.style.gridRowEnd = `span ${rowSpan}`; }
-        };
-        const resizeAllGridItems = () => { const items = galleryContainer.querySelectorAll('.grid-item.is-visible'); items.forEach(resizeSingleGridItem); };
-        window.addEventListener('resize', () => { clearTimeout(debounceTimer); debounceTimer = setTimeout(resizeAllGridItems, 200); });
         
         const createFilterButtons = async () => {
             try {
@@ -689,13 +687,17 @@ cat << 'EOF' > public/index.html
                 });
             } catch (error) { console.error('无法加载分类按钮:', error); }
         };
+
         filterButtonsContainer.addEventListener('click', (e) => {
             const target = e.target.closest('.filter-btn');
-            if (!target) return;
-            currentFilter = target.dataset.filter; currentSearch = ''; searchInput.value = '';
+            if (!target || target.classList.contains('active')) return;
+            currentFilter = target.dataset.filter;
+            currentSearch = '';
+            searchInput.value = '';
             document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
             target.classList.add('active');
-            resetGallery(); fetchAndRenderImages();
+            resetGallery();
+            fetchAndRenderImages();
         });
 
         const lightbox = document.querySelector('.lightbox'); const lightboxImage = lightbox.querySelector('.lightbox-image'); const lbCounter = lightbox.querySelector('.lb-counter'); const lbDownloadLink = document.getElementById('lightbox-download-link'); let currentImageIndexInFiltered = 0;
@@ -712,29 +714,33 @@ cat << 'EOF' > public/index.html
         
         let lastScrollY = window.scrollY;
         let ticking = false;
-
         function handleScroll() {
             const currentScrollY = window.scrollY;
-            
-            // Back to top button visibility
             if (currentScrollY > 300) backToTopBtn.classList.add('visible'); 
             else backToTopBtn.classList.remove('visible'); 
-            
-            // Auto-hide header
-            if (currentScrollY > lastScrollY && currentScrollY > header.offsetHeight) {
-                header.classList.add('is-hidden');
-            } else {
-                header.classList.remove('is-hidden');
-            }
-            lastScrollY = currentScrollY;
-
-            // Infinite scroll
+            if (currentScrollY > lastScrollY && currentScrollY > header.offsetHeight) { header.classList.add('is-hidden'); } 
+            else { header.classList.remove('is-hidden'); }
+            lastScrollY = currentScrollY <= 0 ? 0 : currentScrollY;
             if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 500) { fetchAndRenderImages(); } 
         }
-
         window.addEventListener('scroll', () => { if (!ticking) { window.requestAnimationFrame(() => { handleScroll(); ticking = false; }); ticking = true; } }); 
         
-        (async function init() { await createFilterButtons(); await fetchAndRenderImages(); })();
+        async function init() {
+             macyInstance = Macy({
+                container: '#gallery-container',
+                trueOrder: true,
+                waitForImages: false,
+                margin: 16,
+                columns: 2,
+                breakAt: {
+                    1024: 5,
+                    768: 3,
+                }
+            });
+            await createFilterButtons();
+            await fetchAndRenderImages();
+        }
+        init();
     });
     </script>
 </body>
@@ -799,7 +805,7 @@ cat << 'EOF' > public/admin.html
 
         </div>
         <section class="bg-white p-6 rounded-lg shadow-md xl:col-span-8">
-            <div class="flex flex-col md:flex-row justify-between items-center mb-4 gap-4"><h2 id="image-list-header" class="text-xl font-semibold text-slate-900 flex-grow"></h2><div class="w-full md:w-64"><input type="search" id="search-input" placeholder="搜索文件名或描述..." class="w-full border rounded-full px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"></div></div>
+            <div class="flex flex-col md:flex-row justify-between items-center mb-4 gap-4"><h2 id="image-list-header" class="text-xl font-semibold text-slate-900 flex-grow"></h2><div class="w-full md:w-64"><input type="search" id="search-input" placeholder="在当前视图下搜索..." class="w-full border rounded-full px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"></div></div>
             <div id="image-list" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4"></div>
             <div id="image-loader" class="text-center py-8 text-slate-500 hidden">正在加载...</div>
         </section>
@@ -811,7 +817,6 @@ cat << 'EOF' > public/admin.html
     <div id="toast" class="toast max-w-xs bg-gray-800 text-white text-sm rounded-lg shadow-lg p-3" role="alert"><div class="flex items-center"><div id="toast-icon" class="mr-2"></div><span id="toast-message"></span></div></div>
     <script>
     document.addEventListener('DOMContentLoaded', function() {
-        // --- DOM Elements & State ---
         const UNCATEGORIZED = '未分类';
         const DOMElements = {
             uploadForm: document.getElementById('upload-form'), uploadBtn: document.getElementById('upload-btn'), imageInput: document.getElementById('image-input'),
@@ -823,9 +828,8 @@ cat << 'EOF' > public/admin.html
             editImageModal: document.getElementById('edit-image-modal'), editImageForm: document.getElementById('edit-image-form'), adminLightbox: document.getElementById('admin-lightbox'),
             securitySection: document.getElementById('security-section'), tfaModal: document.getElementById('tfa-modal'),
         };
-        let filesToUpload = []; let adminLoadedImages = []; let currentAdminLightboxIndex = 0; let currentSearchTerm = ''; let debounceTimer; let currentView = 'all'; // 'all', 'category', 'recycle_bin'
+        let filesToUpload = []; let adminLoadedImages = []; let currentAdminLightboxIndex = 0; let currentSearchTerm = ''; let debounceTimer;
         
-        // --- API & Helpers ---
         const apiRequest = async (url, options = {}) => { const response = await fetch(url, options); if (response.status === 401) { showToast('登录状态已过期', 'error'); setTimeout(() => window.location.href = '/login.html', 2000); throw new Error('Unauthorized'); } return response; };
         const formatBytes = (bytes, decimals = 2) => { if (!+bytes) return '0 Bytes'; const k = 1024; const dm = decimals < 0 ? 0 : decimals; const sizes = ["Bytes", "KB", "MB", "GB", "TB"]; const i = Math.floor(Math.log(bytes) / Math.log(k)); return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`; };
         const showToast = (message, type = 'success') => { const toast = document.getElementById('toast'); toast.className = `toast max-w-xs text-white text-sm rounded-lg shadow-lg p-3 ${type === 'success' ? 'bg-green-600' : 'bg-red-600'}`; toast.querySelector('#toast-message').textContent = message; toast.querySelector('#toast-icon').innerHTML = type === 'success' ? `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>` : `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>`; toast.style.display = 'block'; setTimeout(() => toast.classList.add('show'), 10); setTimeout(() => { toast.classList.remove('show'); setTimeout(() => toast.style.display = 'none', 300); }, 3000); };
@@ -833,7 +837,6 @@ cat << 'EOF' > public/admin.html
         const showConfirmationModal = (title, bodyHtml, confirmText = '确认', cancelText = '取消') => { return new Promise(resolve => { const footerHtml = `<button type="button" class="modal-cancel-btn bg-gray-300 hover:bg-gray-400 text-black py-2 px-4 rounded">${cancelText}</button><button type="button" id="modal-confirm-btn" class="bg-red-600 hover:bg-red-700 text-white py-2 px-4 rounded">${confirmText}</button>`; showGenericModal(title, bodyHtml, footerHtml); DOMElements.genericModal.querySelector('#modal-confirm-btn').onclick = () => { hideModal(DOMElements.genericModal); resolve(true); }; const cancelBtn = DOMElements.genericModal.querySelector('.modal-cancel-btn'); cancelBtn.onclick = () => { hideModal(DOMElements.genericModal); resolve(false); }; DOMElements.genericModal.onclick = (e) => { if (e.target === DOMElements.genericModal) { cancelBtn.click(); } }; }); };
         const hideModal = (modal) => modal.classList.remove('active');
 
-        // --- Upload Logic ---
         const handleFileSelection = (fileList) => { const imageFiles = Array.from(fileList).filter(f => f.type.startsWith('image/')); const currentFilenames = new Set(filesToUpload.map(item => item.file.name)); const newFiles = imageFiles.filter(f => !currentFilenames.has(f.name)).map(file => ({ file, description: DOMElements.unifiedDescription.value, userHasTyped: DOMElements.unifiedDescription.value !== '', shouldRename: false, status: 'pending' })); filesToUpload.push(...newFiles); DOMElements.uploadBtn.disabled = filesToUpload.length === 0; renderFilePreviews(); };
         const renderFilePreviews = () => { if (filesToUpload.length === 0) { DOMElements.filePreviewContainer.classList.add('hidden'); return; } DOMElements.filePreviewList.innerHTML = ''; let totalSize = 0; filesToUpload.forEach((item, index) => { totalSize += item.file.size; const listItem = document.createElement('div'); const tempId = `file-preview-${index}`; listItem.className = 'file-preview-item text-slate-600 border rounded p-2'; listItem.dataset.fileIndex = index; listItem.innerHTML = `<div class="flex items-start"><img class="w-12 h-12 object-cover rounded mr-3 bg-slate-100" id="thumb-${tempId}"><div class="flex-grow"><div class="flex justify-between items-center text-xs mb-1"><p class="truncate pr-2 font-medium">${item.file.name}</p><button type="button" data-index="${index}" class="remove-file-btn text-xl text-red-500 hover:text-red-700 leading-none">&times;</button></div><p class="text-xs text-slate-500">${formatBytes(item.file.size)}</p></div></div><input type="text" data-index="${index}" class="relative w-full text-xs border rounded px-2 py-1 description-input bg-transparent mt-2" placeholder="添加独立描述..." value="${item.description}"><p class="upload-status text-xs mt-1"></p>`; DOMElements.filePreviewList.appendChild(listItem); const reader = new FileReader(); reader.onload = (e) => { document.getElementById(`thumb-${tempId}`).src = e.target.result; }; reader.readAsDataURL(item.file); }); DOMElements.uploadSummary.textContent = `已选择 ${filesToUpload.length} 个文件，总大小: ${formatBytes(totalSize)}`; DOMElements.filePreviewContainer.classList.remove('hidden'); };
         const dz = DOMElements.dropZone; dz.addEventListener('dragover', (e) => { e.preventDefault(); dz.classList.add('bg-green-50', 'border-green-400'); }); dz.addEventListener('dragleave', (e) => dz.classList.remove('bg-green-50', 'border-green-400')); dz.addEventListener('drop', (e) => { e.preventDefault(); dz.classList.remove('bg-green-50', 'border-green-400'); handleFileSelection(e.dataTransfer.files); });
@@ -841,109 +844,34 @@ cat << 'EOF' > public/admin.html
         DOMElements.unifiedDescription.addEventListener('input', e => { const unifiedText = e.target.value; document.querySelectorAll('.file-preview-item').forEach(item => { const index = parseInt(item.dataset.fileIndex, 10); if (filesToUpload[index] && !filesToUpload[index].userHasTyped) { item.querySelector('.description-input').value = unifiedText; filesToUpload[index].description = unifiedText; } }); });
         DOMElements.filePreviewList.addEventListener('input', e => { if (e.target.classList.contains('description-input')) { const index = parseInt(e.target.dataset.index, 10); if(filesToUpload[index]) { filesToUpload[index].description = e.target.value; filesToUpload[index].userHasTyped = true; } } });
         DOMElements.filePreviewList.addEventListener('click', e => { if (e.target.classList.contains('remove-file-btn')) { const index = parseInt(e.target.dataset.index, 10); filesToUpload.splice(index, 1); renderFilePreviews(); DOMElements.uploadBtn.disabled = filesToUpload.length === 0; } });
-        
-        const processUploadQueue = async (e) => {
-            e.preventDefault(); DOMElements.uploadBtn.disabled = true;
-            const pendingFiles = filesToUpload.filter(f => f.status === 'pending');
-            if (pendingFiles.length === 0) { showToast("没有需要上传的新文件。", "error"); DOMElements.uploadBtn.disabled = filesToUpload.length === 0; return; }
-            const filenamesToCheck = pendingFiles.map(item => item.file.name);
-            const checkRes = await apiRequest('/api/admin/check-filenames', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({filenames: filenamesToCheck}) });
-            const { duplicates } = await checkRes.json();
-            for (const item of pendingFiles) { if (duplicates.includes(item.file.name)) { const userConfirmed = await showConfirmationModal('文件已存在', `文件 "<strong>${item.file.name}</strong>" 已存在。是否仍然继续上传？<br>(新文件将被自动重命名)`, '继续上传', '取消此文件'); if (userConfirmed) { item.shouldRename = true; } else { item.status = 'cancelled'; const previewItem = DOMElements.filePreviewList.querySelector(`[data-file-index="${filesToUpload.indexOf(item)}"]`); if(previewItem) previewItem.querySelector('.upload-status').textContent = '已取消'; } } }
-            const uploadableFiles = filesToUpload.filter(f => f.status === 'pending');
-            let processedCount = 0;
-            const updateButtonText = () => { DOMElements.uploadBtn.textContent = `正在上传 (${processedCount}/${uploadableFiles.length})...`; };
-            if (uploadableFiles.length > 0) updateButtonText();
-            for (const item of uploadableFiles) {
-                const originalIndex = filesToUpload.indexOf(item);
-                const previewItem = DOMElements.filePreviewList.querySelector(`[data-file-index="${originalIndex}"]`);
-                if (!previewItem) { processedCount++; updateButtonText(); continue; }
-                const statusEl = previewItem.querySelector('.upload-status');
-                try {
-                    statusEl.textContent = '上传中...'; const formData = new FormData(); formData.append('image', item.file); formData.append('category', DOMElements.categorySelect.value); formData.append('description', item.description); formData.append('rename', item.shouldRename);
-                    const response = await apiRequest('/api/admin/upload', { method: 'POST', body: formData }); const result = await response.json();
-                    if (response.ok) { item.status = 'success'; previewItem.classList.add('upload-success'); statusEl.textContent = '✅ 上传成功'; } else { throw new Error(result.message || '上传失败'); }
-                } catch (err) { if (err.message !== 'Unauthorized') { item.status = 'error'; statusEl.textContent = `❌ ${err.message}`; previewItem.classList.add('upload-error'); } } finally { processedCount++; updateButtonText(); }
-            }
-            showToast(`所有任务处理完成。`); DOMElements.uploadBtn.textContent = '上传文件'; filesToUpload = []; DOMElements.imageInput.value = ''; DOMElements.unifiedDescription.value = '';
-            setTimeout(() => { DOMElements.filePreviewContainer.classList.add('hidden'); DOMElements.uploadBtn.disabled = true; }, 3000);
-            await refreshAllData();
-        };
+        const processUploadQueue = async (e) => { e.preventDefault(); DOMElements.uploadBtn.disabled = true; const pendingFiles = filesToUpload.filter(f => f.status === 'pending'); if (pendingFiles.length === 0) { showToast("没有需要上传的新文件。", "error"); DOMElements.uploadBtn.disabled = filesToUpload.length === 0; return; } const filenamesToCheck = pendingFiles.map(item => item.file.name); const checkRes = await apiRequest('/api/admin/check-filenames', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({filenames: filenamesToCheck}) }); const { duplicates } = await checkRes.json(); for (const item of pendingFiles) { if (duplicates.includes(item.file.name)) { const userConfirmed = await showConfirmationModal('文件已存在', `文件 "<strong>${item.file.name}</strong>" 已存在。是否仍然继续上传？<br>(新文件将被自动重命名)`, '继续上传', '取消此文件'); if (userConfirmed) { item.shouldRename = true; } else { item.status = 'cancelled'; const previewItem = DOMElements.filePreviewList.querySelector(`[data-file-index="${filesToUpload.indexOf(item)}"]`); if(previewItem) previewItem.querySelector('.upload-status').textContent = '已取消'; } } } const uploadableFiles = filesToUpload.filter(f => f.status === 'pending'); let processedCount = 0; const updateButtonText = () => { DOMElements.uploadBtn.textContent = `正在上传 (${processedCount}/${uploadableFiles.length})...`; }; if (uploadableFiles.length > 0) updateButtonText(); for (const item of uploadableFiles) { const originalIndex = filesToUpload.indexOf(item); const previewItem = DOMElements.filePreviewList.querySelector(`[data-file-index="${originalIndex}"]`); if (!previewItem) { processedCount++; updateButtonText(); continue; } const statusEl = previewItem.querySelector('.upload-status'); try { statusEl.textContent = '上传中...'; const formData = new FormData(); formData.append('image', item.file); formData.append('category', DOMElements.categorySelect.value); formData.append('description', item.description); formData.append('rename', item.shouldRename); const response = await apiRequest('/api/admin/upload', { method: 'POST', body: formData }); const result = await response.json(); if (response.ok) { item.status = 'success'; previewItem.classList.add('upload-success'); statusEl.textContent = '✅ 上传成功'; } else { throw new Error(result.message || '上传失败'); } } catch (err) { if (err.message !== 'Unauthorized') { item.status = 'error'; statusEl.textContent = `❌ ${err.message}`; previewItem.classList.add('upload-error'); } } finally { processedCount++; updateButtonText(); } } showToast(`所有任务处理完成。`); DOMElements.uploadBtn.textContent = '上传文件'; filesToUpload = []; DOMElements.imageInput.value = ''; DOMElements.unifiedDescription.value = ''; setTimeout(() => { DOMElements.filePreviewContainer.classList.add('hidden'); DOMElements.uploadBtn.disabled = true; }, 3000); await refreshAllData(); };
         DOMElements.uploadForm.addEventListener('submit', processUploadQueue);
 
-        // --- Data Loading & Rendering ---
-        async function refreshAllData() {
-            await refreshNavigation();
-            const activeNav = document.querySelector('.nav-item.active');
-            if (activeNav) {
-                activeNav.click();
-            } else {
-                document.getElementById('nav-item-all').click();
-            }
-        }
-
-        async function populateCategorySelects(selectedCategory = null) {
-            try {
-                const response = await apiRequest('/api/categories');
-                const categories = await response.json();
-                [DOMElements.categorySelect, DOMElements.editCategorySelect].forEach(select => {
-                    const currentVal = select.value;
-                    select.innerHTML = '';
-                    categories.forEach(cat => select.add(new Option(cat, cat)));
-                    select.value = categories.includes(currentVal) ? currentVal : selectedCategory || categories[0];
-                });
-            } catch (error) {
-                if (error.message !== 'Unauthorized') console.error('加载分类失败:', error);
-            }
-        }
-
-        async function refreshNavigation() {
-            try {
-                const response = await apiRequest('/api/categories');
-                const categories = await response.json();
-                DOMElements.categoryDynamicList.innerHTML = ''; // Clear only dynamic part
-                categories.forEach(cat => {
-                    const isUncategorized = cat === UNCATEGORIZED;
-                    const item = document.createElement('div');
-                    item.className = 'nav-item flex items-center justify-between p-2 rounded cursor-pointer hover:bg-gray-100';
-                    item.dataset.view = 'category';
-                    item.dataset.categoryName = cat;
-                    item.innerHTML = `
-                        <span class="category-name flex-grow">${cat}</span>
-                        ` + (isUncategorized ? '' : `
-                        <div class="space-x-2 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button data-name="${cat}" class="rename-cat-btn text-blue-500 hover:text-blue-700 text-sm">重命名</button>
-                            <button data-name="${cat}" class="delete-cat-btn text-red-500 hover:red-700 text-sm">删除</button>
-                        </div>`);
-                    item.addEventListener('mouseenter', () => item.classList.add('group'));
-                    item.addEventListener('mouseleave', () => item.classList.remove('group'));
-                    DOMElements.categoryDynamicList.appendChild(item);
-                });
-                await populateCategorySelects();
-            } catch (error) {
-                if (error.message !== 'Unauthorized') console.error('加载导航列表失败:', error);
-            }
-        }
+        async function refreshAllData() { await refreshNavigation(); const activeNav = document.querySelector('.nav-item.active'); if (activeNav) { activeNav.click(); } else { document.getElementById('nav-item-all').click(); } }
+        async function populateCategorySelects(selectedCategory = null) { try { const response = await apiRequest('/api/categories'); const categories = await response.json(); [DOMElements.categorySelect, DOMElements.editCategorySelect].forEach(select => { const currentVal = select.value; select.innerHTML = ''; categories.forEach(cat => select.add(new Option(cat, cat))); select.value = categories.includes(currentVal) ? currentVal : selectedCategory || categories[0]; }); } catch (error) { if (error.message !== 'Unauthorized') console.error('加载分类失败:', error); } }
+        async function refreshNavigation() { try { const response = await apiRequest('/api/categories'); const categories = await response.json(); DOMElements.categoryDynamicList.innerHTML = ''; categories.forEach(cat => { const isUncategorized = cat === UNCATEGORIZED; const item = document.createElement('div'); item.className = 'nav-item flex items-center justify-between p-2 rounded cursor-pointer hover:bg-gray-100'; item.dataset.view = 'category'; item.dataset.categoryName = cat; item.innerHTML = `<span class="category-name flex-grow">${cat}</span>` + (isUncategorized ? '' : `<div class="space-x-2 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"><button data-name="${cat}" class="rename-cat-btn text-blue-500 hover:text-blue-700 text-sm">重命名</button><button data-name="${cat}" class="delete-cat-btn text-red-500 hover:red-700 text-sm">删除</button></div>`); item.addEventListener('mouseenter', () => item.classList.add('group')); item.addEventListener('mouseleave', () => item.classList.remove('group')); DOMElements.categoryDynamicList.appendChild(item); }); await populateCategorySelects(); } catch (error) { if (error.message !== 'Unauthorized') console.error('加载导航列表失败:', error); } }
         
         async function loadImages(category = 'all', name = '所有图片') {
-            currentView = 'category'; DOMElements.imageList.innerHTML = ''; DOMElements.imageLoader.classList.remove('hidden');
+            DOMElements.imageList.innerHTML = ''; DOMElements.imageLoader.classList.remove('hidden');
             try {
-                const url = `/api/images?category=${category}&search=${encodeURIComponent(currentSearchTerm)}&limit=1000`; // Load all for admin panel
+                const url = `/api/images?category=${category}&search=${encodeURIComponent(currentSearchTerm)}&limit=1000`;
                 const response = await apiRequest(url); adminLoadedImages = (await response.json()).images;
                 DOMElements.imageLoader.classList.add('hidden');
                 const totalSize = adminLoadedImages.reduce((acc, img) => acc + (img.size || 0), 0);
-                const titleText = currentSearchTerm ? `在 "${name}" 中搜索 "${currentSearchTerm}" 的结果` : name;
+                const titleText = currentSearchTerm ? `在 "${name}" 中搜索 "${currentSearchTerm}"` : name;
                 DOMElements.imageListHeader.innerHTML = `${titleText} <span class="text-base text-gray-500 font-normal">(共 ${adminLoadedImages.length} 张, ${formatBytes(totalSize)})</span>`;
                 if (adminLoadedImages.length === 0) { DOMElements.imageList.innerHTML = '<p class="text-slate-500 col-span-full text-center py-10">没有找到图片。</p>'; } 
                 else { adminLoadedImages.forEach(renderImageCard); }
             } catch (error) { if(error.message !== 'Unauthorized') DOMElements.imageLoader.textContent = '加载图片失败。'; }
         }
         async function loadRecycleBin() {
-            currentView = 'recycle_bin'; DOMElements.imageList.innerHTML = ''; DOMElements.imageLoader.classList.remove('hidden');
+            DOMElements.imageList.innerHTML = ''; DOMElements.imageLoader.classList.remove('hidden');
             try {
-                const response = await apiRequest('/api/admin/recycle-bin'); adminLoadedImages = await response.json();
+                const url = `/api/admin/recycle-bin?search=${encodeURIComponent(currentSearchTerm)}`;
+                const response = await apiRequest(url); adminLoadedImages = await response.json();
                 DOMElements.imageLoader.classList.add('hidden');
-                DOMElements.imageListHeader.textContent = `回收站 (共 ${adminLoadedImages.length} 张)`;
+                 const titleText = currentSearchTerm ? `在回收站中搜索 "${currentSearchTerm}"` : "回收站";
+                DOMElements.imageListHeader.innerHTML = `${titleText} <span class="text-base text-gray-500 font-normal">(共 ${adminLoadedImages.length} 张)</span>`;
                 if (adminLoadedImages.length === 0) { DOMElements.imageList.innerHTML = '<p class="text-slate-500 col-span-full text-center py-10">回收站是空的。</p>'; } 
                 else { adminLoadedImages.forEach(renderRecycleBinCard); }
             } catch (error) { if (error.message !== 'Unauthorized') DOMElements.imageLoader.textContent = '加载回收站失败。'; }
@@ -955,113 +883,41 @@ cat << 'EOF' > public/admin.html
             DOMElements.imageList.appendChild(card);
         }
         function renderRecycleBinCard(image) {
-            const card = document.createElement('div'); card.className = 'border border-gray-300 bg-gray-50 rounded-lg shadow-sm overflow-hidden flex flex-col';
-            card.innerHTML = `<div class="p-3 flex-grow flex flex-col"><p class="font-bold text-sm truncate" title="${image.originalFilename}">${image.originalFilename}</p><p class="text-xs text-slate-500">删除于: ${new Date(image.deletedAt).toLocaleString()}</p></div><div class="bg-slate-100 p-2 flex justify-end items-center gap-2"><button title="恢复" data-id="${image.id}" class="restore-btn text-sm py-1 px-3 rounded-md text-white bg-green-600 hover:bg-green-700 transition-colors">恢复</button><button title="彻底删除" data-id="${image.id}" class="purge-btn text-sm py-1 px-3 rounded-md text-white bg-red-700 hover:bg-red-800 transition-colors">彻底删除</button></div>`;
+            const card = document.createElement('div'); card.className = 'border rounded-lg shadow-sm bg-white overflow-hidden flex flex-col sm:flex-row';
+            card.innerHTML = `<div class="sm:w-32 flex-shrink-0 bg-slate-100 flex items-center justify-center"><img src="/image-proxy/${image.filename}?w=200" alt="Thumbnail" class="h-24 sm:h-full w-full object-cover"></div><div class="p-3 flex-grow flex flex-col justify-between"><div class="mb-2"><p class="font-bold text-sm truncate" title="${image.originalFilename}">${image.originalFilename}</p><p class="text-xs text-slate-500">删除于: ${new Date(image.deletedAt).toLocaleString()}</p></div><div class="flex justify-end items-center gap-2"><button title="恢复" data-id="${image.id}" class="restore-btn text-sm py-1 px-3 rounded-md text-white bg-green-600 hover:bg-green-700 transition-colors">恢复</button><button title="彻底删除" data-id="${image.id}" class="purge-btn text-sm py-1 px-3 rounded-md text-white bg-red-700 hover:bg-red-800 transition-colors">彻底删除</button></div></div>`;
             DOMElements.imageList.appendChild(card);
         }
         
-        // --- Event Listeners & Navigation ---
         DOMElements.navigationList.addEventListener('click', async (e) => {
             const navItem = e.target.closest('.nav-item');
             if (!navItem) return;
-
-            // Handle category management buttons first, and stop propagation
-            if (e.target.matches('.rename-cat-btn, .delete-cat-btn')) {
-                e.stopPropagation();
-                const catName = e.target.dataset.name;
-                if (e.target.classList.contains('rename-cat-btn')) {
-                    // Rename logic...
-                    showGenericModal(`重命名分类 "${catName}"`, '<form id="modal-form"><input type="text" id="modal-input" required class="w-full border rounded px-3 py-2"></form>', '<button type="button" class="modal-cancel-btn bg-gray-300 hover:bg-gray-400 text-black py-2 px-4 rounded">取消</button><button type="submit" form="modal-form" class="bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded">保存</button>');
-                    const input = document.getElementById('modal-input'); input.value = catName;
-                    document.getElementById('modal-form').onsubmit = async (ev) => { ev.preventDefault(); const newName = input.value.trim(); if (!newName || newName === catName) { hideModal(DOMElements.genericModal); return; } try { const response = await apiRequest('/api/admin/categories', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ oldName: catName, newName }) }); if (!response.ok) throw new Error((await response.json()).message); hideModal(DOMElements.genericModal); showToast('重命名成功'); await refreshAllData(); } catch (error) { showToast(`重命名失败: ${error.message}`, 'error'); } };
-                } else if (e.target.classList.contains('delete-cat-btn')) {
-                    // Delete logic...
-                    const confirmed = await showConfirmationModal('确认删除', `<p>确定要删除分类 "<strong>${catName}</strong>" 吗？<br>此分类下的图片将归入 "未分类"。</p>`, '确认删除');
-                    if(confirmed) { try { const response = await apiRequest('/api/admin/categories', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: catName }) }); if (!response.ok) throw new Error((await response.json()).message); showToast('删除成功'); await refreshAllData(); } catch (error) { showToast(`删除失败: ${error.message}`, 'error'); } }
-                }
-                return; 
-            }
-            
-            // Handle navigation clicks
+            if (e.target.matches('.rename-cat-btn, .delete-cat-btn')) { e.stopPropagation(); const catName = e.target.dataset.name; if (e.target.classList.contains('rename-cat-btn')) { showGenericModal(`重命名分类 "${catName}"`, '<form id="modal-form"><input type="text" id="modal-input" required class="w-full border rounded px-3 py-2"></form>', '<button type="button" class="modal-cancel-btn bg-gray-300 hover:bg-gray-400 text-black py-2 px-4 rounded">取消</button><button type="submit" form="modal-form" class="bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded">保存</button>'); const input = document.getElementById('modal-input'); input.value = catName; document.getElementById('modal-form').onsubmit = async (ev) => { ev.preventDefault(); const newName = input.value.trim(); if (!newName || newName === catName) { hideModal(DOMElements.genericModal); return; } try { const response = await apiRequest('/api/admin/categories', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ oldName: catName, newName }) }); if (!response.ok) throw new Error((await response.json()).message); hideModal(DOMElements.genericModal); showToast('重命名成功'); await refreshAllData(); } catch (error) { showToast(`重命名失败: ${error.message}`, 'error'); } }; } else if (e.target.classList.contains('delete-cat-btn')) { const confirmed = await showConfirmationModal('确认删除', `<p>确定要删除分类 "<strong>${catName}</strong>" 吗？<br>此分类下的图片将归入 "未分类"。</p>`, '确认删除'); if(confirmed) { try { const response = await apiRequest('/api/admin/categories', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: catName }) }); if (!response.ok) throw new Error((await response.json()).message); showToast('删除成功'); await refreshAllData(); } catch (error) { showToast(`删除失败: ${error.message}`, 'error'); } } } return; }
             document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
             navItem.classList.add('active');
             DOMElements.searchInput.value = ''; currentSearchTerm = '';
-            
             const view = navItem.dataset.view;
             if (view === 'all') { await loadImages('all', '所有图片'); }
             else if (view === 'recycle_bin') { await loadRecycleBin(); }
             else if (view === 'category') { const category = navItem.dataset.categoryName; await loadImages(category, category); }
         });
         
-        
         DOMElements.imageList.addEventListener('click', async (e) => {
             const target = e.target.closest('button, a'); if (!target) return;
             const imageId = target.dataset.id;
             if (target.matches('.preview-btn')) { currentAdminLightboxIndex = adminLoadedImages.findIndex(img => img.id === imageId); if (currentAdminLightboxIndex === -1) return; updateAdminLightbox(); DOMElements.adminLightbox.classList.add('active'); document.body.classList.add('lightbox-open');
             } else if (target.matches('.edit-btn')) { const image = JSON.parse(target.dataset.image); await populateCategorySelects(image.category); document.getElementById('edit-id').value = image.id; document.getElementById('edit-originalFilename').value = image.originalFilename; document.getElementById('edit-description').value = image.description; DOMElements.editImageModal.classList.add('active');
-            } else if (target.matches('.delete-btn')) {
-                const confirmed = await showConfirmationModal('移至回收站', `<p>确定要将这张图片移至回收站吗？</p>`, '确认移动');
-                if(confirmed) { try { const response = await apiRequest(`/api/admin/images/${imageId}`, { method: 'DELETE' }); if (!response.ok) throw new Error('操作失败'); showToast('图片已移至回收站'); const activeNav = document.querySelector('.nav-item.active'); if(activeNav) activeNav.click(); } catch (error) { showToast(error.message, 'error'); } }
-            } else if (target.matches('.restore-btn')) {
-                try { const response = await apiRequest(`/api/admin/recycle-bin/${imageId}/restore`, { method: 'POST' }); if (!response.ok) throw new Error('恢复失败'); showToast('图片已恢复'); await loadRecycleBin(); } catch (error) { showToast(error.message, 'error'); }
-            } else if (target.matches('.purge-btn')) {
-                const confirmed = await showConfirmationModal('彻底删除', `<p>确定要永久删除这张图片吗？<br><strong>此操作无法撤销。</strong></p>`, '确认删除');
-                if (confirmed) { try { const response = await apiRequest(`/api/admin/recycle-bin/${imageId}/purge`, { method: 'DELETE' }); if (!response.ok) throw new Error('删除失败'); showToast('图片已彻底删除'); await loadRecycleBin(); } catch (error) { showToast(error.message, 'error'); } }
-            }
+            } else if (target.matches('.delete-btn')) { const confirmed = await showConfirmationModal('移至回收站', `<p>确定要将这张图片移至回收站吗？</p>`, '确认移动'); if(confirmed) { try { const response = await apiRequest(`/api/admin/images/${imageId}`, { method: 'DELETE' }); if (!response.ok) throw new Error('操作失败'); showToast('图片已移至回收站'); const activeNav = document.querySelector('.nav-item.active'); if(activeNav) activeNav.click(); } catch (error) { showToast(error.message, 'error'); } }
+            } else if (target.matches('.restore-btn')) { try { const response = await apiRequest(`/api/admin/recycle-bin/${imageId}/restore`, { method: 'POST' }); if (!response.ok) throw new Error('恢复失败'); showToast('图片已恢复'); await loadRecycleBin(); } catch (error) { showToast(error.message, 'error'); }
+            } else if (target.matches('.purge-btn')) { const confirmed = await showConfirmationModal('彻底删除', `<p>确定要永久删除这张图片吗？<br><strong>此操作无法撤销。</strong></p>`, '确认删除'); if (confirmed) { try { const response = await apiRequest(`/api/admin/recycle-bin/${imageId}/purge`, { method: 'DELETE' }); if (!response.ok) throw new Error('删除失败'); showToast('图片已彻底删除'); await loadRecycleBin(); } catch (error) { showToast(error.message, 'error'); } } }
         });
 
         DOMElements.searchInput.addEventListener('input', () => { clearTimeout(debounceTimer); debounceTimer = setTimeout(() => { currentSearchTerm = DOMElements.searchInput.value; const activeNav = document.querySelector('.nav-item.active'); if (activeNav) { activeNav.click(); } }, 300); });
         DOMElements.addCategoryBtn.addEventListener('click', () => { showGenericModal('添加新分类', '<form id="modal-form"><input type="text" id="modal-input" placeholder="输入新分类的名称" required class="w-full border rounded px-3 py-2"></form>', '<button type="button" class="modal-cancel-btn bg-gray-300 hover:bg-gray-400 text-black py-2 px-4 rounded">取消</button><button type="submit" form="modal-form" class="bg-green-600 hover:bg-green-700 text-white py-2 px-4 rounded">保存</button>'); document.getElementById('modal-form').onsubmit = async (e) => { e.preventDefault(); const newName = document.getElementById('modal-input').value.trim(); if (!newName) return; try { const response = await apiRequest('/api/admin/categories', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: newName }) }); if (!response.ok) throw new Error((await response.json()).message); hideModal(DOMElements.genericModal); showToast('分类创建成功'); await refreshNavigation(); } catch (error) { showToast(`添加失败: ${error.message}`, 'error'); } }; });
-        DOMElements.editImageForm.addEventListener('submit', async (e) => {
-            e.preventDefault(); const id = document.getElementById('edit-id').value;
-            const body = JSON.stringify({ originalFilename: document.getElementById('edit-originalFilename').value, category: DOMElements.editCategorySelect.value, description: document.getElementById('edit-description').value });
-            try { const response = await apiRequest(`/api/admin/images/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body }); if (!response.ok) throw new Error((await response.json()).message); hideModal(DOMElements.editImageModal); showToast('更新成功'); const activeNav = document.querySelector('.nav-item.active'); if (activeNav) { activeNav.click(); } } catch (error) { showToast(`更新失败: ${error.message}`, 'error'); }
-        });
+        DOMElements.editImageForm.addEventListener('submit', async (e) => { e.preventDefault(); const id = document.getElementById('edit-id').value; const body = JSON.stringify({ originalFilename: document.getElementById('edit-originalFilename').value, category: DOMElements.editCategorySelect.value, description: document.getElementById('edit-description').value }); try { const response = await apiRequest(`/api/admin/images/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body }); if (!response.ok) throw new Error((await response.json()).message); hideModal(DOMElements.editImageModal); showToast('更新成功'); const activeNav = document.querySelector('.nav-item.active'); if (activeNav) { activeNav.click(); } } catch (error) { showToast(`更新失败: ${error.message}`, 'error'); } });
         
-        // --- Security (2FA) ---
-        async function renderSecuritySection() {
-            try {
-                const res = await apiRequest('/api/admin/2fa/status'); const { enabled } = await res.json();
-                let content;
-                if (enabled) {
-                    content = `<p class="text-sm text-slate-600 mb-3">两步验证 (2FA) 当前已<span class="font-bold text-green-600">启用</span>。</p><button id="disable-tfa-btn" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg">禁用 2FA</button>`;
-                } else {
-                    content = `<p class="text-sm text-slate-600 mb-3">通过启用两步验证，为您的账户增加一层额外的安全保障。</p><button id="enable-tfa-btn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg">启用 2FA</button>`;
-                }
-                DOMElements.securitySection.innerHTML = content;
-            } catch (error) { DOMElements.securitySection.innerHTML = '<p class="text-red-500">无法加载安全状态。</p>'; }
-        }
-        DOMElements.securitySection.addEventListener('click', async e => {
-            if (e.target.id === 'enable-tfa-btn') {
-                try {
-                    const res = await apiRequest('/api/admin/2fa/generate', {method: 'POST'}); const data = await res.json();
-                    DOMElements.tfaModal.querySelector('#tfa-setup-content').innerHTML = `
-                        <p class="text-sm mb-4">1. 使用您的 Authenticator 应用 (如 Google Authenticator, Authy) 扫描下方的二维码。</p>
-                        <img src="${data.qrCode}" alt="2FA QR Code" class="mx-auto border p-2 bg-white">
-                        <p class="text-sm mt-4 mb-2">或者手动输入密钥:</p>
-                        <p class="font-mono bg-gray-100 p-2 rounded text-center text-sm break-all">${data.secret}</p>
-                        <p class="text-sm mt-6 mb-2">2. 在下方输入应用生成的6位验证码以完成设置：</p>
-                        <form id="tfa-verify-form" class="flex gap-2"><input type="text" id="tfa-token-input" required maxlength="6" class="w-full border rounded px-3 py-2" placeholder="6位数字码"><button type="submit" class="bg-green-600 hover:bg-green-700 text-white py-2 px-4 rounded">验证并启用</button></form>
-                        <p id="tfa-error" class="text-red-500 text-sm mt-2 hidden"></p>`;
-                    DOMElements.tfaModal.classList.add('active');
-                    document.getElementById('tfa-verify-form').addEventListener('submit', async ev => {
-                        ev.preventDefault();
-                        const token = document.getElementById('tfa-token-input').value;
-                        try {
-                            const verifyRes = await apiRequest('/api/admin/2fa/enable', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ secret: data.secret, token })});
-                            const result = await verifyRes.json();
-                            if(verifyRes.ok) { showToast(result.message); hideModal(DOMElements.tfaModal); await renderSecuritySection(); }
-                            else { document.getElementById('tfa-error').textContent = result.message; document.getElementById('tfa-error').classList.remove('hidden'); }
-                        } catch (err) { document.getElementById('tfa-error').textContent = '发生未知错误。'; document.getElementById('tfa-error').classList.remove('hidden'); }
-                    });
-                } catch (error) { showToast('无法生成2FA信息', 'error'); }
-            } else if (e.target.id === 'disable-tfa-btn') {
-                const confirmed = await showConfirmationModal('禁用 2FA', `<p>确定要禁用两步验证吗？您的账户安全性将会降低。</p>`, '确认禁用');
-                if (confirmed) { try { await apiRequest('/api/admin/2fa/disable', {method: 'POST'}); showToast('2FA已禁用'); await renderSecuritySection(); } catch(err) { showToast('操作失败', 'error'); } }
-            }
-        });
+        async function renderSecuritySection() { try { const res = await apiRequest('/api/admin/2fa/status'); const { enabled } = await res.json(); let content; if (enabled) { content = `<p class="text-sm text-slate-600 mb-3">两步验证 (2FA) 当前已<span class="font-bold text-green-600">启用</span>。</p><button id="disable-tfa-btn" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg">禁用 2FA</button>`; } else { content = `<p class="text-sm text-slate-600 mb-3">通过启用两步验证，为您的账户增加一层额外的安全保障。</p><button id="enable-tfa-btn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg">启用 2FA</button>`; } DOMElements.securitySection.innerHTML = content; } catch (error) { DOMElements.securitySection.innerHTML = '<p class="text-red-500">无法加载安全状态。</p>'; } }
+        DOMElements.securitySection.addEventListener('click', async e => { if (e.target.id === 'enable-tfa-btn') { try { const res = await apiRequest('/api/admin/2fa/generate', {method: 'POST'}); const data = await res.json(); DOMElements.tfaModal.querySelector('#tfa-setup-content').innerHTML = `<p class="text-sm mb-4">1. 使用您的 Authenticator 应用 (如 Google Authenticator, Authy) 扫描下方的二维码。</p><img src="${data.qrCode}" alt="2FA QR Code" class="mx-auto border p-2 bg-white"><p class="text-sm mt-4 mb-2">或者手动输入密钥:</p><p class="font-mono bg-gray-100 p-2 rounded text-center text-sm break-all">${data.secret}</p><p class="text-sm mt-6 mb-2">2. 在下方输入应用生成的6位验证码以完成设置：</p><form id="tfa-verify-form" class="flex gap-2"><input type="text" id="tfa-token-input" required maxlength="6" class="w-full border rounded px-3 py-2" placeholder="6位数字码"><button type="submit" class="bg-green-600 hover:bg-green-700 text-white py-2 px-4 rounded">验证并启用</button></form><p id="tfa-error" class="text-red-500 text-sm mt-2 hidden"></p>`; DOMElements.tfaModal.classList.add('active'); document.getElementById('tfa-verify-form').addEventListener('submit', async ev => { ev.preventDefault(); const token = document.getElementById('tfa-token-input').value; try { const verifyRes = await apiRequest('/api/admin/2fa/enable', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ secret: data.secret, token })}); const result = await verifyRes.json(); if(verifyRes.ok) { showToast(result.message); hideModal(DOMElements.tfaModal); await renderSecuritySection(); } else { document.getElementById('tfa-error').textContent = result.message; document.getElementById('tfa-error').classList.remove('hidden'); } } catch (err) { document.getElementById('tfa-error').textContent = '发生未知错误。'; document.getElementById('tfa-error').classList.remove('hidden'); } }); } catch (error) { showToast('无法生成2FA信息', 'error'); } } else if (e.target.id === 'disable-tfa-btn') { const confirmed = await showConfirmationModal('禁用 2FA', `<p>确定要禁用两步验证吗？您的账户安全性将会降低。</p>`, '确认禁用'); if (confirmed) { try { await apiRequest('/api/admin/2fa/disable', {method: 'POST'}); showToast('2FA已禁用'); await renderSecuritySection(); } catch(err) { showToast('操作失败', 'error'); } } } });
         
-        // --- Modals & Lightbox ---
         function updateAdminLightbox() { const item = adminLoadedImages[currentAdminLightboxIndex]; if (!item) return; const lightbox = DOMElements.adminLightbox; lightbox.querySelector('.lightbox-image').src = item.src; lightbox.querySelector('#admin-lightbox-download-link').href = item.src; lightbox.querySelector('#admin-lightbox-download-link').download = item.originalFilename; }
         function showNextAdminImage() { currentAdminLightboxIndex = (currentAdminLightboxIndex + 1) % adminLoadedImages.length; updateAdminLightbox(); }
         function showPrevAdminImage() { currentAdminLightboxIndex = (currentAdminLightboxIndex - 1 + adminLoadedImages.length) % adminLoadedImages.length; updateAdminLightbox(); }
@@ -1070,11 +926,7 @@ cat << 'EOF' > public/admin.html
         document.addEventListener('keydown', e => { if (DOMElements.adminLightbox.classList.contains('active')) { if (e.key === 'ArrowRight') showNextAdminImage(); if (e.key === 'ArrowLeft') showPrevAdminImage(); if (e.key === 'Escape') closeAdminLightbox(); } });
         [DOMElements.genericModal, DOMElements.editImageModal, DOMElements.tfaModal].forEach(modal => { const cancelBtn = modal.querySelector('.modal-cancel-btn'); if(cancelBtn) { cancelBtn.addEventListener('click', () => hideModal(modal)); } modal.addEventListener('click', (e) => { if (e.target === modal) hideModal(modal); }); });
         
-        // --- Init ---
-        async function init() {
-            await Promise.all([refreshNavigation(), renderSecuritySection()]);
-            loadImages('all', '所有图片');
-        }
+        async function init() { await Promise.all([refreshNavigation(), renderSecuritySection()]); loadImages('all', '所有图片'); }
         init();
     });
     </script>
@@ -1387,9 +1239,6 @@ manage_2fa() {
         read -p "您想 [1] 禁用 2FA 还是 [2] 强制重置 2FA? (输入其他任意键取消): " tfa_choice
         if [[ "$tfa_choice" == "1" || "$tfa_choice" == "2" ]]; then
             echo -e "${YELLOW}正在移除 2FA 配置...${NC}"
-            # A more robust way is to remove only the tfa key, but for simplicity, deleting is fine.
-            # A better approach would be: `jq 'del(.tfa)' data/config.json > tmp.$$.json && mv tmp.$$.json data/config.json`
-            # But that requires jq to be installed.
             rm -f "$config_file"
             echo -e "${GREEN}2FA 配置已移除。${NC}"
             echo -e "${YELLOW}请注意：这仅移除了服务器端的密钥。您可能需要手动从您的 Authenticator 应用中删除旧的条目。${NC}"
@@ -1401,7 +1250,6 @@ manage_2fa() {
     else
         echo -e "当前 2FA 状态: ${RED}未启用${NC}"
         echo -e "${YELLOW}要启用 2FA，请登录后台管理页面，在“安全”区域进行设置。${NC}"
-        echo -e "${YELLOW}这是因为启用过程需要您使用手机 App 扫描二维码，在网页端操作体验最佳。${NC}"
     fi
 }
 
