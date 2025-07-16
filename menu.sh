@@ -1,12 +1,11 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v0.4.2 体验优化)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v0.4.3 交互修复)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
-#   v0.4.2 更新:
-#   - 功能 (后台): 将后台的图片预览灯箱（Lightbox）的功能和外观与前台完全统一，增加了计数器等。
-#   - UI (后台): 增强了分页器当前页码的高亮样式，使其更醒目。
+#   v0.4.3 更新:
+#   - 紧急修复 (后台): 修复了因缺少对浏览器默认行为的阻止，导致的图片预览、分页等链接和按钮点击无响应的严重BUG。
 # =================================================================
 
 # --- 配置 ---
@@ -17,7 +16,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 PROMPT_Y="(${GREEN}y${NC}/${RED}n${NC})"
 
-SCRIPT_VERSION="0.4.2"
+SCRIPT_VERSION="0.4.3"
 APP_NAME="image-gallery"
 
 # --- 路径设置 ---
@@ -44,7 +43,7 @@ overwrite_app_files() {
 cat << 'EOF' > package.json
 {
   "name": "image-gallery-pro",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "A high-performance, full-stack image gallery application with all features.",
   "main": "server.js",
   "scripts": {
@@ -463,7 +462,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 })();
 EOF
 
-    echo "--> 正在生成主画廊 public/index.html (v0.4.2)..."
+    echo "--> 正在生成主画廊 public/index.html (v0.4.3)..."
 cat << 'EOF' > public/index.html
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -976,9 +975,10 @@ cat << 'EOF' > public/admin.html
             html += '</div>';
             DOMElements.paginationContainer.innerHTML = html;
         }
-        DOMElements.paginationContainer.addEventListener('click', e => { const target = e.target.closest('.page-item'); if(target && !target.classList.contains('disabled') && !target.classList.contains('active')) { changePage(parseInt(target.dataset.page)); } });
+        DOMElements.paginationContainer.addEventListener('click', e => { e.preventDefault(); const target = e.target.closest('.page-item'); if(target && !target.classList.contains('disabled') && !target.classList.contains('active')) { changePage(parseInt(target.dataset.page)); } });
 
         DOMElements.navigationList.addEventListener('click', async (e) => {
+            e.preventDefault();
             const navItem = e.target.closest('.nav-item');
             if (!navItem) return;
             if (e.target.matches('.rename-cat-btn, .delete-cat-btn')) { e.stopPropagation(); const catName = e.target.dataset.name; if (e.target.classList.contains('rename-cat-btn')) { showGenericModal(`重命名分类 "${catName}"`, '<form id="modal-form"><input type="text" id="modal-input" required class="w-full border rounded px-3 py-2"></form>', '<button type="button" class="modal-cancel-btn bg-gray-300 hover:bg-gray-400 text-black py-2 px-4 rounded">取消</button><button type="submit" form="modal-form" class="bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded">保存</button>'); const input = document.getElementById('modal-input'); input.value = catName; document.getElementById('modal-form').onsubmit = async (ev) => { ev.preventDefault(); const newName = input.value.trim(); if (!newName || newName === catName) { hideModal(DOMElements.genericModal); return; } try { await apiRequest('/api/admin/categories', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ oldName: catName, newName }) }); hideModal(DOMElements.genericModal); showToast('重命名成功'); await refreshAllData(); } catch (error) { showToast(`重命名失败: ${error.message}`, 'error'); } }; } else if (e.target.classList.contains('delete-cat-btn')) { const confirmed = await showConfirmationModal('确认删除', `<p>确定要删除分类 "<strong>${catName}</strong>" 吗？<br>此分类下的图片将归入 "未分类"。</p>`, '确认删除'); if(confirmed) { try { await apiRequest('/api/admin/categories', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: catName }) }); showToast('删除成功'); await refreshAllData(); } catch (error) { showToast(`删除失败: ${error.message}`, 'error'); } } } return; }
@@ -994,6 +994,7 @@ cat << 'EOF' > public/admin.html
         });
         
         DOMElements.imageList.addEventListener('click', async (e) => {
+            e.preventDefault();
             const button = e.target.closest('button, a'); if (!button) return;
             if (!button.matches('.preview-btn, .edit-btn, .delete-btn, .restore-btn, .purge-btn, .download-btn')) return;
             const imageId = button.dataset.id;
@@ -1018,7 +1019,6 @@ cat << 'EOF' > public/admin.html
         async function renderSecuritySection() { try { const response = await apiRequest('/api/admin/2fa/status'); const { enabled } = await response.json(); let content; if (enabled) { content = `<p class="text-sm text-slate-600 mb-3">两步验证 (2FA) 当前已<span class="font-bold text-green-600">启用</span>。</p><button id="disable-tfa-btn" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg">禁用 2FA</button>`; } else { content = `<p class="text-sm text-slate-600 mb-3">通过启用两步验证，为您的账户增加一层额外的安全保障。</p><button id="enable-tfa-btn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg">启用 2FA</button>`; } DOMElements.securitySection.innerHTML = content; } catch (error) { DOMElements.securitySection.innerHTML = `<p class="text-red-500">无法加载安全状态: ${error.message}</p>`; } }
         DOMElements.securitySection.addEventListener('click', async e => { if (e.target.id === 'enable-tfa-btn') { try { const response = await apiRequest('/api/admin/2fa/generate', {method: 'POST'}); const data = await response.json(); DOMElements.tfaModal.querySelector('#tfa-setup-content').innerHTML = `<p class="text-sm mb-4">1. 使用您的 Authenticator 应用 (如 Google Authenticator, Authy) 扫描下方的二维码。</p><img src="${data.qrCode}" alt="2FA QR Code" class="mx-auto border p-2 bg-white"><p class="text-sm mt-4 mb-2">或者手动输入密钥:</p><p class="font-mono bg-gray-100 p-2 rounded text-center text-sm break-all">${data.secret}</p><p class="text-sm mt-6 mb-2">2. 在下方输入应用生成的6位验证码以完成设置：</p><form id="tfa-verify-form" class="flex gap-2"><input type="text" id="tfa-token-input" required maxlength="6" class="w-full border rounded px-3 py-2" placeholder="6位数字码"><button type="submit" class="bg-green-600 hover:bg-green-700 text-white py-2 px-4 rounded">验证并启用</button></form><p id="tfa-error" class="text-red-500 text-sm mt-2 hidden"></p>`; DOMElements.tfaModal.classList.add('active'); document.getElementById('tfa-verify-form').addEventListener('submit', async ev => { ev.preventDefault(); const token = document.getElementById('tfa-token-input').value; try { const response = await apiRequest('/api/admin/2fa/enable', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ secret: data.secret, token })}); const result = await response.json(); showToast(result.message); hideModal(DOMElements.tfaModal); await renderSecuritySection(); } catch (err) { document.getElementById('tfa-error').textContent = err.message; document.getElementById('tfa-error').classList.remove('hidden'); } }); } catch (error) { showToast(error.message, 'error'); } } else if (e.target.id === 'disable-tfa-btn') { const confirmed = await showConfirmationModal('禁用 2FA', `<p>确定要禁用两步验证吗？您的账户安全性将会降低。</p>`, '确认禁用'); if (confirmed) { try { await apiRequest('/api/admin/2fa/disable', {method: 'POST'}); showToast('2FA已禁用'); await renderSecuritySection(); } catch(err) { showToast(err.message, 'error'); } } } });
         
-        // --- Unified Lightbox Logic ---
         function updateLightbox() {
             const item = adminLoadedImages[currentLightboxIndex];
             if (!item) return;
