@@ -1,14 +1,13 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v0.1.1 终版优化)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v0.1.2 修复版)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
-#   v0.1.1 更新:
-#   - 核心重构 (前台): 引入 Masonry.js 和 imagesLoaded.js，实现稳定、流畅、可平滑缩放的瀑布流布局。
-#   - 修复 (前台): 彻底解决因图片加载时机导致的布局重叠和响应式失效问题。
-#   - 确认 (功能): 明确图片排序为“最新上传的在最前”，与现有逻辑保持一致。
-#   - 保留 (动画): 根据用户反馈，保留了“转圈”+“微光”的加载动画效果。
+#   v0.1.2 更新:
+#   - 紧急修复 (前台): 修正了v0.1.1中因JavaScript作用域错误导致图片和动画无法加载的严重BUG。
+#   - 优化 (前台): 重构了图片加载的事件处理方式，增强了Masonry布局的稳定性和可靠性。
+#   - 优化 (前台): 改进了画廊清空逻辑，提升了切换分类时的流畅度。
 # =================================================================
 
 # --- 配置 ---
@@ -19,7 +18,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 PROMPT_Y="(${GREEN}y${NC}/${RED}n${NC})"
 
-SCRIPT_VERSION="0.1.1"
+SCRIPT_VERSION="0.1.2"
 APP_NAME="image-gallery"
 
 # --- 路径设置 ---
@@ -46,7 +45,7 @@ overwrite_app_files() {
 cat << 'EOF' > package.json
 {
   "name": "image-gallery-pro",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "A high-performance, full-stack image gallery application with all features.",
   "main": "server.js",
   "scripts": {
@@ -456,7 +455,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 })();
 EOF
 
-    echo "--> 正在生成主画廊 public/index.html (v0.1.1)..."
+    echo "--> 正在生成主画廊 public/index.html (v0.1.2)..."
 cat << 'EOF' > public/index.html
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -504,8 +503,9 @@ cat << 'EOF' > public/index.html
         #search-input:focus { outline: none; }
         
         .grid-item {
-            width: 48%; /* For 2-column layout on mobile */
+            width: 48%; /* 2 columns for mobile */
             margin-bottom: 1rem;
+            float: left; /* Necessary for masonry gutter calculation */
         }
         @media (min-width: 640px) { .grid-item { width: 32%; } } /* 3 columns */
         @media (min-width: 768px) { .grid-item { width: 24%; } } /* 4 columns */
@@ -514,7 +514,7 @@ cat << 'EOF' > public/index.html
 
         .grid-item > a { display: block; border-radius: 0.5rem; overflow: hidden; cursor: pointer; text-decoration: none; }
         
-        .image-placeholder { position: relative; width: 100%; height: 0; background-color: var(--grid-item-bg); border-radius: 0.5rem; overflow: hidden; }
+        .image-placeholder { position: relative; width: 100%; background-color: var(--grid-item-bg); border-radius: 0.5rem; overflow: hidden; }
         .image-placeholder::after { content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: linear-gradient(100deg, transparent 20%, var(--shimmer-color) 50%, transparent 80%); animation: shimmer 1.5s infinite linear; background-size: 200% 100%; }
         @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
         .image-placeholder.item-loaded::after { display: none; }
@@ -604,7 +604,7 @@ cat << 'EOF' > public/index.html
         applyTheme(localStorage.getItem('theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
 
         const fetchJSON = async (url) => { const response = await fetch(url); if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`); return response.json(); };
-        const resetGallery = () => { masonry.remove(galleryContainer.children); masonry.layout(); allLoadedImages = []; currentPage = 1; hasMoreImages = true; window.scrollTo(0, 0); loader.textContent = '正在加载更多...'; };
+        const resetGallery = () => { if (masonry) { masonry.remove(Array.from(galleryContainer.children)); masonry.layout(); } allLoadedImages = []; currentPage = 1; hasMoreImages = true; window.scrollTo(0, 0); loader.textContent = '正在加载更多...'; };
         const fetchAndRenderImages = async () => {
             if (isLoading || !hasMoreImages) return;
             isLoading = true;
@@ -612,23 +612,18 @@ cat << 'EOF' > public/index.html
             try {
                 const url = `/api/images?page=${currentPage}&limit=20&category=${currentFilter}&search=${encodeURIComponent(currentSearch)}`;
                 const data = await fetchJSON(url);
-                loader.classList.add('hidden');
                 if (data.images && data.images.length > 0) {
-                    const items = renderItems(data.images);
-                    galleryContainer.appendChild(items);
-                    masonry.appended(Array.from(items.children));
-                    imagesLoaded(galleryContainer, () => {
-                        masonry.layout();
-                    });
+                    const itemsFragment = renderItems(data.images);
+                    const newItems = Array.from(itemsFragment.children);
+                    galleryContainer.appendChild(itemsFragment);
+                    masonry.appended(newItems);
+                    imagesLoaded(galleryContainer).on('progress', () => masonry.layout());
                     allLoadedImages.push(...data.images);
                     currentPage++;
                     hasMoreImages = data.hasMore;
-                } else {
-                    hasMoreImages = false;
-                    if (allLoadedImages.length === 0) loader.textContent = '没有找到符合条件的图片。';
-                }
+                } else { hasMoreImages = false; if (allLoadedImages.length === 0) loader.textContent = '没有找到符合条件的图片。'; }
             } catch (error) { console.error('获取图片数据失败:', error); loader.textContent = '加载失败，请刷新页面。'; } 
-            finally { isLoading = false; if (!hasMoreImages && allLoadedImages.length > 0) loader.classList.add('hidden'); }
+            finally { isLoading = false; if (!hasMoreImages) loader.classList.add('hidden'); }
         };
 
         const renderItems = (images) => {
@@ -636,17 +631,33 @@ cat << 'EOF' > public/index.html
             images.forEach(image => {
                 const item = document.createElement('div');
                 item.className = 'grid-item'; item.dataset.id = image.id;
-                const aspectRatio = (image.height && image.width) ? (image.height / image.width) * 100 : 100;
+
                 const link = document.createElement('a');
                 link.href = "#"; link.setAttribute('role', 'button'); link.setAttribute('aria-label', image.description || image.originalFilename);
-                // The placeholder height is now handled by the image itself having intrinsic dimensions
-                link.innerHTML = `
-                    <div class="image-placeholder">
-                        <div class="spinner"></div>
-                        <img src="/image-proxy/${image.filename}?w=500" alt="${image.description || image.originalFilename}"
-                             onload="this.classList.add('loaded'); this.parentElement.classList.add('item-loaded'); masonry.layout();"
-                             onerror="this.closest('.grid-item').style.display='none'; masonry.layout();">
-                    </div>`;
+
+                const placeholder = document.createElement('div');
+                placeholder.className = 'image-placeholder';
+
+                const spinner = document.createElement('div');
+                spinner.className = 'spinner';
+
+                const img = document.createElement('img');
+                img.src = `/image-proxy/${image.filename}?w=500`;
+                img.alt = image.description || image.originalFilename;
+
+                img.addEventListener('load', () => {
+                    img.classList.add('loaded');
+                    placeholder.classList.add('item-loaded');
+                    if (masonry) masonry.layout();
+                });
+                img.addEventListener('error', () => {
+                    item.style.display = 'none';
+                    if (masonry) masonry.layout();
+                });
+                
+                placeholder.appendChild(spinner);
+                placeholder.appendChild(img);
+                link.appendChild(placeholder);
                 item.appendChild(link);
                 fragment.appendChild(item);
             });
