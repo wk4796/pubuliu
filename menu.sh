@@ -1,13 +1,12 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v0.0.9 重构优化版)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v0.1.0 终版优化)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
-#   v0.0.9 更新:
-#   - 重大重构 (前台): 弃用 Macy.js，改用纯 CSS Columns 实现瀑布流布局，根治响应式布局问题，提升性能。
-#   - 优化 (前台): 将加载动画升级为更平滑、专业的“微光扫过”(Shimmer)效果，并修复图片加载后的闪烁问题。
-#   - 新增 (后台): 为“图片管理”和“回收站”增加了完整的后端分页逻辑和前端分页导航UI，大幅提升图片量大时的后台性能和可用性。
+#   v0.1.0 更新:
+#   - 修复 (前台): 修正了画廊容器宽度在宽屏下不自适应的问题，实现了真正的响应式布局。
+#   - 优化 (前台): 在图片加载占位符中增加了“旋转”加载动画，提供了更清晰的加载反馈。
 # =================================================================
 
 # --- 配置 ---
@@ -18,7 +17,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 PROMPT_Y="(${GREEN}y${NC}/${RED}n${NC})"
 
-SCRIPT_VERSION="0.0.9"
+SCRIPT_VERSION="0.1.0"
 APP_NAME="image-gallery"
 
 # --- 路径设置 ---
@@ -45,7 +44,7 @@ overwrite_app_files() {
 cat << 'EOF' > package.json
 {
   "name": "image-gallery-pro",
-  "version": "0.0.9",
+  "version": "0.1.0",
   "description": "A high-performance, full-stack image gallery application with all features.",
   "main": "server.js",
   "scripts": {
@@ -66,7 +65,7 @@ cat << 'EOF' > package.json
 }
 EOF
 
-    echo "--> 正在生成后端服务器 server.js (v0.0.9)..."
+    echo "--> 正在生成后端服务器 server.js..."
 cat << 'EOF' > server.js
 const express = require('express');
 const multer = require('multer');
@@ -454,7 +453,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 })();
 EOF
 
-    echo "--> 正在生成主画廊 public/index.html (v0.0.9)..."
+    echo "--> 正在生成主画廊 public/index.html (v0.1.0)..."
 cat << 'EOF' > public/index.html
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -475,31 +474,22 @@ cat << 'EOF' > public/index.html
             --filter-btn-color: #166534; --filter-btn-hover-bg: #dcfce7; --filter-btn-active-bg: #22c55e;
             --filter-btn-active-border: #16a34a; --grid-item-bg: #e4e4e7; --shimmer-color: #ffffff4d;
             --search-bg: #ffffff; --search-placeholder-color: #9ca3af; --divider-color: #dcfce7;
+            --spinner-base-color: #ffffff4d; --spinner-top-color: #ffffffbf;
         }
         body.dark {
             --bg-color: #111827; --text-color: #a7f3d0; --header-bg: rgba(17, 24, 39, 0.85);
             --filter-btn-color: #a7f3d0; --filter-btn-hover-bg: #1f2937; --filter-btn-active-bg: #16a34a;
             --filter-btn-active-border: #15803d; --grid-item-bg: #374151; --shimmer-color: #ffffff1a;
             --search-bg: #1f2937; --search-placeholder-color: #6b7280; --divider-color: #166534;
+            --spinner-base-color: #0000004d; --spinner-top-color: #ffffff80;
         }
         
         html { height: 100%; scroll-behavior: smooth; }
-        body { 
-            font-family: 'Inter', 'Noto Sans SC', sans-serif; 
-            background-color: var(--bg-color); color: var(--text-color);
-            display: flex; flex-direction: column; min-height: 100%;
-        }
+        body { font-family: 'Inter', 'Noto Sans SC', sans-serif; background-color: var(--bg-color); color: var(--text-color); display: flex; flex-direction: column; min-height: 100%; }
         main { flex-grow: 1; }
         body.overflow-hidden { overflow: hidden; }
 
-        .header-sticky { 
-            background-color: var(--header-bg);
-            backdrop-filter: blur(8px);
-            position: sticky; top: 0; z-index: 40; 
-            box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
-            transition: transform 0.3s ease-in-out;
-            will-change: transform;
-        }
+        .header-sticky { background-color: var(--header-bg); backdrop-filter: blur(8px); position: sticky; top: 0; z-index: 40; box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1); transition: transform 0.3s ease-in-out; will-change: transform; }
         .header-sticky.is-hidden { transform: translateY(-100%); }
         
         #search-overlay { opacity: 0; visibility: hidden; transition: opacity 0.3s ease, visibility 0s 0.3s; background-color: transparent; }
@@ -508,44 +498,25 @@ cat << 'EOF' > public/index.html
         #search-overlay.active #search-box { transform: translateY(0) scale(1); opacity: 1; }
         #search-input:focus { outline: none; }
         
-        #gallery-container {
-            column-gap: 1rem;
-            column-count: 2; /* 手机默认2列 */
-        }
+        #gallery-container { column-gap: 1rem; column-count: 2; }
         @media (min-width: 640px) { #gallery-container { column-count: 3; } }
         @media (min-width: 768px) { #gallery-container { column-count: 4; } }
         @media (min-width: 1024px) { #gallery-container { column-count: 5; } }
         @media (min-width: 1280px) { #gallery-container { column-count: 6; } }
 
-        .grid-item {
-            margin-bottom: 1rem;
-            break-inside: avoid;
-            display: inline-block; /* Fix for potential spacing issues */
-            width: 100%;
-        }
+        .grid-item { margin-bottom: 1rem; break-inside: avoid; }
         .grid-item > a { display: block; border-radius: 0.5rem; overflow: hidden; cursor: pointer; text-decoration: none; }
         
-        .image-placeholder {
-            position: relative; width: 100%; height: 0;
-            background-color: var(--grid-item-bg);
-            border-radius: 0.5rem; overflow: hidden;
-        }
-        .image-placeholder::after {
-            content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-            background: linear-gradient(100deg, transparent 20%, var(--shimmer-color) 50%, transparent 80%);
-            animation: shimmer 1.5s infinite linear;
-            background-size: 200% 100%;
-        }
-        @keyframes shimmer {
-            0% { background-position: 200% 0; }
-            100% { background-position: -200% 0; }
-        }
+        .image-placeholder { position: relative; width: 100%; height: 0; background-color: var(--grid-item-bg); border-radius: 0.5rem; overflow: hidden; }
+        .image-placeholder::after { content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: linear-gradient(100deg, transparent 20%, var(--shimmer-color) 50%, transparent 80%); animation: shimmer 1.5s infinite linear; background-size: 200% 100%; }
+        @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
         .image-placeholder.item-loaded::after { display: none; }
 
-        .image-placeholder img {
-            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-            object-fit: cover; opacity: 0; transition: opacity 0.4s ease-in-out;
-        }
+        .spinner { position: absolute; top: 50%; left: 50%; width: 2.5rem; height: 2.5rem; margin-top: -1.25rem; margin-left: -1.25rem; border: 4px solid var(--spinner-base-color); border-top-color: var(--spinner-top-color); border-radius: 50%; animation: spin 1s linear infinite; transition: opacity 0.3s; z-index: 1; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .image-placeholder.item-loaded .spinner { opacity: 0; }
+
+        .image-placeholder img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity 0.4s ease-in-out; }
         .image-placeholder img.loaded { opacity: 1; }
 
         .filter-btn { padding: 0.5rem 1rem; border-radius: 9999px; font-weight: 500; transition: all 0.2s ease; border: 1px solid transparent; cursor: pointer; background-color: transparent; color: var(--filter-btn-color); }
@@ -657,6 +628,7 @@ cat << 'EOF' > public/index.html
                 link.href = "#"; link.setAttribute('role', 'button'); link.setAttribute('aria-label', image.description || image.originalFilename);
                 link.innerHTML = `
                     <div class="image-placeholder" style="padding-bottom: ${aspectRatio}%;">
+                        <div class="spinner"></div>
                         <img src="/image-proxy/${image.filename}?w=500" alt="${image.description || image.originalFilename}"
                              onload="this.classList.add('loaded'); this.parentElement.classList.add('item-loaded');"
                              onerror="this.closest('.grid-item').style.display='none';">
@@ -694,7 +666,7 @@ cat << 'EOF' > public/index.html
 </html>
 EOF
 
-    echo "--> 正在生成后台管理页 public/admin.html (v0.0.9)..."
+    echo "--> 正在生成后台管理页 public/admin.html..."
 cat << 'EOF' > public/admin.html
 <!DOCTYPE html>
 <html lang="zh-CN">
