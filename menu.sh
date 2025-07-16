@@ -1,21 +1,14 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v1.0.5 稳定版)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v1.0.6 稳定版)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
-#   v1.0.5 更新:
-#   - 修复 (核心): 彻底修复了后台预览无响应的顽固BUG，并修复了添加分类时取消按钮无效的问题。
-#   - 修复 (布局): 根据截图反馈，使用精确计算重写了前端瀑布流列宽，解决了移动端布局空白的BUG。
-#   - 确认 (性能): 所有v1.0.4中的性能与体验优化项均已继承并验证。
-#
-#   v1.0.4 更新:
-#   - 性能 (前端): 实现响应式图片加载！现在画廊会根据设备自动请求最合适尺寸的图片，大幅提升移动端加载速度与体验。
-#
-#   v1.0.3 更新:
-#   - 体验 (前后端): 为灯箱预览增加图片预加载机制，彻底解决切换图片时的延迟和旧图残留问题。
-#   - 体验 (后台): 为后台图库的图片卡片增加加载动画，优化了“添加分类”按钮的交互流程。
-#   - 体验 (前端): 为前端图库增加鼠标悬停缩放效果，并采纳方案一优化瀑布流布局，减少空白。
+#   v1.0.6 更新:
+#   - 修复 (核心): 从根本上重构了后台图库的卡片创建与预览逻辑，彻底解决“点击预览无响应”的顽固BUG。
+#   - 修复 (后台): 修复了“添加分类”弹窗中取消按钮无效的问题。
+#   - 修复 (前端): 使用精确的CSS calc()函数重写了瀑布流列宽，解决了移动端布局空白的BUG。
+#   - 确认: 所有v1.0.5版本中的功能与优化均已继承并验证。
 # =================================================================
 
 # --- 配置 ---
@@ -26,7 +19,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 PROMPT_Y="(${GREEN}y${NC}/${RED}n${NC})"
 
-SCRIPT_VERSION="1.0.5"
+SCRIPT_VERSION="1.0.6"
 APP_NAME="image-gallery"
 
 # --- 路径设置 ---
@@ -53,7 +46,7 @@ overwrite_app_files() {
 cat << 'EOF' > package.json
 {
   "name": "image-gallery-pro",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "A high-performance, full-stack image gallery application with all features.",
   "main": "server.js",
   "scripts": {
@@ -528,19 +521,19 @@ cat << 'EOF' > public/index.html
         }
         @media (min-width: 640px) {
             .grid-item { width: calc(33.333% - 11px); } 
-            .grid-item.grid-item--width2 { width: calc(66.666% - 5px); }
+            .grid-item.grid-item--width2 { width: calc(66.666% - 6px); }
         } 
         @media (min-width: 768px) {
             .grid-item { width: calc(25% - 12px); }
             .grid-item.grid-item--width2 { width: calc(50% - 8px); }
         } 
         @media (min-width: 1024px) {
-            .grid-item { width: calc(20% - 13px); }
-            .grid-item.grid-item--width2 { width: calc(40% - 10px); }
+            .grid-item { width: calc(20% - 12.8px); }
+            .grid-item.grid-item--width2 { width: calc(40% - 9.6px); }
         } 
         @media (min-width: 1280px) {
-            .grid-item { width: calc(16.666% - 14px); }
-            .grid-item.grid-item--width2 { width: calc(33.333% - 12px); }
+            .grid-item { width: calc(16.666% - 13.33px); }
+            .grid-item.grid-item--width2 { width: calc(33.333% - 10.67px); }
         }
 
         .grid-item > a { display: block; border-radius: 0.5rem; overflow: hidden; cursor: pointer; text-decoration: none; }
@@ -719,16 +712,12 @@ cat << 'EOF' > public/index.html
 
         const preloadImage = (index, callback) => {
             if (isLightboxLoading) return;
+            const item = allLoadedImages[index];
+            if (!item) return;
+
             isLightboxLoading = true;
             lightbox.classList.add('is-loading');
             
-            const item = allLoadedImages[index];
-            if (!item) {
-                isLightboxLoading = false;
-                lightbox.classList.remove('is-loading');
-                return;
-            }
-
             const preloader = new Image();
             preloader.src = `/image-proxy/${item.filename}`;
             
@@ -754,10 +743,8 @@ cat << 'EOF' > public/index.html
         };
 
         const showImageAtIndex = (index) => {
-            preloadImage(index, (item) => {
-                currentImageIndex = index;
-                updateLightbox(item);
-            });
+            currentImageIndex = index;
+            preloadImage(index, updateLightbox);
         };
 
         const showNextImage = () => showImageAtIndex((currentImageIndex + 1) % allLoadedImages.length);
@@ -802,8 +789,7 @@ cat << 'EOF' > public/index.html
         async function init() { 
             masonry = new Masonry(galleryContainer, {
                 itemSelector: '.grid-item',
-                // columnWidth is not needed when using calc() in CSS
-                percentPosition: false, // Set to false when using calc()
+                percentPosition: false,
                 gutter: 16,
                 transitionDuration: '0.3s'
             });
@@ -1139,17 +1125,18 @@ cat << 'EOF' > public/admin.html
         async function populateCategorySelects(selectedCategory = null) { try { const response = await apiRequest('/api/categories'); const categories = await response.json(); [DOMElements.categorySelect, DOMElements.editCategorySelect].forEach(select => { const currentVal = select.value; select.innerHTML = ''; categories.forEach(cat => select.add(new Option(cat, cat))); select.value = categories.includes(currentVal) ? currentVal : selectedCategory || categories[0] || ''; }); } catch (error) { if (error.message !== 'Unauthorized') console.error('加载分类失败:', error.message); } }
         async function refreshNavigation() { try { const response = await apiRequest('/api/categories'); const categories = await response.json(); DOMElements.categoryDynamicList.innerHTML = ''; categories.forEach(cat => { const isUncategorized = cat === UNCATEGORIZED; const item = document.createElement('div'); item.className = 'nav-item flex items-center justify-between p-2 rounded cursor-pointer hover:bg-gray-100'; item.dataset.view = 'category'; item.dataset.categoryName = cat; item.innerHTML = `<span class="category-name flex-grow">${cat}</span>` + (isUncategorized ? '' : `<div class="space-x-2 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"><button data-name="${cat}" class="rename-cat-btn text-blue-500 hover:text-blue-700 text-sm">重命名</button><button data-name="${cat}" class="delete-cat-btn text-red-500 hover:red-700 text-sm">删除</button></div>`); item.addEventListener('mouseenter', () => item.classList.add('group')); item.addEventListener('mouseleave', () => item.classList.remove('group')); DOMElements.categoryDynamicList.appendChild(item); }); await populateCategorySelects(); } catch (error) { if (error.message !== 'Unauthorized') console.error('加载导航列表失败:', error.message); } }
         
-        async function loadImages(category, name) { DOMElements.imageLoader.classList.remove('hidden'); DOMElements.imageList.innerHTML = ''; try { const url = `/api/images?category=${category}&search=${encodeURIComponent(currentSearchTerm)}&page=${currentAdminPage}&limit=12`; const response = await apiRequest(url); const data = await response.json(); adminLoadedImages = data.images; DOMElements.imageListHeader.innerHTML = `${name} <span class="text-base text-gray-500 font-normal">(共 ${data.totalImages} 张)</span>`; if (adminLoadedImages.length === 0) { DOMElements.imageList.innerHTML = '<p class="text-slate-500 col-span-full text-center py-10">没有找到图片。</p>'; } else { adminLoadedImages.forEach(renderImageCard); } renderPaginationControls(data.page, data.totalPages); } catch (error) { if(error.message !== 'Unauthorized') DOMElements.imageList.innerHTML = `<p class="text-red-500 col-span-full text-center py-10">加载图片失败: ${error.message}</p>`; } finally { DOMElements.imageLoader.classList.add('hidden'); } }
-        async function loadRecycleBin() { DOMElements.imageLoader.classList.remove('hidden'); DOMElements.imageList.innerHTML = ''; try { const url = `/api/admin/recycle-bin?search=${encodeURIComponent(currentSearchTerm)}&page=${currentAdminPage}&limit=12`; const response = await apiRequest(url); const data = await response.json(); adminLoadedImages = data.images; DOMElements.imageListHeader.innerHTML = `回收站`; if (adminLoadedImages.length === 0) { DOMElements.imageList.innerHTML = '<p class="text-slate-500 col-span-full text-center py-10">回收站是空的。</p>'; } else { adminLoadedImages.forEach(renderPurgeableImageCard); } renderPaginationControls(data.page, data.totalPages); } catch (error) { if (error.message !== 'Unauthorized') DOMElements.imageList.innerHTML = `<p class="text-red-500 col-span-full text-center py-10">加载回收站失败: ${error.message}</p>`; } finally { DOMElements.imageLoader.classList.add('hidden'); } }
+        async function loadImages(category, name) { DOMElements.imageLoader.classList.remove('hidden'); DOMElements.imageList.innerHTML = ''; try { const url = `/api/images?category=${category}&search=${encodeURIComponent(currentSearchTerm)}&page=${currentAdminPage}&limit=12`; const response = await apiRequest(url); const data = await response.json(); adminLoadedImages = data.images; DOMElements.imageListHeader.innerHTML = `${name} <span class="text-base text-gray-500 font-normal">(共 ${data.totalImages} 张)</span>`; if (adminLoadedImages.length === 0) { DOMElements.imageList.innerHTML = '<p class="text-slate-500 col-span-full text-center py-10">没有找到图片。</p>'; } else { adminLoadedImages.forEach((image, index) => renderAdminImage(image, index, false)); } renderPaginationControls(data.page, data.totalPages); } catch (error) { if(error.message !== 'Unauthorized') DOMElements.imageList.innerHTML = `<p class="text-red-500 col-span-full text-center py-10">加载图片失败: ${error.message}</p>`; } finally { DOMElements.imageLoader.classList.add('hidden'); } }
+        async function loadRecycleBin() { DOMElements.imageLoader.classList.remove('hidden'); DOMElements.imageList.innerHTML = ''; try { const url = `/api/admin/recycle-bin?search=${encodeURIComponent(currentSearchTerm)}&page=${currentAdminPage}&limit=12`; const response = await apiRequest(url); const data = await response.json(); adminLoadedImages = data.images; DOMElements.imageListHeader.innerHTML = `回收站`; if (adminLoadedImages.length === 0) { DOMElements.imageList.innerHTML = '<p class="text-slate-500 col-span-full text-center py-10">回收站是空的。</p>'; } else { adminLoadedImages.forEach((image, index) => renderAdminImage(image, index, true)); } renderPaginationControls(data.page, data.totalPages); } catch (error) { if (error.message !== 'Unauthorized') DOMElements.imageList.innerHTML = `<p class="text-red-500 col-span-full text-center py-10">加载回收站失败: ${error.message}</p>`; } finally { DOMElements.imageLoader.classList.add('hidden'); } }
 
-        function createCard(image, index, buttons) {
+        function renderAdminImage(image, index, isRecycleBinView) {
             const card = document.createElement('div');
             card.className = 'admin-image-card border rounded-lg shadow-sm bg-white overflow-hidden flex flex-col';
             card.dataset.id = image.id;
-            
+
             const previewLink = document.createElement('a');
             previewLink.href = "#";
             previewLink.className = 'image-preview-container flex-shrink-0';
+            previewLink.addEventListener('click', (e) => { e.preventDefault(); openAdminLightbox(index); });
 
             const spinner = document.createElement('div');
             spinner.className = 'card-spinner';
@@ -1158,9 +1145,7 @@ cat << 'EOF' > public/admin.html
             img.src = `/image-proxy/${image.filename}?w=400`;
             img.alt = image.description || image.originalFilename;
             img.onload = () => { img.classList.add('loaded'); spinner.style.display = 'none'; };
-
             previewLink.append(spinner, img);
-            previewLink.addEventListener('click', (e) => { e.preventDefault(); openLightbox(index); });
             
             const infoDiv = document.createElement('div');
             infoDiv.className = 'p-3 flex-grow flex flex-col min-h-0';
@@ -1179,33 +1164,29 @@ cat << 'EOF' > public/admin.html
                 <p class="text-xs text-slate-600 flex-grow pt-1" title="${image.description || ''}">
                     <span class="description-clamp">${image.description || '无描述'}</span>
                 </p>
-                ${image.status === 'deleted' ? `<p class="text-xs text-red-500 mt-auto pt-2"><strong>删除于:</strong> ${new Date(image.deletedAt).toLocaleString()}</p>` : ''}
+                ${isRecycleBinView ? `<p class="text-xs text-red-500 mt-auto pt-2"><strong>删除于:</strong> ${new Date(image.deletedAt).toLocaleString()}</p>` : ''}
             `;
             infoDiv.innerHTML = infoHtml;
             
             const footerDiv = document.createElement('div');
             footerDiv.className = 'bg-slate-50 p-2 flex justify-end items-center gap-1 mt-auto flex-shrink-0';
-            buttons(card, image).forEach(btn => footerDiv.appendChild(btn));
+            
+            const previewButton = createButton({ title: '预览', classes: 'p-2 rounded-full text-slate-600 hover:bg-slate-200 hover:text-slate-800 transition-colors', html: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>', onClick: () => openAdminLightbox(index) });
+            footerDiv.appendChild(previewButton);
 
+            if (isRecycleBinView) {
+                const restoreButton = createButton({ title: '恢复', classes: 'p-2 rounded-full text-green-600 hover:bg-green-100 transition-colors', html: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" /></svg>', onClick: async () => { try { await apiRequest(`/api/admin/recycle-bin/${image.id}/restore`, { method: 'POST' }); showToast('图片已恢复'); card.classList.add('fading-out'); setTimeout(() => card.remove(), 400); adminLoadedImages.splice(index, 1); } catch (error) { showToast(error.message, 'error'); } } });
+                const purgeButton = createButton({ title: '彻底删除', classes: 'p-2 rounded-full text-red-500 hover:bg-red-100 hover:text-red-700 transition-colors', html: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.134-2.036-2.134H8.718c-1.126 0-2.037.955-2.037 2.134v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>', onClick: async () => { const confirmed = await showConfirmationModal('彻底删除', `<p>确定要永久删除这张图片吗？<br><strong>此操作无法撤销。</strong></p>`, '确认删除'); if (confirmed) { try { await apiRequest(`/api/admin/recycle-bin/${image.id}/purge`, { method: 'DELETE' }); showToast('图片已彻底删除'); card.classList.add('fading-out'); setTimeout(() => card.remove(), 400); adminLoadedImages.splice(index, 1); } catch (error) { showToast(error.message, 'error'); } } } });
+                footerDiv.append(restoreButton, purgeButton);
+            } else {
+                const downloadButton = createButton({ tag: 'a', title: '下载', classes: 'p-2 rounded-full text-slate-600 hover:bg-slate-200 hover:text-slate-800 transition-colors', href: image.src, download: image.originalFilename, html: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>'});
+                const editButton = createButton({ title: '编辑', classes: 'p-2 rounded-full text-slate-600 hover:bg-slate-200 hover:text-slate-800 transition-colors', html: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487zm0 0L19.5 7.125" /></svg>', onClick: async () => { await populateCategorySelects(image.category); DOMElements.editImageModal.querySelector('#edit-id').value = image.id; DOMElements.editImageModal.querySelector('#edit-originalFilename').value = image.originalFilename; DOMElements.editImageModal.querySelector('#edit-description').value = image.description; DOMElements.editImageModal.classList.add('active'); }});
+                const deleteButton = createButton({ title: '移至回收站', classes: 'p-2 rounded-full text-red-500 hover:bg-red-100 hover:text-red-700 transition-colors', html: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.134-2.036-2.134H8.718c-1.126 0-2.037.955-2.037 2.134v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>', onClick: async () => { const confirmed = await showConfirmationModal('移至回收站', `<p>确定要将这张图片移至回收站吗？</p>`, '确认移动'); if(confirmed) { try { await apiRequest(`/api/admin/images/${image.id}`, { method: 'DELETE' }); showToast('图片已移至回收站'); card.classList.add('fading-out'); setTimeout(() => card.remove(), 400); adminLoadedImages.splice(index, 1); } catch (error) { showToast(error.message, 'error'); } } }});
+                footerDiv.append(downloadButton, editButton, deleteButton);
+            }
+            
             card.append(previewLink, infoDiv, footerDiv);
             DOMElements.imageList.appendChild(card);
-        }
-        
-        const renderImageCard = (image, index) => {
-            createCard(image, index, (card, image) => [
-                createButton({ title: '预览', classes: 'p-2 rounded-full text-slate-600 hover:bg-slate-200 hover:text-slate-800 transition-colors', html: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>', onClick: () => openLightbox(index) }),
-                createButton({ tag: 'a', title: '下载', classes: 'p-2 rounded-full text-slate-600 hover:bg-slate-200 hover:text-slate-800 transition-colors', href: image.src, download: image.originalFilename, html: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>'}),
-                createButton({ title: '编辑', classes: 'p-2 rounded-full text-slate-600 hover:bg-slate-200 hover:text-slate-800 transition-colors', html: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487zm0 0L19.5 7.125" /></svg>', onClick: async () => { await populateCategorySelects(image.category); DOMElements.editImageModal.querySelector('#edit-id').value = image.id; DOMElements.editImageModal.querySelector('#edit-originalFilename').value = image.originalFilename; DOMElements.editImageModal.querySelector('#edit-description').value = image.description; DOMElements.editImageModal.classList.add('active'); }}),
-                createButton({ title: '移至回收站', classes: 'p-2 rounded-full text-red-500 hover:bg-red-100 hover:text-red-700 transition-colors', html: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.134-2.036-2.134H8.718c-1.126 0-2.037.955-2.037 2.134v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>', onClick: async () => { const confirmed = await showConfirmationModal('移至回收站', `<p>确定要将这张图片移至回收站吗？</p>`, '确认移动'); if(confirmed) { try { await apiRequest(`/api/admin/images/${image.id}`, { method: 'DELETE' }); showToast('图片已移至回收站'); card.classList.add('fading-out'); setTimeout(() => card.remove(), 400); adminLoadedImages = adminLoadedImages.filter(img => img.id !== image.id); } catch (error) { showToast(error.message, 'error'); } } }})
-            ]);
-        }
-        
-        const renderPurgeableImageCard = (image, index) => {
-            createCard(image, index, (card, image) => [
-                createButton({ title: '预览', classes: 'p-2 rounded-full text-slate-600 hover:bg-slate-200 hover:text-slate-800 transition-colors', html: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>', onClick: () => openLightbox(index) }),
-                createButton({ title: '恢复', classes: 'p-2 rounded-full text-green-600 hover:bg-green-100 transition-colors', html: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" /></svg>', onClick: async () => { try { await apiRequest(`/api/admin/recycle-bin/${image.id}/restore`, { method: 'POST' }); showToast('图片已恢复'); card.classList.add('fading-out'); setTimeout(() => card.remove(), 400); adminLoadedImages = adminLoadedImages.filter(img => img.id !== image.id); } catch (error) { showToast(error.message, 'error'); } } }),
-                createButton({ title: '彻底删除', classes: 'p-2 rounded-full text-red-500 hover:bg-red-100 hover:text-red-700 transition-colors', html: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.134-2.036-2.134H8.718c-1.126 0-2.037.955-2.037 2.134v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>', onClick: async () => { const confirmed = await showConfirmationModal('彻底删除', `<p>确定要永久删除这张图片吗？<br><strong>此操作无法撤销。</strong></p>`, '确认删除'); if (confirmed) { try { await apiRequest(`/api/admin/recycle-bin/${image.id}/purge`, { method: 'DELETE' }); showToast('图片已彻底删除'); card.classList.add('fading-out'); setTimeout(() => card.remove(), 400); adminLoadedImages = adminLoadedImages.filter(img => img.id !== image.id); } catch (error) { showToast(error.message, 'error'); } } } })
-            ]);
         }
         
         const changePage = (page) => {
@@ -1264,7 +1245,7 @@ cat << 'EOF' > public/admin.html
             e.preventDefault();
             const navItem = e.target.closest('.nav-item');
             if (!navItem) return;
-            if (e.target.matches('.rename-cat-btn, .delete-cat-btn')) { e.stopPropagation(); const catName = e.target.dataset.name; if (e.target.classList.contains('rename-cat-btn')) { showGenericModal(`重命名分类 "${catName}"`, '<form id="modal-form"><input type="text" id="modal-input" required class="w-full border rounded px-3 py-2"></form>', '<button type="button" class="modal-cancel-btn bg-gray-300 hover:bg-gray-400 text-black py-2 px-4 rounded">取消</button><button type="submit" form="modal-form" class="bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded">保存</button>'); const input = document.getElementById('modal-input'); input.value = catName; document.getElementById('modal-form').onsubmit = async (ev) => { ev.preventDefault(); const newName = input.value.trim(); if (!newName || newName === catName) { hideModal(DOMElements.genericModal); return; } try { await apiRequest('/api/admin/categories', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ oldName: catName, newName }) }); hideModal(DOMElements.genericModal); showToast('重命名成功'); await refreshAllData(); } catch (error) { showToast(`重命名失败: ${error.message}`, 'error'); } }; } else if (e.target.classList.contains('delete-cat-btn')) { const confirmed = await showConfirmationModal('确认删除', `<p>确定要删除分类 "<strong>${catName}</strong>" 吗？<br>此分类下的图片将归入 "未分类"。</p>`, '确认删除'); if(confirmed) { try { await apiRequest('/api/admin/categories', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: catName }) }); showToast('删除成功'); await refreshAllData(); } catch (error) { showToast(`删除失败: ${error.message}`, 'error'); } } } return; }
+            if (e.target.matches('.rename-cat-btn, .delete-cat-btn')) { e.stopPropagation(); const catName = e.target.dataset.name; if (e.target.classList.contains('rename-cat-btn')) { showGenericModal(`重命名分类 "${catName}"`, '<form id="modal-form"><input type="text" id="modal-input" required class="w-full border rounded px-3 py-2"></form>', '<button type="button" class="modal-cancel-btn bg-gray-300 hover:bg-gray-400 text-black py-2 px-4 rounded">取消</button><button type="submit" form="modal-form" class="bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded">保存</button>'); const input = document.getElementById('modal-input'); input.value = catName; DOMElements.genericModal.querySelector('.modal-cancel-btn').onclick=() => hideModal(DOMElements.genericModal); document.getElementById('modal-form').onsubmit = async (ev) => { ev.preventDefault(); const newName = input.value.trim(); if (!newName || newName === catName) { hideModal(DOMElements.genericModal); return; } try { await apiRequest('/api/admin/categories', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ oldName: catName, newName }) }); hideModal(DOMElements.genericModal); showToast('重命名成功'); await refreshAllData(); } catch (error) { showToast(`重命名失败: ${error.message}`, 'error'); } }; } else if (e.target.classList.contains('delete-cat-btn')) { const confirmed = await showConfirmationModal('确认删除', `<p>确定要删除分类 "<strong>${catName}</strong>" 吗？<br>此分类下的图片将归入 "未分类"。</p>`, '确认删除'); if(confirmed) { try { await apiRequest('/api/admin/categories', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: catName }) }); showToast('删除成功'); await refreshAllData(); } catch (error) { showToast(`删除失败: ${error.message}`, 'error'); } } } return; }
             document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
             navItem.classList.add('active');
             DOMElements.searchInput.value = ''; currentSearchTerm = '';
@@ -1310,7 +1291,8 @@ cat << 'EOF' > public/admin.html
             };
         };
         
-        const openLightbox = (index) => {
+        const openAdminLightbox = (index) => {
+            if(index === undefined || index < 0 || index >= adminLoadedImages.length) return;
             DOMElements.lightbox.classList.add('active');
             document.body.classList.add('lightbox-open');
             preloadAndShowImage(index);
