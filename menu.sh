@@ -1,12 +1,13 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v0.0.4 布局优化版)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v0.0.5 最终布局优化版)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
-#   v0.0.4 更新:
-#   - 修复(后台): 采用更健壮的Flexbox布局，彻底修复回收站中项目按钮被遮挡的问题。
-#   - 优化(UI): 为前端瀑布流(Macy.js)配置了更精细的响应式断点，实现手机、平板、电脑间更平滑的列数调整。
+#   v0.0.5 更新:
+#   - 优化(后台): 回收站视图升级为与主图库一致的网格卡片布局，预览和操作更统一。
+#   - 优化(UI): 在保持严格时间排序的前提下，再次优化瀑布流响应式断点，使其在各设备上列数调整更合理。
+#   - 优化(UI): 简化了前端HTML结构，以增强瀑布流布局的稳定性。
 # =================================================================
 
 # --- 配置 ---
@@ -17,7 +18,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 PROMPT_Y="(${GREEN}y${NC}/${RED}n${NC})"
 
-SCRIPT_VERSION="0.0.4"
+SCRIPT_VERSION="0.0.5"
 APP_NAME="image-gallery"
 
 # --- 路径设置 ---
@@ -46,7 +47,7 @@ EOF
 cat << 'EOF' > package.json
 {
   "name": "image-gallery-pro",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "description": "A high-performance, full-stack image gallery application with all features.",
   "main": "server.js",
   "scripts": {
@@ -441,7 +442,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 })();
 EOF
 
-    echo "--> 正在生成主画廊 public/index.html (v0.0.4 布局优化版)..."
+    echo "--> 正在生成主画廊 public/index.html (v0.0.5 布局优化版)..."
 cat << 'EOF' > public/index.html
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -566,7 +567,7 @@ cat << 'EOF' > public/index.html
     
     <div class="border-b-2" style="border-color: var(--divider-color);"></div>
 
-    <main class="container mx-auto px-4 py-8 md:py-10">
+    <main class="px-4 py-8 md:py-10">
         <div id="gallery-container" class="max-w-7xl mx-auto"></div>
         <div id="loader" class="text-center py-8 hidden">正在加载更多...</div>
     </main>
@@ -804,7 +805,7 @@ cat << 'EOF' > public/admin.html
         </div>
         <section class="bg-white p-6 rounded-lg shadow-md xl:col-span-8">
             <div class="flex flex-col md:flex-row justify-between items-center mb-4 gap-4"><h2 id="image-list-header" class="text-xl font-semibold text-slate-900 flex-grow"></h2><div class="w-full md:w-64"><input type="search" id="search-input" placeholder="在当前视图下搜索..." class="w-full border rounded-full px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"></div></div>
-            <div id="image-list" class="grid grid-cols-1 gap-4"></div>
+            <div id="image-list" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4"></div>
             <div id="image-loader" class="text-center py-8 text-slate-500 hidden">正在加载...</div>
         </section>
     </main>
@@ -864,7 +865,7 @@ cat << 'EOF' > public/admin.html
             } catch (error) { if(error.message !== 'Unauthorized') DOMElements.imageLoader.textContent = '加载图片失败。'; }
         }
         async function loadRecycleBin() {
-            DOMElements.imageList.className = 'grid grid-cols-1 gap-4';
+            DOMElements.imageList.className = 'grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4';
             DOMElements.imageList.innerHTML = ''; DOMElements.imageLoader.classList.remove('hidden');
             try {
                 const url = `/api/admin/recycle-bin?search=${encodeURIComponent(currentSearchTerm)}`;
@@ -873,7 +874,7 @@ cat << 'EOF' > public/admin.html
                  const titleText = currentSearchTerm ? `在回收站中搜索 "${currentSearchTerm}"` : "回收站";
                 DOMElements.imageListHeader.innerHTML = `${titleText} <span class="text-base text-gray-500 font-normal">(共 ${adminLoadedImages.length} 张)</span>`;
                 if (adminLoadedImages.length === 0) { DOMElements.imageList.innerHTML = '<p class="text-slate-500 col-span-full text-center py-10">回收站是空的。</p>'; } 
-                else { adminLoadedImages.forEach(renderRecycleBinCard); }
+                else { adminLoadedImages.forEach(renderPurgeableImageCard); }
             } catch (error) { if (error.message !== 'Unauthorized') DOMElements.imageLoader.textContent = '加载回收站失败。'; }
         }
 
@@ -882,10 +883,9 @@ cat << 'EOF' > public/admin.html
             card.innerHTML = `<a class="preview-btn h-40 bg-slate-100 flex items-center justify-center cursor-pointer group" data-id="${image.id}"><img src="/image-proxy/${image.filename}?w=400" alt="${image.description}" class="max-h-full max-w-full object-contain group-hover:scale-105 transition-transform duration-300"></a><div class="p-3 flex-grow flex flex-col"><p class="font-bold text-sm truncate" title="${image.originalFilename}">${image.originalFilename}</p><p class="text-xs text-slate-500 -mt-1 mb-2">${formatBytes(image.size)}</p><p class="text-xs text-slate-500 mb-2">${image.category}</p><p class="text-xs text-slate-600 flex-grow mb-3 break-words">${image.description || '无描述'}</p></div><div class="bg-slate-50 p-2 flex justify-end items-center gap-1"><button title="预览" data-id="${image.id}" class="preview-btn p-2 rounded-full text-slate-600 hover:bg-slate-200 hover:text-slate-800 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg></button><a href="${image.src}" download="${image.originalFilename}" title="下载" class="download-btn p-2 rounded-full text-slate-600 hover:bg-slate-200 hover:text-slate-800 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg></a><button title="编辑" data-image='${JSON.stringify(image)}' class="edit-btn p-2 rounded-full text-slate-600 hover:bg-slate-200 hover:text-slate-800 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487zm0 0L19.5 7.125" /></svg></button><button title="移至回收站" data-id="${image.id}" class="delete-btn p-2 rounded-full text-red-500 hover:bg-red-100 hover:text-red-700 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.134-2.036-2.134H8.718c-1.126 0-2.037.955-2.037 2.134v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg></button></div>`;
             DOMElements.imageList.appendChild(card);
         }
-        function renderRecycleBinCard(image) {
-            const card = document.createElement('div');
-            card.className = 'border rounded-lg shadow-sm bg-white overflow-hidden';
-            card.innerHTML = `<div class="flex items-center w-full p-3 gap-4"><div class="flex-shrink-0 w-20 h-20 bg-slate-100 rounded-md"><img src="/image-proxy/${image.filename}?w=200" alt="Thumbnail" class="h-full w-full object-cover rounded-md"></div><div class="flex-grow min-w-0"><p class="font-bold text-sm truncate" title="${image.originalFilename}">${image.originalFilename}</p><p class="text-xs text-slate-500">删除于: ${new Date(image.deletedAt).toLocaleString()}</p></div><div class="flex-shrink-0 flex flex-col sm:flex-row gap-2"><button title="恢复" data-id="${image.id}" class="restore-btn text-sm py-1 px-3 rounded-md text-white bg-green-600 hover:bg-green-700 transition-colors">恢复</button><button title="彻底删除" data-id="${image.id}" class="purge-btn text-sm py-1 px-3 rounded-md text-white bg-red-700 hover:bg-red-800 transition-colors">彻底删除</button></div></div>`;
+        function renderPurgeableImageCard(image) {
+            const card = document.createElement('div'); card.className = 'border rounded-lg shadow-sm bg-white overflow-hidden flex flex-col';
+            card.innerHTML = `<a class="preview-btn h-40 bg-slate-100 flex items-center justify-center cursor-pointer group" data-id="${image.id}"><img src="/image-proxy/${image.filename}?w=400" alt="${image.description}" class="max-h-full max-w-full object-contain group-hover:scale-105 transition-transform duration-300"></a><div class="p-3 flex-grow flex flex-col"><p class="font-bold text-sm truncate" title="${image.originalFilename}">${image.originalFilename}</p><p class="text-xs text-slate-500">删除于: ${new Date(image.deletedAt).toLocaleString()}</p></div><div class="bg-slate-50 p-2 flex justify-end items-center gap-1"><button title="恢复" data-id="${image.id}" class="restore-btn p-2 rounded-full text-green-600 hover:bg-green-100 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0011.664 0l3.18-3.185m-7.5 0v-4.992m0 0h4.992M9.75 9.348c0-1.031.84-1.875 1.875-1.875h.008c1.036 0 1.875.844 1.875 1.875v4.992m0 0H9.75m-4.992 0h4.992" /></svg></button><button title="彻底删除" data-id="${image.id}" class="purge-btn p-2 rounded-full text-red-500 hover:bg-red-100 hover:text-red-700 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.134-2.036-2.134H8.718c-1.126 0-2.037.955-2.037 2.134v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg></button></div>`;
             DOMElements.imageList.appendChild(card);
         }
         
