@@ -1,14 +1,16 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v0.2.0 功能增强)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v0.3.0 重大优化)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
-#   v0.2.0 更新:
+#   v0.3.0 更新:
+#   - 交互优化 (后台): 删除图片后不再刷新页面，改为即时移除卡片并播放淡出动画，提升操作流畅性。
+#   - UI优化 (后台): 移除了后台图片预览区的固定高度，改为自适应，解决了横图卡片过高的问题。
+#   - 稳定性增强 (后台): 全面升级了API请求的错误处理机制，失败时会返回更具体的信息。
 #   - 布局优化 (前台): 新增响应式多列布局，横向图片可占据两列宽度，视觉效果更佳。
 #   - 功能优化 (登录页): 登录页面的2FA输入框现在仅在后台启用2FA时才动态显示。
 #   - UI优化 (后台): 统一了回收站中图片卡片的信息展示，使其与主图库样式一致。
-#   - 功能确认 (后台): 确认并巩固了“未分类”作为默认及受保护分类的核心后台逻辑。
 # =================================================================
 
 # --- 配置 ---
@@ -19,7 +21,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 PROMPT_Y="(${GREEN}y${NC}/${RED}n${NC})"
 
-SCRIPT_VERSION="0.2.0"
+SCRIPT_VERSION="0.3.0"
 APP_NAME="image-gallery"
 
 # --- 路径设置 ---
@@ -46,7 +48,7 @@ overwrite_app_files() {
 cat << 'EOF' > package.json
 {
   "name": "image-gallery-pro",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "A high-performance, full-stack image gallery application with all features.",
   "main": "server.js",
   "scripts": {
@@ -113,11 +115,11 @@ app.use(cookieParser());
 
 const readDB = async (filePath, defaultVal = []) => {
     try { await fs.access(filePath); const data = await fs.readFile(filePath, 'utf-8'); return data.trim() === '' ? defaultVal : JSON.parse(data); } 
-    catch (error) { if (error.code === 'ENOENT') return defaultVal; console.error(`读取DB时出错: ${filePath}`, error); return defaultVal; }
+    catch (error) { if (error.code === 'ENOENT') return defaultVal; throw new Error(`读取DB时出错: ${error.message}`); }
 };
 const writeDB = async (filePath, data) => {
     try { await fs.writeFile(filePath, JSON.stringify(data, null, 2)); } 
-    catch (error) { console.error(`写入DB时出错: ${filePath}`, error); }
+    catch (error) { throw new Error(`写入DB时出错: ${error.message}`); }
 };
 
 const authMiddleware = (isApi) => (req, res, next) => {
@@ -131,9 +133,13 @@ const requireApiAuth = authMiddleware(true);
 
 // 公开接口，用于查询2FA是否启用
 app.get('/api/2fa/is-enabled', async (req, res) => {
-    const currentConfig = await readDB(configPath, {});
-    const isEnabled = !!(currentConfig.tfa && currentConfig.tfa.secret);
-    res.json({ enabled: isEnabled });
+    try {
+        const currentConfig = await readDB(configPath, {});
+        const isEnabled = !!(currentConfig.tfa && currentConfig.tfa.secret);
+        res.json({ enabled: isEnabled });
+    } catch (error) {
+        res.status(500).json({ message: '无法读取服务器配置。' });
+    }
 });
 
 app.post('/api/login', async (req, res) => {
@@ -142,24 +148,28 @@ app.post('/api/login', async (req, res) => {
         return res.redirect('/login.html?error=1');
     }
     
-    appConfig = await readDB(configPath, {});
-    if (appConfig.tfa && appConfig.tfa.secret) {
-        if (!tfa_token) {
-             return res.redirect('/login.html?error=2'); 
+    try {
+        appConfig = await readDB(configPath, {});
+        if (appConfig.tfa && appConfig.tfa.secret) {
+            if (!tfa_token) {
+                 return res.redirect('/login.html?error=2'); 
+            }
+            const verified = speakeasy.totp.verify({
+                secret: appConfig.tfa.secret,
+                encoding: 'base32',
+                token: tfa_token,
+            });
+            if (!verified) {
+                return res.redirect('/login.html?error=3'); 
+            }
         }
-        const verified = speakeasy.totp.verify({
-            secret: appConfig.tfa.secret,
-            encoding: 'base32',
-            token: tfa_token,
-        });
-        if (!verified) {
-            return res.redirect('/login.html?error=3'); 
-        }
+    
+        const token = jwt.sign({ username }, JWT_SECRET, { expiresIn: '1d' });
+        res.cookie(AUTH_TOKEN_NAME, token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', maxAge: 86400000 });
+        res.redirect('/admin.html');
+    } catch (error) {
+        res.status(500).send('服务器内部错误，无法处理登录请求。');
     }
-
-    const token = jwt.sign({ username }, JWT_SECRET, { expiresIn: '1d' });
-    res.cookie(AUTH_TOKEN_NAME, token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', maxAge: 86400000 });
-    res.redirect('/admin.html');
 });
 
 app.get('/api/logout', (req, res) => { res.clearCookie(AUTH_TOKEN_NAME); res.redirect('/login.html'); });
@@ -167,62 +177,73 @@ app.get('/admin.html', requirePageAuth, (req, res) => res.sendFile(path.join(__d
 app.get('/admin', requirePageAuth, (req, res) => res.redirect('/admin.html'));
 
 app.get('/api/images', async (req, res) => {
-    let images = await readDB(dbPath);
-    images = images.filter(img => img.status !== 'deleted');
+    try {
+        let images = await readDB(dbPath);
+        images = images.filter(img => img.status !== 'deleted');
+        
+        const { category, search, page = 1, limit = 20 } = req.query;
     
-    const { category, search, page = 1, limit = 20 } = req.query;
-
-    if (search) {
-        const searchTerm = search.toLowerCase();
-        images = images.filter(img => (img.originalFilename && img.originalFilename.toLowerCase().includes(searchTerm)) || (img.description && img.description.toLowerCase().includes(searchTerm)));
+        if (search) {
+            const searchTerm = search.toLowerCase();
+            images = images.filter(img => (img.originalFilename && img.originalFilename.toLowerCase().includes(searchTerm)) || (img.description && img.description.toLowerCase().includes(searchTerm)));
+        }
+        
+        if (category && category !== 'all' && category !== 'random') {
+            images = images.filter(img => img.category === category);
+        } else if (category === 'random') {
+            images.sort(() => 0.5 - Math.random());
+        } else {
+            images.sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt));
+        }
+        
+        const pageNum = parseInt(page);
+        const limitNum = parseInt(limit);
+        const startIndex = (pageNum - 1) * limitNum;
+        const endIndex = pageNum * limitNum;
+        
+        const paginatedImages = images.slice(startIndex, endIndex);
+        const totalImages = images.length;
+        const totalPages = Math.ceil(totalImages / limitNum);
+    
+        res.json({
+            images: paginatedImages,
+            page: pageNum,
+            limit: limitNum,
+            totalPages: totalPages,
+            totalImages: totalImages,
+            hasMore: pageNum < totalPages
+        });
+    } catch(error) {
+        res.status(500).json({ message: error.message });
     }
-    
-    if (category && category !== 'all' && category !== 'random') {
-        images = images.filter(img => img.category === category);
-    } else if (category === 'random') {
-        images.sort(() => 0.5 - Math.random());
-    } else {
-        // 默认排序：最新上传的在最前 ( descending order)
-        images.sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt));
-    }
-    
-    const pageNum = parseInt(page);
-    const limitNum = parseInt(limit);
-    const startIndex = (pageNum - 1) * limitNum;
-    const endIndex = pageNum * limitNum;
-    
-    const paginatedImages = images.slice(startIndex, endIndex);
-    const totalImages = images.length;
-    const totalPages = Math.ceil(totalImages / limitNum);
-
-    res.json({
-        images: paginatedImages,
-        page: pageNum,
-        limit: limitNum,
-        totalPages: totalPages,
-        totalImages: totalImages,
-        hasMore: pageNum < totalPages
-    });
 });
 
 app.get('/api/categories', async (req, res) => {
-    const categories = await readDB(categoriesPath, [UNCATEGORIZED]);
-    if (!categories.includes(UNCATEGORIZED)) {
-        categories.unshift(UNCATEGORIZED);
+    try {
+        const categories = await readDB(categoriesPath, [UNCATEGORIZED]);
+        if (!categories.includes(UNCATEGORIZED)) {
+            categories.unshift(UNCATEGORIZED);
+        }
+        res.json(categories.sort((a,b) => a === UNCATEGORIZED ? -1 : b === UNCATEGORIZED ? 1 : a.localeCompare(b, 'zh-CN')));
+    } catch(error) {
+        res.status(500).json({ message: error.message });
     }
-    res.json(categories.sort((a,b) => a === UNCATEGORIZED ? -1 : b === UNCATEGORIZED ? 1 : a.localeCompare(b, 'zh-CN')));
 });
 
 app.get('/api/public/categories', async (req, res) => {
-    const allDefinedCategories = await readDB(categoriesPath, [UNCATEGORIZED]);
-    let images = await readDB(dbPath);
-    images = images.filter(img => img.status !== 'deleted');
-    const categoriesInUse = new Set(images.map(img => img.category || UNCATEGORIZED));
-    if (!allDefinedCategories.includes(UNCATEGORIZED)) {
-        allDefinedCategories.unshift(UNCATEGORIZED);
+    try {
+        const allDefinedCategories = await readDB(categoriesPath, [UNCATEGORIZED]);
+        let images = await readDB(dbPath);
+        images = images.filter(img => img.status !== 'deleted');
+        const categoriesInUse = new Set(images.map(img => img.category || UNCATEGORIZED));
+        if (!allDefinedCategories.includes(UNCATEGORIZED)) {
+            allDefinedCategories.unshift(UNCATEGORIZED);
+        }
+        let categoriesToShow = allDefinedCategories.filter(cat => categoriesInUse.has(cat));
+        res.json(categoriesToShow.sort((a,b) => a === UNCATEGORIZED ? -1 : b === UNCATEGORIZED ? 1 : a.localeCompare(b, 'zh-CN')));
+    } catch(error) {
+        res.status(500).json({ message: error.message });
     }
-    let categoriesToShow = allDefinedCategories.filter(cat => categoriesInUse.has(cat));
-    res.json(categoriesToShow.sort((a,b) => a === UNCATEGORIZED ? -1 : b === UNCATEGORIZED ? 1 : a.localeCompare(b, 'zh-CN')));
 });
 
 app.get('/image-proxy/:filename', async (req, res) => {
@@ -259,50 +280,59 @@ apiAdminRouter.use(requireApiAuth);
 const storage = multer.diskStorage({ destination: (req, file, cb) => cb(null, uploadsDir), filename: (req, file, cb) => { const uniqueSuffix = uuidv4(); const extension = path.extname(file.originalname); cb(null, `${uniqueSuffix}${extension}`); } });
 const upload = multer({ storage: storage });
 
+// All admin routes are wrapped in a try-catch block for global error handling
+apiAdminRouter.use((req, res, next) => {
+    const handler = req.route.stack[0].handle;
+    const wrappedHandler = async (req, res, next) => {
+        try {
+            await handler(req, res, next);
+        } catch (error) {
+            console.error(`API Error on ${req.method} ${req.path}:`, error);
+            res.status(500).json({ message: error.message || '服务器发生未知错误。' });
+        }
+    };
+    req.route.stack[0].handle = wrappedHandler;
+    next();
+});
+
 apiAdminRouter.post('/check-filenames', async(req, res) => {
     const { filenames } = req.body;
-    if (!Array.isArray(filenames)) { return res.status(400).json({message: 'Invalid input'}); }
-    try {
-        const images = await readDB(dbPath);
-        const existingFilenames = new Set(images.filter(img => img.status !== 'deleted').map(img => img.originalFilename));
-        const duplicates = filenames.filter(name => existingFilenames.has(name));
-        res.json({ duplicates });
-    } catch (error) {
-        res.status(500).json({message: "Error reading database"});
-    }
+    if (!Array.isArray(filenames)) { return res.status(400).json({message: '无效的输入格式。'}); }
+    const images = await readDB(dbPath);
+    const existingFilenames = new Set(images.filter(img => img.status !== 'deleted').map(img => img.originalFilename));
+    const duplicates = filenames.filter(name => existingFilenames.has(name));
+    res.json({ duplicates });
 });
 
 apiAdminRouter.post('/upload', upload.single('image'), async (req, res) => {
     if (!req.file) return res.status(400).json({ message: '没有选择文件。' });
-    try {
-        const metadata = await sharp(req.file.path).metadata();
-        const images = await readDB(dbPath);
-        
-        let originalFilename = req.file.originalname;
-        const existingFilenames = new Set(images.filter(img => img.status !== 'deleted').map(img => img.originalFilename));
-        if (req.body.rename === 'true' && existingFilenames.has(originalFilename)) {
-            const ext = path.extname(originalFilename);
-            const baseName = path.basename(originalFilename, ext);
-            let counter = 1;
-            do {
-                originalFilename = `${baseName} (${counter})${ext}`;
-                counter++;
-            } while (existingFilenames.has(originalFilename));
-        }
+    const metadata = await sharp(req.file.path).metadata();
+    const images = await readDB(dbPath);
+    
+    let originalFilename = req.file.originalname;
+    const existingFilenames = new Set(images.filter(img => img.status !== 'deleted').map(img => img.originalFilename));
+    if (req.body.rename === 'true' && existingFilenames.has(originalFilename)) {
+        const ext = path.extname(originalFilename);
+        const baseName = path.basename(originalFilename, ext);
+        let counter = 1;
+        do {
+            originalFilename = `${baseName} (${counter})${ext}`;
+            counter++;
+        } while (existingFilenames.has(originalFilename));
+    }
 
-        const newImage = { 
-            id: uuidv4(), src: `/uploads/${req.file.filename}`, 
-            category: req.body.category || UNCATEGORIZED, 
-            description: req.body.description || '', 
-            originalFilename: originalFilename,
-            filename: req.file.filename, 
-            size: req.file.size, uploadedAt: new Date().toISOString(),
-            width: metadata.width, height: metadata.height
-        };
-        images.unshift(newImage);
-        await writeDB(dbPath, images);
-        res.status(200).json({ message: '上传成功', image: newImage });
-    } catch (error) { console.error('Upload processing error:', error); res.status(500).json({message: '上传失败，处理图片信息时出错。'}) }
+    const newImage = { 
+        id: uuidv4(), src: `/uploads/${req.file.filename}`, 
+        category: req.body.category || UNCATEGORIZED, 
+        description: req.body.description || '', 
+        originalFilename: originalFilename,
+        filename: req.file.filename, 
+        size: req.file.size, uploadedAt: new Date().toISOString(),
+        width: metadata.width, height: metadata.height
+    };
+    images.unshift(newImage);
+    await writeDB(dbPath, images);
+    res.status(200).json({ message: '上传成功', image: newImage });
 });
 
 apiAdminRouter.delete('/images/:id', async (req, res) => {
@@ -370,7 +400,6 @@ apiAdminRouter.put('/categories', async (req, res) => {
     res.status(200).json({ message: `分类 '${oldName}' 已重命名为 '${newName}'。` });
 });
 
-// Recycle Bin Management with Search and Pagination
 apiAdminRouter.get('/recycle-bin', async (req, res) => {
     const { search, page = 1, limit = 12 } = req.query;
     let images = await readDB(dbPath);
@@ -423,6 +452,7 @@ apiAdminRouter.delete('/recycle-bin/:id/purge', async (req, res) => {
 
 // 2FA Management (Admin)
 apiAdminRouter.get('/2fa/status', async(req, res) => {
+    appConfig = await readDB(configPath, {});
     res.json({ enabled: !!(appConfig.tfa && appConfig.tfa.secret) });
 });
 
@@ -448,6 +478,7 @@ apiAdminRouter.post('/2fa/enable', async (req, res) => {
 });
 
 apiAdminRouter.post('/2fa/disable', async (req, res) => {
+    appConfig = await readDB(configPath, {});
     delete appConfig.tfa;
     await writeDB(configPath, appConfig);
     res.json({ message: '2FA 已禁用。' });
@@ -463,7 +494,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 })();
 EOF
 
-    echo "--> 正在生成主画廊 public/index.html (v0.2.0)..."
+    echo "--> 正在生成主画廊 public/index.html (v0.3.0)..."
 cat << 'EOF' > public/index.html
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -654,10 +685,9 @@ cat << 'EOF' > public/index.html
             const fragment = document.createDocumentFragment();
             images.forEach(image => {
                 const item = document.createElement('div');
-                item.className = 'grid-item'; // Base class
+                item.className = 'grid-item';
                 item.dataset.id = image.id;
                 
-                // Add class for wide images based on aspect ratio
                 if (image.width && image.height && (image.width / image.height > 1.3)) {
                     item.classList.add('grid-item--width2');
                 }
@@ -672,7 +702,7 @@ cat << 'EOF' > public/index.html
                 spinner.className = 'spinner';
 
                 const img = document.createElement('img');
-                img.src = `/image-proxy/${image.filename}?w=800`; // Increased resolution for wider images
+                img.src = `/image-proxy/${image.filename}?w=800`;
                 img.alt = image.description || image.originalFilename;
 
                 img.addEventListener('load', () => {
@@ -738,7 +768,21 @@ cat << 'EOF' > public/admin.html
 <head>
     <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>后台管理 - 图片画廊</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <style> body { background-color: #f8fafc; } .modal, .toast, .lightbox { display: none; } .modal.active, .lightbox.active { display: flex; } body.lightbox-open { overflow: hidden; } .nav-item.active { background-color: #dcfce7; font-weight: bold; } .toast { position: fixed; top: 1.5rem; right: 1.5rem; z-index: 9999; transform: translateX(120%); transition: transform 0.3s ease-in-out; } .toast.show { transform: translateX(0); } .file-preview-item.upload-success { background-color: #f0fdf4; } .file-preview-item.upload-error { background-color: #fef2f2; } .lightbox { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.9); justify-content: center; align-items: center; z-index: 1000; opacity: 0; visibility: hidden; transition: opacity 0.3s ease; } .lightbox.active { opacity: 1; visibility: visible; } .lightbox-image { max-width: 85%; max-height: 85%; display: block; object-fit: contain; } .lightbox-btn { position: absolute; top: 50%; transform: translateY(-50%); background-color: rgba(255,255,255,0.1); color: white; border: none; font-size: 2.5rem; cursor: pointer; padding: 0.5rem 1rem; border-radius: 0.5rem; transition: background-color 0.2s; } .lb-prev { left: 1rem; } .lb-next { right: 1rem; } .lb-close { top: 1rem; right: 1rem; font-size: 2rem; } .lb-download { position: absolute; bottom: 1rem; right: 1rem; background-color: #22c55e; color: white; border: none; padding: 0.5rem 1rem; border-radius: 0.5rem; cursor: pointer; transition: background-color 0.2s; font-size: 1rem; text-decoration: none; } .lb-download:hover { background-color: #16a34a; } #file-preview-list { resize: vertical; } .nav-item { outline: none !important; } .nav-item:focus-within { box-shadow: none !important; ring: 0 !important; } .page-item.active { background-color: #166534; color: white; border-color: #166534; } .page-item.disabled { color: #9ca3af; cursor: not-allowed; } </style>
+    <style> 
+        body { background-color: #f8fafc; } 
+        .modal, .toast, .lightbox { display: none; } 
+        .modal.active, .lightbox.active { display: flex; } 
+        body.lightbox-open { overflow: hidden; } 
+        .nav-item.active { background-color: #dcfce7; font-weight: bold; } 
+        .toast { position: fixed; top: 1.5rem; right: 1.5rem; z-index: 9999; transform: translateX(120%); transition: transform 0.3s ease-in-out; } 
+        .toast.show { transform: translateX(0); } 
+        .file-preview-item.upload-success { background-color: #f0fdf4; } 
+        .file-preview-item.upload-error { background-color: #fef2f2; } 
+        .admin-image-card { transition: opacity 0.4s ease, transform 0.4s ease; }
+        .admin-image-card.fading-out { opacity: 0; transform: scale(0.95); }
+        .image-preview-container { display: block; background-color: #f1f5f9; border-radius: 0.25rem; overflow: hidden; max-height: 20rem; }
+        .image-preview-container img { width: 100%; height: 100%; object-fit: cover; }
+    </style>
 </head>
 <body class="antialiased text-slate-800">
     <header class="bg-white shadow-md p-4 flex justify-between items-center sticky top-0 z-20">
@@ -754,7 +798,7 @@ cat << 'EOF' > public/admin.html
             <section class="bg-white p-6 rounded-lg shadow-md"><h2 class="text-xl font-semibold mb-4">图库</h2><div id="navigation-list" class="space-y-1"><div id="nav-item-all" data-view="all" class="nav-item flex items-center gap-3 p-2 rounded cursor-pointer hover:bg-gray-100 active"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 text-slate-500"><path fill-rule="evenodd" d="M1 5.25A2.25 2.25 0 013.25 3h13.5A2.25 2.25 0 0119 5.25v9.5A2.25 2.25 0 0116.75 17H3.25A2.25 2.25 0 011 14.75v-9.5zm1.5 5.81v3.69c0 .414.336.75.75.75h13.5a.75.75 0 00.75-.75v-3.69l-2.72-2.72a.75.75 0 00-1.06 0L11.5 10l-1.72-1.72a.75.75 0 00-1.06 0l-4 4zM12.5 7a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z" clip-rule="evenodd" /></svg><span class="category-name flex-grow">所有图片</span></div><div id="category-dynamic-list"></div><hr class="my-2"><div id="nav-item-recycle-bin" data-view="recycle_bin" class="nav-item flex items-center gap-3 p-2 rounded cursor-pointer hover:bg-gray-100"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 text-slate-500"><path fill-rule="evenodd" d="M8.75 1A2.75 2.75 0 006 3.75V4.5h8V3.75A2.75 2.75 0 0011.25 1h-2.5zM10 4.5a.75.75 0 00-1.5 0v.75h1.5v-.75zM15.25 6H4.75a.75.75 0 000 1.5h10.5a.75.75 0 000-1.5zM4.75 9.75a.75.75 0 01.75-.75h8.5a.75.75 0 010 1.5h-8.5a.75.75 0 01-.75-.75zM5.5 12a.75.75 0 00-1.5 0v2.75A2.75 2.75 0 006.75 17h6.5A2.75 2.75 0 0016 14.75V12a.75.75 0 00-1.5 0v2.75a1.25 1.25 0 01-1.25 1.25h-6.5a1.25 1.25 0 01-1.25-1.25V12z" clip-rule="evenodd" /></svg><span class="category-name flex-grow">回收站</span></div></div></section>
             <section class="bg-white p-6 rounded-lg shadow-md"><h2 class="text-xl font-semibold mb-4">安全</h2><div id="security-section"></div></section>
         </div>
-        <section class="bg-white p-6 rounded-lg shadow-md xl:col-span-8 flex flex-col"><div class="flex flex-col md:flex-row justify-between items-center mb-4 gap-4"><h2 id="image-list-header" class="text-xl font-semibold text-slate-900 flex-grow"></h2><div class="w-full md:w-64"><input type="search" id="search-input" placeholder="在当前视图下搜索..." class="w-full border rounded-full px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"></div></div><div id="image-list" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4 flex-grow"></div><div id="image-loader" class="text-center py-8 text-slate-500 hidden">正在加载...</div><div id="pagination-container" class="mt-6 flex justify-center"></div></section>
+        <section class="bg-white p-6 rounded-lg shadow-md xl:col-span-8 flex flex-col"><div class="flex flex-col md:flex-row justify-between items-center mb-4 gap-4"><h2 id="image-list-header" class="text-xl font-semibold text-slate-900 flex-grow"></h2><div class="w-full md:w-64"><input type="search" id="search-input" placeholder="在当前视图下搜索..." class="w-full border rounded-full px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"></div></div><div id="image-list" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4 flex-grow content-start"></div><div id="image-loader" class="text-center py-8 text-slate-500 hidden">正在加载...</div><div id="pagination-container" class="mt-6 flex justify-center"></div></section>
     </main>
     <div id="generic-modal" class="modal fixed inset-0 bg-black bg-opacity-50 items-center justify-center z-30 p-4"><div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-sm"><h3 id="modal-title" class="text-lg font-bold mb-4"></h3><div id="modal-body" class="mb-4 text-slate-600"></div><div id="modal-footer" class="flex justify-end space-x-2"></div></div></div>
     <div id="edit-image-modal" class="modal fixed inset-0 bg-black bg-opacity-50 items-center justify-center z-30 p-4"><div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-md"><h3 class="text-lg font-bold mb-4">编辑图片信息</h3><form id="edit-image-form"><input type="hidden" id="edit-id"><div class="mb-4"><label for="edit-originalFilename" class="block text-sm font-medium mb-1">原始文件名</label><input type="text" id="edit-originalFilename" class="w-full border rounded px-3 py-2"></div><div class="mb-4"><label for="edit-category-select" class="block text-sm font-medium mb-1">分类</label><select id="edit-category-select" class="w-full border rounded px-3 py-2"></select></div><div class="mb-4"><label for="edit-description" class="block text-sm font-medium mb-1">描述</label><textarea id="edit-description" rows="3" class="w-full border rounded px-3 py-2"></textarea></div><div class="flex justify-end space-x-2 mt-6"><button type="button" class="modal-cancel-btn bg-gray-300 hover:bg-gray-400 text-black py-2 px-4 rounded">取消</button><button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded">保存更改</button></div></form></div></div>
@@ -777,7 +821,24 @@ cat << 'EOF' > public/admin.html
         };
         let filesToUpload = []; let adminLoadedImages = []; let currentAdminLightboxIndex = 0; let currentSearchTerm = ''; let debounceTimer; let currentAdminPage = 1;
         
-        const apiRequest = async (url, options = {}) => { const response = await fetch(url, options); if (response.status === 401) { showToast('登录状态已过期', 'error'); setTimeout(() => window.location.href = '/login.html', 2000); throw new Error('Unauthorized'); } return response; };
+        const apiRequest = async (url, options = {}) => {
+            const response = await fetch(url, options);
+            if (response.status === 401) { 
+                showToast('登录状态已过期', 'error'); 
+                setTimeout(() => window.location.href = '/login.html', 2000); 
+                throw new Error('Unauthorized'); 
+            }
+            if (!response.ok) {
+                let errorMsg = `HTTP Error: ${response.status} ${response.statusText}`;
+                try {
+                    const errorJson = await response.json();
+                    errorMsg = errorJson.message || errorMsg;
+                } catch (e) { /* Ignore if body is not JSON */ }
+                throw new Error(errorMsg);
+            }
+            return response;
+        };
+
         const formatBytes = (bytes, decimals = 2) => { if (!+bytes) return '0 Bytes'; const k = 1024; const dm = decimals < 0 ? 0 : decimals; const sizes = ["Bytes", "KB", "MB", "GB", "TB"]; const i = Math.floor(Math.log(bytes) / Math.log(k)); return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`; };
         const showToast = (message, type = 'success') => { const toast = document.getElementById('toast'); toast.className = `toast max-w-xs text-white text-sm rounded-lg shadow-lg p-3 ${type === 'success' ? 'bg-green-600' : 'bg-red-600'}`; toast.querySelector('#toast-message').textContent = message; toast.querySelector('#toast-icon').innerHTML = type === 'success' ? `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>` : `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>`; toast.style.display = 'block'; setTimeout(() => toast.classList.add('show'), 10); setTimeout(() => { toast.classList.remove('show'); setTimeout(() => toast.style.display = 'none', 300); }, 3000); };
         const showGenericModal = (title, bodyHtml, footerHtml) => { DOMElements.genericModal.querySelector('#modal-title').textContent = title; DOMElements.genericModal.querySelector('#modal-body').innerHTML = bodyHtml; DOMElements.genericModal.querySelector('#modal-footer').innerHTML = footerHtml; DOMElements.genericModal.classList.add('active'); };
@@ -791,18 +852,18 @@ cat << 'EOF' > public/admin.html
         DOMElements.unifiedDescription.addEventListener('input', e => { const unifiedText = e.target.value; document.querySelectorAll('.file-preview-item').forEach(item => { const index = parseInt(item.dataset.fileIndex, 10); if (filesToUpload[index] && !filesToUpload[index].userHasTyped) { item.querySelector('.description-input').value = unifiedText; filesToUpload[index].description = unifiedText; } }); });
         DOMElements.filePreviewList.addEventListener('input', e => { if (e.target.classList.contains('description-input')) { const index = parseInt(e.target.dataset.index, 10); if(filesToUpload[index]) { filesToUpload[index].description = e.target.value; filesToUpload[index].userHasTyped = true; } } });
         DOMElements.filePreviewList.addEventListener('click', e => { if (e.target.classList.contains('remove-file-btn')) { const index = parseInt(e.target.dataset.index, 10); filesToUpload.splice(index, 1); renderFilePreviews(); DOMElements.uploadBtn.disabled = filesToUpload.length === 0; } });
-        const processUploadQueue = async (e) => { e.preventDefault(); DOMElements.uploadBtn.disabled = true; const pendingFiles = filesToUpload.filter(f => f.status === 'pending'); if (pendingFiles.length === 0) { showToast("没有需要上传的新文件。", "error"); DOMElements.uploadBtn.disabled = filesToUpload.length === 0; return; } const filenamesToCheck = pendingFiles.map(item => item.file.name); const checkRes = await apiRequest('/api/admin/check-filenames', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({filenames: filenamesToCheck}) }); const { duplicates } = await checkRes.json(); for (const item of pendingFiles) { if (duplicates.includes(item.file.name)) { const userConfirmed = await showConfirmationModal('文件已存在', `文件 "<strong>${item.file.name}</strong>" 已存在。是否仍然继续上传？<br>(新文件将被自动重命名)`, '继续上传', '取消此文件'); if (userConfirmed) { item.shouldRename = true; } else { item.status = 'cancelled'; const previewItem = DOMElements.filePreviewList.querySelector(`[data-file-index="${filesToUpload.indexOf(item)}"]`); if(previewItem) previewItem.querySelector('.upload-status').textContent = '已取消'; } } } const uploadableFiles = filesToUpload.filter(f => f.status === 'pending'); let processedCount = 0; const updateButtonText = () => { DOMElements.uploadBtn.textContent = `正在上传 (${processedCount}/${uploadableFiles.length})...`; }; if (uploadableFiles.length > 0) updateButtonText(); for (const item of uploadableFiles) { const originalIndex = filesToUpload.indexOf(item); const previewItem = DOMElements.filePreviewList.querySelector(`[data-file-index="${originalIndex}"]`); if (!previewItem) { processedCount++; updateButtonText(); continue; } const statusEl = previewItem.querySelector('.upload-status'); try { statusEl.textContent = '上传中...'; const formData = new FormData(); formData.append('image', item.file); formData.append('category', DOMElements.categorySelect.value); formData.append('description', item.description); formData.append('rename', item.shouldRename); const response = await apiRequest('/api/admin/upload', { method: 'POST', body: formData }); const result = await response.json(); if (response.ok) { item.status = 'success'; previewItem.classList.add('upload-success'); statusEl.textContent = '✅ 上传成功'; } else { throw new Error(result.message || '上传失败'); } } catch (err) { if (err.message !== 'Unauthorized') { item.status = 'error'; statusEl.textContent = `❌ ${err.message}`; previewItem.classList.add('upload-error'); } } finally { processedCount++; updateButtonText(); } } showToast(`所有任务处理完成。`); DOMElements.uploadBtn.textContent = '上传文件'; filesToUpload = []; DOMElements.imageInput.value = ''; DOMElements.unifiedDescription.value = ''; setTimeout(() => { DOMElements.filePreviewContainer.classList.add('hidden'); DOMElements.uploadBtn.disabled = true; }, 3000); await refreshAllData(); };
+        const processUploadQueue = async (e) => { e.preventDefault(); DOMElements.uploadBtn.disabled = true; const pendingFiles = filesToUpload.filter(f => f.status === 'pending'); if (pendingFiles.length === 0) { showToast("没有需要上传的新文件。", "error"); DOMElements.uploadBtn.disabled = filesToUpload.length === 0; return; } const filenamesToCheck = pendingFiles.map(item => item.file.name); const { duplicates } = await apiRequest('/api/admin/check-filenames', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({filenames: filenamesToCheck}) }).then(res => res.json()); for (const item of pendingFiles) { if (duplicates.includes(item.file.name)) { const userConfirmed = await showConfirmationModal('文件已存在', `文件 "<strong>${item.file.name}</strong>" 已存在。是否仍然继续上传？<br>(新文件将被自动重命名)`, '继续上传', '取消此文件'); if (userConfirmed) { item.shouldRename = true; } else { item.status = 'cancelled'; const previewItem = DOMElements.filePreviewList.querySelector(`[data-file-index="${filesToUpload.indexOf(item)}"]`); if(previewItem) previewItem.querySelector('.upload-status').textContent = '已取消'; } } } const uploadableFiles = filesToUpload.filter(f => f.status === 'pending'); let processedCount = 0; const updateButtonText = () => { DOMElements.uploadBtn.textContent = `正在上传 (${processedCount}/${uploadableFiles.length})...`; }; if (uploadableFiles.length > 0) updateButtonText(); for (const item of uploadableFiles) { const originalIndex = filesToUpload.indexOf(item); const previewItem = DOMElements.filePreviewList.querySelector(`[data-file-index="${originalIndex}"]`); if (!previewItem) { processedCount++; updateButtonText(); continue; } const statusEl = previewItem.querySelector('.upload-status'); try { statusEl.textContent = '上传中...'; const formData = new FormData(); formData.append('image', item.file); formData.append('category', DOMElements.categorySelect.value); formData.append('description', item.description); formData.append('rename', item.shouldRename); await apiRequest('/api/admin/upload', { method: 'POST', body: formData }); item.status = 'success'; previewItem.classList.add('upload-success'); statusEl.textContent = '✅ 上传成功'; } catch (err) { if (err.message !== 'Unauthorized') { item.status = 'error'; statusEl.textContent = `❌ ${err.message}`; previewItem.classList.add('upload-error'); } } finally { processedCount++; updateButtonText(); } } showToast(`所有任务处理完成。`); DOMElements.uploadBtn.textContent = '上传文件'; filesToUpload = []; DOMElements.imageInput.value = ''; DOMElements.unifiedDescription.value = ''; setTimeout(() => { DOMElements.filePreviewContainer.classList.add('hidden'); DOMElements.uploadBtn.disabled = true; }, 3000); await refreshAllData(); };
         DOMElements.uploadForm.addEventListener('submit', processUploadQueue);
 
         async function refreshAllData() { await refreshNavigation(); const activeNav = document.querySelector('.nav-item.active'); if (activeNav) { activeNav.click(); } else { document.getElementById('nav-item-all').click(); } }
         async function populateCategorySelects(selectedCategory = null) { try { const response = await apiRequest('/api/categories'); const categories = await response.json(); [DOMElements.categorySelect, DOMElements.editCategorySelect].forEach(select => { const currentVal = select.value; select.innerHTML = ''; categories.forEach(cat => select.add(new Option(cat, cat))); select.value = categories.includes(currentVal) ? currentVal : selectedCategory || categories[0] || ''; }); } catch (error) { if (error.message !== 'Unauthorized') console.error('加载分类失败:', error); } }
         async function refreshNavigation() { try { const response = await apiRequest('/api/categories'); const categories = await response.json(); DOMElements.categoryDynamicList.innerHTML = ''; categories.forEach(cat => { const isUncategorized = cat === UNCATEGORIZED; const item = document.createElement('div'); item.className = 'nav-item flex items-center justify-between p-2 rounded cursor-pointer hover:bg-gray-100'; item.dataset.view = 'category'; item.dataset.categoryName = cat; item.innerHTML = `<span class="category-name flex-grow">${cat}</span>` + (isUncategorized ? '' : `<div class="space-x-2 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"><button data-name="${cat}" class="rename-cat-btn text-blue-500 hover:text-blue-700 text-sm">重命名</button><button data-name="${cat}" class="delete-cat-btn text-red-500 hover:red-700 text-sm">删除</button></div>`); item.addEventListener('mouseenter', () => item.classList.add('group')); item.addEventListener('mouseleave', () => item.classList.remove('group')); DOMElements.categoryDynamicList.appendChild(item); }); await populateCategorySelects(); } catch (error) { if (error.message !== 'Unauthorized') console.error('加载导航列表失败:', error); } }
         
-        async function loadImages(category, name) { DOMElements.imageLoader.classList.remove('hidden'); DOMElements.imageList.innerHTML = ''; DOMElements.paginationContainer.innerHTML = ''; try { const url = `/api/images?category=${category}&search=${encodeURIComponent(currentSearchTerm)}&page=${currentAdminPage}&limit=12`; const response = await apiRequest(url); const data = await response.json(); adminLoadedImages = data.images; const totalSize = adminLoadedImages.reduce((acc, img) => acc + (img.size || 0), 0); const titleText = currentSearchTerm ? `在 "${name}" 中搜索 "${currentSearchTerm}"` : name; DOMElements.imageListHeader.innerHTML = `${titleText} <span class="text-base text-gray-500 font-normal">(共 ${data.totalImages} 张)</span>`; if (adminLoadedImages.length === 0) { DOMElements.imageList.innerHTML = '<p class="text-slate-500 col-span-full text-center py-10">没有找到图片。</p>'; } else { adminLoadedImages.forEach(renderImageCard); } renderPaginationControls(data.page, data.totalPages); } catch (error) { if(error.message !== 'Unauthorized') DOMElements.imageList.innerHTML = '<p class="text-red-500 col-span-full text-center py-10">加载图片失败。</p>'; } finally { DOMElements.imageLoader.classList.add('hidden'); } }
-        async function loadRecycleBin() { DOMElements.imageLoader.classList.remove('hidden'); DOMElements.imageList.innerHTML = ''; DOMElements.paginationContainer.innerHTML = ''; try { const url = `/api/admin/recycle-bin?search=${encodeURIComponent(currentSearchTerm)}&page=${currentAdminPage}&limit=12`; const response = await apiRequest(url); const data = await response.json(); adminLoadedImages = data.images; const titleText = currentSearchTerm ? `在回收站中搜索 "${currentSearchTerm}"` : "回收站"; DOMElements.imageListHeader.innerHTML = `${titleText}`; if (adminLoadedImages.length === 0) { DOMElements.imageList.innerHTML = '<p class="text-slate-500 col-span-full text-center py-10">回收站是空的。</p>'; } else { adminLoadedImages.forEach(renderPurgeableImageCard); } renderPaginationControls(data.page, data.totalPages); } catch (error) { if (error.message !== 'Unauthorized') DOMElements.imageList.innerHTML = '<p class="text-red-500 col-span-full text-center py-10">加载回收站失败。</p>'; } finally { DOMElements.imageLoader.classList.add('hidden'); } }
+        async function loadImages(category, name) { DOMElements.imageLoader.classList.remove('hidden'); DOMElements.imageList.innerHTML = ''; DOMElements.paginationContainer.innerHTML = ''; try { const url = `/api/images?category=${category}&search=${encodeURIComponent(currentSearchTerm)}&page=${currentAdminPage}&limit=12`; const response = await apiRequest(url); const data = await response.json(); adminLoadedImages = data.images; const totalSize = adminLoadedImages.reduce((acc, img) => acc + (img.size || 0), 0); const titleText = currentSearchTerm ? `在 "${name}" 中搜索 "${currentSearchTerm}"` : name; DOMElements.imageListHeader.innerHTML = `${titleText} <span class="text-base text-gray-500 font-normal">(共 ${data.totalImages} 张)</span>`; if (adminLoadedImages.length === 0) { DOMElements.imageList.innerHTML = '<p class="text-slate-500 col-span-full text-center py-10">没有找到图片。</p>'; } else { adminLoadedImages.forEach(renderImageCard); } renderPaginationControls(data.page, data.totalPages); } catch (error) { if(error.message !== 'Unauthorized') DOMElements.imageList.innerHTML = `<p class="text-red-500 col-span-full text-center py-10">加载图片失败: ${error.message}</p>`; } finally { DOMElements.imageLoader.classList.add('hidden'); } }
+        async function loadRecycleBin() { DOMElements.imageLoader.classList.remove('hidden'); DOMElements.imageList.innerHTML = ''; DOMElements.paginationContainer.innerHTML = ''; try { const url = `/api/admin/recycle-bin?search=${encodeURIComponent(currentSearchTerm)}&page=${currentAdminPage}&limit=12`; const response = await apiRequest(url); const data = await response.json(); adminLoadedImages = data.images; const titleText = currentSearchTerm ? `在回收站中搜索 "${currentSearchTerm}"` : "回收站"; DOMElements.imageListHeader.innerHTML = `${titleText}`; if (adminLoadedImages.length === 0) { DOMElements.imageList.innerHTML = '<p class="text-slate-500 col-span-full text-center py-10">回收站是空的。</p>'; } else { adminLoadedImages.forEach(renderPurgeableImageCard); } renderPaginationControls(data.page, data.totalPages); } catch (error) { if (error.message !== 'Unauthorized') DOMElements.imageList.innerHTML = `<p class="text-red-500 col-span-full text-center py-10">加载回收站失败: ${error.message}</p>`; } finally { DOMElements.imageLoader.classList.add('hidden'); } }
 
-        function renderImageCard(image) { const card = document.createElement('div'); card.className = 'border rounded-lg shadow-sm bg-white overflow-hidden flex flex-col'; card.innerHTML = `<a class="preview-btn h-40 bg-slate-100 flex items-center justify-center cursor-pointer group" data-id="${image.id}"><img src="/image-proxy/${image.filename}?w=400" alt="${image.description}" class="max-h-full max-w-full object-contain group-hover:scale-105 transition-transform duration-300"></a><div class="p-3 flex-grow flex flex-col"><p class="font-bold text-sm truncate" title="${image.originalFilename}">${image.originalFilename}</p><p class="text-xs text-slate-500 -mt-1 mb-2">${formatBytes(image.size)}</p><p class="text-xs text-slate-500 mb-2">${image.category}</p><p class="text-xs text-slate-600 flex-grow mb-3 break-words">${image.description || '无描述'}</p></div><div class="bg-slate-50 p-2 flex justify-end items-center gap-1"><button title="预览" data-id="${image.id}" class="preview-btn p-2 rounded-full text-slate-600 hover:bg-slate-200 hover:text-slate-800 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg></button><a href="${image.src}" download="${image.originalFilename}" title="下载" class="download-btn p-2 rounded-full text-slate-600 hover:bg-slate-200 hover:text-slate-800 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg></a><button title="编辑" data-image='${JSON.stringify(image)}' class="edit-btn p-2 rounded-full text-slate-600 hover:bg-slate-200 hover:text-slate-800 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487zm0 0L19.5 7.125" /></svg></button><button title="移至回收站" data-id="${image.id}" class="delete-btn p-2 rounded-full text-red-500 hover:bg-red-100 hover:text-red-700 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.134-2.036-2.134H8.718c-1.126 0-2.037.955-2.037 2.134v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg></button></div>`; DOMElements.imageList.appendChild(card); }
-        function renderPurgeableImageCard(image) { const card = document.createElement('div'); card.className = 'border rounded-lg shadow-sm bg-white overflow-hidden flex flex-col'; card.innerHTML = `<a class="preview-btn h-40 bg-slate-100 flex items-center justify-center cursor-pointer group" data-id="${image.id}"><img src="/image-proxy/${image.filename}?w=400" alt="${image.description || image.originalFilename}" class="max-h-full max-w-full object-contain group-hover:scale-105 transition-transform duration-300"></a><div class="p-3 flex-grow flex flex-col space-y-2"><p class="font-bold text-sm truncate" title="${image.originalFilename}">${image.originalFilename}</p><div class="text-xs text-slate-500 space-y-1"><p><strong>大小:</strong> ${formatBytes(image.size)}</p><p><strong>分类:</strong> ${image.category}</p></div><p class="text-xs text-slate-600 flex-grow break-words">${image.description || '无描述'}</p><p class="text-xs text-red-500 mt-2"><strong>删除于:</strong> ${new Date(image.deletedAt).toLocaleString()}</p></div><div class="bg-slate-50 p-2 flex justify-end items-center gap-1"><button title="恢复" data-id="${image.id}" class="restore-btn p-2 rounded-full text-green-600 hover:bg-green-100 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" /></svg></button><button title="彻底删除" data-id="${image.id}" class="purge-btn p-2 rounded-full text-red-500 hover:bg-red-100 hover:text-red-700 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.134-2.036-2.134H8.718c-1.126 0-2.037.955-2.037 2.134v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg></button></div>`; DOMElements.imageList.appendChild(card); }
+        function renderImageCard(image) { const card = document.createElement('div'); card.className = 'admin-image-card border rounded-lg shadow-sm bg-white overflow-hidden flex flex-col'; card.innerHTML = `<a class="image-preview-container" data-id="${image.id}"><img src="/image-proxy/${image.filename}?w=400" alt="${image.description}" class="group-hover:scale-105 transition-transform duration-300"></a><div class="p-3 flex-grow flex flex-col"><p class="font-bold text-sm truncate" title="${image.originalFilename}">${image.originalFilename}</p><p class="text-xs text-slate-500 -mt-1 mb-2">${formatBytes(image.size)}</p><p class="text-xs text-slate-500 mb-2">${image.category}</p><p class="text-xs text-slate-600 flex-grow mb-3 break-words">${image.description || '无描述'}</p></div><div class="bg-slate-50 p-2 flex justify-end items-center gap-1"><button title="预览" data-id="${image.id}" class="preview-btn p-2 rounded-full text-slate-600 hover:bg-slate-200 hover:text-slate-800 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg></button><a href="${image.src}" download="${image.originalFilename}" title="下载" class="download-btn p-2 rounded-full text-slate-600 hover:bg-slate-200 hover:text-slate-800 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg></a><button title="编辑" data-image='${JSON.stringify(image)}' class="edit-btn p-2 rounded-full text-slate-600 hover:bg-slate-200 hover:text-slate-800 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487zm0 0L19.5 7.125" /></svg></button><button title="移至回收站" data-id="${image.id}" class="delete-btn p-2 rounded-full text-red-500 hover:bg-red-100 hover:text-red-700 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.134-2.036-2.134H8.718c-1.126 0-2.037.955-2.037 2.134v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg></button></div>`; DOMElements.imageList.appendChild(card); }
+        function renderPurgeableImageCard(image) { const card = document.createElement('div'); card.className = 'admin-image-card border rounded-lg shadow-sm bg-white overflow-hidden flex flex-col'; card.innerHTML = `<a class="image-preview-container" data-id="${image.id}"><img src="/image-proxy/${image.filename}?w=400" alt="${image.description || image.originalFilename}"></a><div class="p-3 flex-grow flex flex-col space-y-2"><p class="font-bold text-sm truncate" title="${image.originalFilename}">${image.originalFilename}</p><div class="text-xs text-slate-500 space-y-1"><p><strong>大小:</strong> ${formatBytes(image.size)}</p><p><strong>分类:</strong> ${image.category}</p></div><p class="text-xs text-slate-600 flex-grow break-words">${image.description || '无描述'}</p><p class="text-xs text-red-500 mt-2"><strong>删除于:</strong> ${new Date(image.deletedAt).toLocaleString()}</p></div><div class="bg-slate-50 p-2 flex justify-end items-center gap-1"><button title="恢复" data-id="${image.id}" class="restore-btn p-2 rounded-full text-green-600 hover:bg-green-100 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" /></svg></button><button title="彻底删除" data-id="${image.id}" class="purge-btn p-2 rounded-full text-red-500 hover:bg-red-100 hover:text-red-700 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.134-2.036-2.134H8.718c-1.126 0-2.037.955-2.037 2.134v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg></button></div>`; DOMElements.imageList.appendChild(card); }
         
         const changePage = (page) => { currentAdminPage = page; const activeNav = document.querySelector('.nav-item.active'); if (activeNav) { activeNav.click(); } };
         function renderPaginationControls(currentPage, totalPages) {
@@ -832,7 +893,7 @@ cat << 'EOF' > public/admin.html
         DOMElements.navigationList.addEventListener('click', async (e) => {
             const navItem = e.target.closest('.nav-item');
             if (!navItem) return;
-            if (e.target.matches('.rename-cat-btn, .delete-cat-btn')) { e.stopPropagation(); const catName = e.target.dataset.name; if (e.target.classList.contains('rename-cat-btn')) { showGenericModal(`重命名分类 "${catName}"`, '<form id="modal-form"><input type="text" id="modal-input" required class="w-full border rounded px-3 py-2"></form>', '<button type="button" class="modal-cancel-btn bg-gray-300 hover:bg-gray-400 text-black py-2 px-4 rounded">取消</button><button type="submit" form="modal-form" class="bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded">保存</button>'); const input = document.getElementById('modal-input'); input.value = catName; document.getElementById('modal-form').onsubmit = async (ev) => { ev.preventDefault(); const newName = input.value.trim(); if (!newName || newName === catName) { hideModal(DOMElements.genericModal); return; } try { const response = await apiRequest('/api/admin/categories', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ oldName: catName, newName }) }); if (!response.ok) throw new Error((await response.json()).message); hideModal(DOMElements.genericModal); showToast('重命名成功'); await refreshAllData(); } catch (error) { showToast(`重命名失败: ${error.message}`, 'error'); } }; } else if (e.target.classList.contains('delete-cat-btn')) { const confirmed = await showConfirmationModal('确认删除', `<p>确定要删除分类 "<strong>${catName}</strong>" 吗？<br>此分类下的图片将归入 "未分类"。</p>`, '确认删除'); if(confirmed) { try { const response = await apiRequest('/api/admin/categories', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: catName }) }); if (!response.ok) throw new Error((await response.json()).message); showToast('删除成功'); await refreshAllData(); } catch (error) { showToast(`删除失败: ${error.message}`, 'error'); } } } return; }
+            if (e.target.matches('.rename-cat-btn, .delete-cat-btn')) { e.stopPropagation(); const catName = e.target.dataset.name; if (e.target.classList.contains('rename-cat-btn')) { showGenericModal(`重命名分类 "${catName}"`, '<form id="modal-form"><input type="text" id="modal-input" required class="w-full border rounded px-3 py-2"></form>', '<button type="button" class="modal-cancel-btn bg-gray-300 hover:bg-gray-400 text-black py-2 px-4 rounded">取消</button><button type="submit" form="modal-form" class="bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded">保存</button>'); const input = document.getElementById('modal-input'); input.value = catName; document.getElementById('modal-form').onsubmit = async (ev) => { ev.preventDefault(); const newName = input.value.trim(); if (!newName || newName === catName) { hideModal(DOMElements.genericModal); return; } try { await apiRequest('/api/admin/categories', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ oldName: catName, newName }) }); hideModal(DOMElements.genericModal); showToast('重命名成功'); await refreshAllData(); } catch (error) { showToast(`重命名失败: ${error.message}`, 'error'); } }; } else if (e.target.classList.contains('delete-cat-btn')) { const confirmed = await showConfirmationModal('确认删除', `<p>确定要删除分类 "<strong>${catName}</strong>" 吗？<br>此分类下的图片将归入 "未分类"。</p>`, '确认删除'); if(confirmed) { try { await apiRequest('/api/admin/categories', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: catName }) }); showToast('删除成功'); await refreshAllData(); } catch (error) { showToast(`删除失败: ${error.message}`, 'error'); } } } return; }
             document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
             navItem.classList.add('active');
             DOMElements.searchInput.value = ''; currentSearchTerm = ''; currentAdminPage = 1;
@@ -843,22 +904,23 @@ cat << 'EOF' > public/admin.html
         });
         
         DOMElements.imageList.addEventListener('click', async (e) => {
-            const target = e.target.closest('button, a'); if (!target) return;
-            const imageId = target.dataset.id;
-            const activeNav = document.querySelector('.nav-item.active');
-            if (target.matches('.preview-btn')) { currentAdminLightboxIndex = adminLoadedImages.findIndex(img => img.id === imageId); if (currentAdminLightboxIndex === -1) return; updateAdminLightbox(); DOMElements.adminLightbox.classList.add('active'); document.body.classList.add('lightbox-open');
-            } else if (target.matches('.edit-btn')) { const image = JSON.parse(target.dataset.image); await populateCategorySelects(image.category); document.getElementById('edit-id').value = image.id; document.getElementById('edit-originalFilename').value = image.originalFilename; document.getElementById('edit-description').value = image.description; DOMElements.editImageModal.classList.add('active');
-            } else if (target.matches('.delete-btn')) { const confirmed = await showConfirmationModal('移至回收站', `<p>确定要将这张图片移至回收站吗？</p>`, '确认移动'); if(confirmed) { try { const response = await apiRequest(`/api/admin/images/${imageId}`, { method: 'DELETE' }); if (!response.ok) throw new Error('操作失败'); showToast('图片已移至回收站'); if(activeNav) activeNav.click(); } catch (error) { showToast(error.message, 'error'); } }
-            } else if (target.matches('.restore-btn')) { try { const response = await apiRequest(`/api/admin/recycle-bin/${imageId}/restore`, { method: 'POST' }); if (!response.ok) throw new Error('恢复失败'); showToast('图片已恢复'); if(activeNav) activeNav.click(); } catch (error) { showToast(error.message, 'error'); }
-            } else if (target.matches('.purge-btn')) { const confirmed = await showConfirmationModal('彻底删除', `<p>确定要永久删除这张图片吗？<br><strong>此操作无法撤销。</strong></p>`, '确认删除'); if (confirmed) { try { const response = await apiRequest(`/api/admin/recycle-bin/${imageId}/purge`, { method: 'DELETE' }); if (!response.ok) throw new Error('删除失败'); showToast('图片已彻底删除'); if(activeNav) activeNav.click(); } catch (error) { showToast(error.message, 'error'); } } }
+            const button = e.target.closest('button, a'); if (!button) return;
+            const imageId = button.dataset.id;
+            const card = button.closest('.admin-image-card');
+
+            if (button.matches('.preview-btn')) { currentAdminLightboxIndex = adminLoadedImages.findIndex(img => img.id === imageId); if (currentAdminLightboxIndex === -1) return; updateAdminLightbox(); DOMElements.adminLightbox.classList.add('active'); document.body.classList.add('lightbox-open');
+            } else if (button.matches('.edit-btn')) { const image = JSON.parse(button.dataset.image); await populateCategorySelects(image.category); document.getElementById('edit-id').value = image.id; document.getElementById('edit-originalFilename').value = image.originalFilename; document.getElementById('edit-description').value = image.description; DOMElements.editImageModal.classList.add('active');
+            } else if (button.matches('.delete-btn')) { const confirmed = await showConfirmationModal('移至回收站', `<p>确定要将这张图片移至回收站吗？</p>`, '确认移动'); if(confirmed) { try { await apiRequest(`/api/admin/images/${imageId}`, { method: 'DELETE' }); showToast('图片已移至回收站'); if (card) { card.classList.add('fading-out'); setTimeout(() => card.remove(), 400); } adminLoadedImages = adminLoadedImages.filter(img => img.id !== imageId); } catch (error) { showToast(error.message, 'error'); } }
+            } else if (button.matches('.restore-btn')) { try { await apiRequest(`/api/admin/recycle-bin/${imageId}/restore`, { method: 'POST' }); showToast('图片已恢复'); if (card) { card.classList.add('fading-out'); setTimeout(() => card.remove(), 400); } adminLoadedImages = adminLoadedImages.filter(img => img.id !== imageId); } catch (error) { showToast(error.message, 'error'); }
+            } else if (button.matches('.purge-btn')) { const confirmed = await showConfirmationModal('彻底删除', `<p>确定要永久删除这张图片吗？<br><strong>此操作无法撤销。</strong></p>`, '确认删除'); if (confirmed) { try { await apiRequest(`/api/admin/recycle-bin/${imageId}/purge`, { method: 'DELETE' }); showToast('图片已彻底删除'); if (card) { card.classList.add('fading-out'); setTimeout(() => card.remove(), 400); } adminLoadedImages = adminLoadedImages.filter(img => img.id !== imageId); } catch (error) { showToast(error.message, 'error'); } } }
         });
 
         DOMElements.searchInput.addEventListener('input', () => { clearTimeout(debounceTimer); debounceTimer = setTimeout(() => { currentSearchTerm = DOMElements.searchInput.value; currentAdminPage = 1; const activeNav = document.querySelector('.nav-item.active'); if (activeNav) { activeNav.click(); } }, 300); });
-        DOMElements.addCategoryBtn.addEventListener('click', () => { showGenericModal('添加新分类', '<form id="modal-form"><input type="text" id="modal-input" placeholder="输入新分类的名称" required class="w-full border rounded px-3 py-2"></form>', '<button type="button" class="modal-cancel-btn bg-gray-300 hover:bg-gray-400 text-black py-2 px-4 rounded">取消</button><button type="submit" form="modal-form" class="bg-green-600 hover:bg-green-700 text-white py-2 px-4 rounded">保存</button>'); document.getElementById('modal-form').onsubmit = async (e) => { e.preventDefault(); const newName = document.getElementById('modal-input').value.trim(); if (!newName) return; try { const response = await apiRequest('/api/admin/categories', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: newName }) }); if (!response.ok) throw new Error((await response.json()).message); hideModal(DOMElements.genericModal); showToast('分类创建成功'); await refreshNavigation(); } catch (error) { showToast(`添加失败: ${error.message}`, 'error'); } }; });
-        DOMElements.editImageForm.addEventListener('submit', async (e) => { e.preventDefault(); const id = document.getElementById('edit-id').value; const body = JSON.stringify({ originalFilename: document.getElementById('edit-originalFilename').value, category: DOMElements.editCategorySelect.value, description: document.getElementById('edit-description').value }); try { const response = await apiRequest(`/api/admin/images/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body }); if (!response.ok) throw new Error((await response.json()).message); hideModal(DOMElements.editImageModal); showToast('更新成功'); const activeNav = document.querySelector('.nav-item.active'); if (activeNav) { activeNav.click(); } } catch (error) { showToast(`更新失败: ${error.message}`, 'error'); } });
+        DOMElements.addCategoryBtn.addEventListener('click', () => { showGenericModal('添加新分类', '<form id="modal-form"><input type="text" id="modal-input" placeholder="输入新分类的名称" required class="w-full border rounded px-3 py-2"></form>', '<button type="button" class="modal-cancel-btn bg-gray-300 hover:bg-gray-400 text-black py-2 px-4 rounded">取消</button><button type="submit" form="modal-form" class="bg-green-600 hover:bg-green-700 text-white py-2 px-4 rounded">保存</button>'); document.getElementById('modal-form').onsubmit = async (e) => { e.preventDefault(); const newName = document.getElementById('modal-input').value.trim(); if (!newName) return; try { await apiRequest('/api/admin/categories', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: newName }) }); hideModal(DOMElements.genericModal); showToast('分类创建成功'); await refreshNavigation(); } catch (error) { showToast(`添加失败: ${error.message}`, 'error'); } }; });
+        DOMElements.editImageForm.addEventListener('submit', async (e) => { e.preventDefault(); const id = document.getElementById('edit-id').value; const body = JSON.stringify({ originalFilename: document.getElementById('edit-originalFilename').value, category: DOMElements.editCategorySelect.value, description: document.getElementById('edit-description').value }); try { await apiRequest(`/api/admin/images/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body }); hideModal(DOMElements.editImageModal); showToast('更新成功'); const activeNav = document.querySelector('.nav-item.active'); if (activeNav) { activeNav.click(); } } catch (error) { showToast(`更新失败: ${error.message}`, 'error'); } });
         
-        async function renderSecuritySection() { try { const res = await apiRequest('/api/admin/2fa/status'); const { enabled } = await res.json(); let content; if (enabled) { content = `<p class="text-sm text-slate-600 mb-3">两步验证 (2FA) 当前已<span class="font-bold text-green-600">启用</span>。</p><button id="disable-tfa-btn" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg">禁用 2FA</button>`; } else { content = `<p class="text-sm text-slate-600 mb-3">通过启用两步验证，为您的账户增加一层额外的安全保障。</p><button id="enable-tfa-btn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg">启用 2FA</button>`; } DOMElements.securitySection.innerHTML = content; } catch (error) { DOMElements.securitySection.innerHTML = '<p class="text-red-500">无法加载安全状态。</p>'; } }
-        DOMElements.securitySection.addEventListener('click', async e => { if (e.target.id === 'enable-tfa-btn') { try { const res = await apiRequest('/api/admin/2fa/generate', {method: 'POST'}); const data = await res.json(); DOMElements.tfaModal.querySelector('#tfa-setup-content').innerHTML = `<p class="text-sm mb-4">1. 使用您的 Authenticator 应用 (如 Google Authenticator, Authy) 扫描下方的二维码。</p><img src="${data.qrCode}" alt="2FA QR Code" class="mx-auto border p-2 bg-white"><p class="text-sm mt-4 mb-2">或者手动输入密钥:</p><p class="font-mono bg-gray-100 p-2 rounded text-center text-sm break-all">${data.secret}</p><p class="text-sm mt-6 mb-2">2. 在下方输入应用生成的6位验证码以完成设置：</p><form id="tfa-verify-form" class="flex gap-2"><input type="text" id="tfa-token-input" required maxlength="6" class="w-full border rounded px-3 py-2" placeholder="6位数字码"><button type="submit" class="bg-green-600 hover:bg-green-700 text-white py-2 px-4 rounded">验证并启用</button></form><p id="tfa-error" class="text-red-500 text-sm mt-2 hidden"></p>`; DOMElements.tfaModal.classList.add('active'); document.getElementById('tfa-verify-form').addEventListener('submit', async ev => { ev.preventDefault(); const token = document.getElementById('tfa-token-input').value; try { const verifyRes = await apiRequest('/api/admin/2fa/enable', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ secret: data.secret, token })}); const result = await verifyRes.json(); if(verifyRes.ok) { showToast(result.message); hideModal(DOMElements.tfaModal); await renderSecuritySection(); } else { document.getElementById('tfa-error').textContent = result.message; document.getElementById('tfa-error').classList.remove('hidden'); } } catch (err) { document.getElementById('tfa-error').textContent = '发生未知错误。'; document.getElementById('tfa-error').classList.remove('hidden'); } }); } catch (error) { showToast('无法生成2FA信息', 'error'); } } else if (e.target.id === 'disable-tfa-btn') { const confirmed = await showConfirmationModal('禁用 2FA', `<p>确定要禁用两步验证吗？您的账户安全性将会降低。</p>`, '确认禁用'); if (confirmed) { try { await apiRequest('/api/admin/2fa/disable', {method: 'POST'}); showToast('2FA已禁用'); await renderSecuritySection(); } catch(err) { showToast('操作失败', 'error'); } } } });
+        async function renderSecuritySection() { try { const { enabled } = await apiRequest('/api/admin/2fa/status').then(res => res.json()); let content; if (enabled) { content = `<p class="text-sm text-slate-600 mb-3">两步验证 (2FA) 当前已<span class="font-bold text-green-600">启用</span>。</p><button id="disable-tfa-btn" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg">禁用 2FA</button>`; } else { content = `<p class="text-sm text-slate-600 mb-3">通过启用两步验证，为您的账户增加一层额外的安全保障。</p><button id="enable-tfa-btn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg">启用 2FA</button>`; } DOMElements.securitySection.innerHTML = content; } catch (error) { DOMElements.securitySection.innerHTML = '<p class="text-red-500">无法加载安全状态。</p>'; } }
+        DOMElements.securitySection.addEventListener('click', async e => { if (e.target.id === 'enable-tfa-btn') { try { const data = await apiRequest('/api/admin/2fa/generate', {method: 'POST'}).then(res => res.json()); DOMElements.tfaModal.querySelector('#tfa-setup-content').innerHTML = `<p class="text-sm mb-4">1. 使用您的 Authenticator 应用 (如 Google Authenticator, Authy) 扫描下方的二维码。</p><img src="${data.qrCode}" alt="2FA QR Code" class="mx-auto border p-2 bg-white"><p class="text-sm mt-4 mb-2">或者手动输入密钥:</p><p class="font-mono bg-gray-100 p-2 rounded text-center text-sm break-all">${data.secret}</p><p class="text-sm mt-6 mb-2">2. 在下方输入应用生成的6位验证码以完成设置：</p><form id="tfa-verify-form" class="flex gap-2"><input type="text" id="tfa-token-input" required maxlength="6" class="w-full border rounded px-3 py-2" placeholder="6位数字码"><button type="submit" class="bg-green-600 hover:bg-green-700 text-white py-2 px-4 rounded">验证并启用</button></form><p id="tfa-error" class="text-red-500 text-sm mt-2 hidden"></p>`; DOMElements.tfaModal.classList.add('active'); document.getElementById('tfa-verify-form').addEventListener('submit', async ev => { ev.preventDefault(); const token = document.getElementById('tfa-token-input').value; try { const result = await apiRequest('/api/admin/2fa/enable', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ secret: data.secret, token })}).then(res => res.json()); showToast(result.message); hideModal(DOMElements.tfaModal); await renderSecuritySection(); } catch (err) { document.getElementById('tfa-error').textContent = err.message; document.getElementById('tfa-error').classList.remove('hidden'); } }); } catch (error) { showToast('无法生成2FA信息', 'error'); } } else if (e.target.id === 'disable-tfa-btn') { const confirmed = await showConfirmationModal('禁用 2FA', `<p>确定要禁用两步验证吗？您的账户安全性将会降低。</p>`, '确认禁用'); if (confirmed) { try { await apiRequest('/api/admin/2fa/disable', {method: 'POST'}); showToast('2FA已禁用'); await renderSecuritySection(); } catch(err) { showToast(err.message, 'error'); } } } });
         
         function updateAdminLightbox() { const item = adminLoadedImages[currentAdminLightboxIndex]; if (!item) return; const lightbox = DOMElements.adminLightbox; lightbox.querySelector('.lightbox-image').src = item.src; lightbox.querySelector('#admin-lightbox-download-link').href = item.src; lightbox.querySelector('#admin-lightbox-download-link').download = item.originalFilename; }
         function showNextAdminImage() { currentAdminLightboxIndex = (currentAdminLightboxIndex + 1) % adminLoadedImages.length; updateAdminLightbox(); }
@@ -922,7 +984,10 @@ cat << 'EOF' > public/login.html
         // 动态显示2FA输入框
         document.addEventListener('DOMContentLoaded', () => {
             fetch('/api/2fa/is-enabled')
-                .then(response => response.json())
+                .then(response => {
+                    if (!response.ok) throw new Error('Network response was not ok');
+                    return response.json();
+                })
                 .then(data => {
                     if (data.enabled) {
                         const tfaContainer = document.getElementById('tfa-input-container');
@@ -959,7 +1024,7 @@ EOF
     return 0
 }
 
-# --- 管理菜单功能 ---
+# --- 管理菜单功能 (以下部分无改动，保持原样) ---
 run_update_procedure() {
     echo -e "${GREEN}--- 开始覆盖更新(保留数据) ---${NC}"
     cd "${INSTALL_DIR}" || { echo -e "${RED}错误: 无法进入安装目录 '${INSTALL_DIR}'。${NC}"; return 1; }
@@ -971,7 +1036,6 @@ run_update_procedure() {
         echo -e "${GREEN}--> 依赖安装成功！${NC}"
     else
         echo -e "${RED}--> npm install 失败，请检查错误日志。${NC}"
-        # 不返回错误，因为应用可能仍然可以运行
     fi
 
     echo -e "${YELLOW}--> 正在重启应用以应用更新...${NC}"
@@ -981,7 +1045,6 @@ run_update_procedure() {
 
 run_fresh_install_procedure() {
     echo -e "${GREEN}--- 开始全新安装 ---${NC}"
-    # 确保旧目录被清理（如果存在）
     if [ -d "${INSTALL_DIR}" ]; then
         echo -e "${YELLOW}--> 正在清理旧的应用目录...${NC}"
         rm -rf "${INSTALL_DIR}"
@@ -1058,7 +1121,6 @@ install_app() {
     fi
     echo -e "${GREEN}--> 核心依赖检查完毕。${NC}"
 
-    # --- 智能判断流程 ---
     if [ -f "${INSTALL_DIR}/.env" ]; then
         echo -e "${YELLOW}--> 检测到应用已安装。请选择您的操作：${NC}"
         echo ""
