@@ -1,14 +1,15 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v0.1.5 新登录页)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v0.1.6 登录页优化)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
+#   v0.1.6 更新:
+#   - 优化 (前台): 登录页(login.html)的2FA输入框现在仅在后台启用时才动态显示。
+#   - 优化 (前台): 调整了登录页的布局，确保页脚始终固定在页面底部。
 #   v0.1.5 更新:
 #   - 优化 (前台): 根据用户提供的源码，全面更新登录页面(login.html)的视觉风格，与主画廊(index.html)保持一致。
 #   - 优化 (后台): 调整了登录接口(server.js)的错误处理逻辑，以匹配新版登录页面的错误提示。
-#   v0.1.3 更新:
-#   - 紧急修复 (后台): 创建并集成了缺失的`login.html`登录页面，解决了访问/admin时出现"Cannot GET /login.html"的致命错误。
 # =================================================================
 
 # --- 配置 ---
@@ -19,7 +20,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 PROMPT_Y="(${GREEN}y${NC}/${RED}n${NC})"
 
-SCRIPT_VERSION="0.1.5"
+SCRIPT_VERSION="0.1.6"
 APP_NAME="image-gallery"
 
 # --- 路径设置 ---
@@ -46,7 +47,7 @@ overwrite_app_files() {
 cat << 'EOF' > package.json
 {
   "name": "image-gallery-pro",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "A high-performance, full-stack image gallery application with all features.",
   "main": "server.js",
   "scripts": {
@@ -490,7 +491,7 @@ cat << 'EOF' > public/index.html
             --search-bg: #ffffff; --search-placeholder-color: #9ca3af; --divider-color: #dcfce7;
             --spinner-base-color: #ffffff4d; --spinner-top-color: #ffffffbf;
         }
-        body.dark {
+        html.dark {
             --bg-color: #111827; --text-color: #a7f3d0; --header-bg: rgba(17, 24, 39, 0.85);
             --filter-btn-color: #a7f3d0; --filter-btn-hover-bg: #1f2937; --filter-btn-active-bg: #16a34a;
             --filter-btn-active-border: #15803d; --grid-item-bg: #374151; --shimmer-color: #ffffff1a;
@@ -554,11 +555,12 @@ cat << 'EOF' > public/index.html
     </style>
 </head>
 <body class="antialiased">
-
     <header class="text-center header-sticky py-3">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex items-center justify-between h-auto md:h-14 mb-4">
-                <div class="flex-1"></div>
+                <div class="flex-1 flex items-center">
+                    <a href="/admin" class="text-sm font-medium hover:underline">管理</a>
+                </div>
                 <h1 class="text-4xl md:text-5xl font-bold text-center whitespace-nowrap">图片画廊</h1>
                 <div class="flex-1 flex items-center justify-end gap-1">
                     <button id="search-toggle-btn" title="搜索" class="p-2 rounded-full text-[var(--text-color)] hover:bg-gray-500/10"><svg class="w-6 h-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg></button>
@@ -609,12 +611,19 @@ cat << 'EOF' > public/index.html
         searchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') performSearch(); });
         searchExecBtn.addEventListener('click', performSearch);
         
-        const applyTheme = (theme) => { const isDark = theme === 'dark'; body.classList.toggle('dark', isDark); document.getElementById('theme-icon-sun').classList.toggle('hidden', isDark); document.getElementById('theme-icon-moon').classList.toggle('hidden', !isDark); };
-        themeToggleBtn.addEventListener('click', () => { const newTheme = body.classList.contains('dark') ? 'light' : 'dark'; localStorage.setItem('theme', newTheme); applyTheme(newTheme); });
+        const applyTheme = (theme) => {
+            const isDark = theme === 'dark';
+            document.documentElement.classList.toggle('dark', isDark);
+            if (document.getElementById('theme-icon-sun')) {
+                 document.getElementById('theme-icon-sun').classList.toggle('hidden', isDark);
+                 document.getElementById('theme-icon-moon').classList.toggle('hidden', !isDark);
+            }
+        };
+        themeToggleBtn.addEventListener('click', () => { const newTheme = document.documentElement.classList.contains('dark') ? 'light' : 'dark'; localStorage.setItem('theme', newTheme); applyTheme(newTheme); });
         applyTheme(localStorage.getItem('theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
 
         const fetchJSON = async (url) => { const response = await fetch(url); if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`); return response.json(); };
-        const resetGallery = () => { if (masonry) { masonry.remove(Array.from(galleryContainer.children)); masonry.layout(); } allLoadedImages = []; currentPage = 1; hasMoreImages = true; window.scrollTo(0, 0); loader.textContent = '正在加载更多...'; };
+        const resetGallery = () => { galleryContainer.innerHTML = ''; if (masonry) { masonry.destroy(); } masonry = new Masonry(galleryContainer, { itemSelector: '.grid-item', columnWidth: '.grid-item', percentPosition: true, gutter: 16, transitionDuration: '0.3s' }); allLoadedImages = []; currentPage = 1; hasMoreImages = true; window.scrollTo(0, 0); loader.textContent = '正在加载更多...'; };
         const fetchAndRenderImages = async () => {
             if (isLoading || !hasMoreImages) return;
             isLoading = true;
@@ -624,16 +633,28 @@ cat << 'EOF' > public/index.html
                 const data = await fetchJSON(url);
                 if (data.images && data.images.length > 0) {
                     const itemsFragment = renderItems(data.images);
-                    const newItems = Array.from(itemsFragment.children);
                     galleryContainer.appendChild(itemsFragment);
+                    const newItems = Array.from(itemsFragment.children);
+                    
+                    imagesLoaded(galleryContainer).on('progress', function(instance, image) {
+                        const item = image.img.closest('.grid-item');
+                        if (item) {
+                             item.querySelector('.image-placeholder').classList.add('item-loaded');
+                             image.img.classList.add('loaded');
+                        }
+                        masonry.layout();
+                    }).on('always', function() {
+                        masonry.layout();
+                    });
+
                     masonry.appended(newItems);
-                    imagesLoaded(galleryContainer).on('progress', () => masonry.layout());
                     allLoadedImages.push(...data.images);
                     currentPage++;
                     hasMoreImages = data.hasMore;
-                } else { hasMoreImages = false; if (allLoadedImages.length === 0) loader.textContent = '没有找到符合条件的图片。'; }
+                    if (!hasMoreImages) { loader.classList.add('hidden'); }
+                } else { hasMoreImages = false; if (allLoadedImages.length === 0) { loader.textContent = '没有找到符合条件的图片。'; } else { loader.classList.add('hidden'); } }
             } catch (error) { console.error('获取图片数据失败:', error); loader.textContent = '加载失败，请刷新页面。'; } 
-            finally { isLoading = false; if (!hasMoreImages) loader.classList.add('hidden'); }
+            finally { isLoading = false; }
         };
 
         const renderItems = (images) => {
@@ -647,23 +668,15 @@ cat << 'EOF' > public/index.html
 
                 const placeholder = document.createElement('div');
                 placeholder.className = 'image-placeholder';
+                placeholder.style.paddingBottom = `${(image.height / image.width) * 100}%`;
 
                 const spinner = document.createElement('div');
                 spinner.className = 'spinner';
 
                 const img = document.createElement('img');
+                img.className = 'absolute top-0 left-0 w-full h-full object-cover';
                 img.src = `/image-proxy/${image.filename}?w=500`;
                 img.alt = image.description || image.originalFilename;
-
-                img.addEventListener('load', () => {
-                    img.classList.add('loaded');
-                    placeholder.classList.add('item-loaded');
-                    if (masonry) masonry.layout();
-                });
-                img.addEventListener('error', () => {
-                    item.style.display = 'none';
-                    if (masonry) masonry.layout();
-                });
                 
                 placeholder.appendChild(spinner);
                 placeholder.appendChild(img);
@@ -678,8 +691,8 @@ cat << 'EOF' > public/index.html
         filterButtonsContainer.addEventListener('click', (e) => { const target = e.target.closest('.filter-btn'); if (!target || target.classList.contains('active')) return; currentFilter = target.dataset.filter; currentSearch = ''; searchInput.value = ''; document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active')); target.classList.add('active'); resetGallery(); fetchAndRenderImages(); });
 
         const lightbox = document.querySelector('.lightbox'); const lightboxImage = lightbox.querySelector('.lightbox-image'); const lbCounter = lightbox.querySelector('.lb-counter'); const lbDownloadLink = document.getElementById('lightbox-download-link'); let currentImageIndexInFiltered = 0;
-        galleryContainer.addEventListener('click', (e) => { const item = e.target.closest('.grid-item'); if (item) { lastFocusedElement = document.activeElement; currentImageIndexInFiltered = allLoadedImages.findIndex(img => img.id === item.dataset.id); if (currentImageIndexInFiltered === -1) return; updateLightbox(); lightbox.classList.add('active'); document.body.classList.add('overflow-hidden'); } });
-        const updateLightbox = () => { const currentItem = allLoadedImages[currentImageIndexInFiltered]; if (!currentItem) return; lightboxImage.src = currentItem.src; lightboxImage.alt = currentItem.description; lbCounter.textContent = `${currentImageIndexInFiltered + 1} / ${allLoadedImages.length}`; lbDownloadLink.href = currentItem.src; lbDownloadLink.download = currentItem.originalFilename; };
+        galleryContainer.addEventListener('click', (e) => { e.preventDefault(); const itemLink = e.target.closest('.grid-item > a'); if(!itemLink) return; const item = itemLink.parentElement; if (item) { lastFocusedElement = document.activeElement; currentImageIndexInFiltered = allLoadedImages.findIndex(img => img.id === item.dataset.id); if (currentImageIndexInFiltered === -1) return; updateLightbox(); lightbox.classList.add('active'); document.body.classList.add('overflow-hidden'); } });
+        const updateLightbox = () => { const currentItem = allLoadedImages[currentImageIndexInFiltered]; if (!currentItem) return; lightboxImage.src = `/image-proxy/${currentItem.filename}`; lightboxImage.alt = currentItem.description; lbCounter.textContent = `${currentImageIndexInFiltered + 1} / ${allLoadedImages.length}`; lbDownloadLink.href = `/uploads/${currentItem.filename}`; lbDownloadLink.download = currentItem.originalFilename; };
         const showPrevImage = () => { currentImageIndexInFiltered = (currentImageIndexInFiltered - 1 + allLoadedImages.length) % allLoadedImages.length; updateLightbox(); };
         const showNextImage = () => { currentImageIndexInFiltered = (currentImageIndexInFiltered + 1) % allLoadedImages.length; updateLightbox(); };
         const closeLightbox = () => { lightbox.classList.remove('active'); document.body.classList.remove('overflow-hidden'); if(lastFocusedElement) lastFocusedElement.focus(); };
@@ -714,35 +727,51 @@ EOF
     echo "--> 正在生成登录页 public/login.html..."
 cat << 'EOF' > public/login.html
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" class="">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>后台登录 - 图片画廊</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
     <style>
+        :root {
+            --bg-color: #f0fdf4;
+            --text-color: #14532d;
+            --card-bg: rgba(255, 255, 255, 0.7);
+            --input-border: #dcfce7;
+            --link-color: #166534;
+            --link-hover: #15803d;
+        }
+        html.dark {
+            --bg-color: #111827;
+            --text-color: #a7f3d0;
+            --card-bg: rgba(31, 41, 55, 0.7);
+            --input-border: #166534;
+            --link-color: #6ee7b7;
+            --link-hover: #a7f3d0;
+        }
         body {
-            background-color: #f0fdf4;
+            font-family: 'Inter', 'Noto Sans SC', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
         }
     </style>
 </head>
-<body class="antialiased text-green-900">
-
-    <div class="absolute top-0 left-0 p-6">
-        <a href="/" class="text-green-800 hover:text-green-600 font-semibold transition-colors">
-            &larr; 返回主页
+<body class="flex flex-col min-h-screen">
+    <header class="absolute top-0 left-0 p-4 md:p-6">
+        <a href="/" class="font-medium transition-colors" style="color: var(--link-color); text-decoration-color: var(--link-color);">
+            <span class="hover:underline">&larr; 返回主页</span>
         </a>
-    </div>
-    
-    <div class="min-h-screen flex flex-col items-center justify-center">
-        
-        <h1 class="text-4xl font-bold text-center text-green-900 mb-4">
-            图片画廊
-        </h1>
-        <p class="text-green-800 mb-8">管理员登录入口</p>
-        
-        <div class="max-w-md w-full bg-white/70 backdrop-blur-sm p-8 rounded-xl shadow-lg m-4">
+    </header>
 
+    <main class="flex-grow flex flex-col items-center justify-center p-4">
+        <h1 class="text-4xl font-bold text-center">图片画廊</h1>
+        <p class="mt-2 mb-8 opacity-80">管理员登录入口</p>
+
+        <div class="w-full max-w-md rounded-xl p-8 shadow-lg" style="background-color: var(--card-bg); backdrop-filter: blur(10px);">
             <div id="error-message-creds" class="hidden bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg relative mb-4" role="alert">
                 <strong class="font-bold">登录失败！</strong>
                 <span class="block sm:inline">用户名或密码不正确。</span>
@@ -754,33 +783,35 @@ cat << 'EOF' > public/login.html
 
             <form action="/api/login" method="POST">
                 <div class="mb-4">
-                    <label for="username" class="block text-green-800 text-sm font-bold mb-2">用户名</label>
-                    <input type="text" id="username" name="username" required autofocus class="shadow-sm appearance-none border border-green-200 rounded-lg w-full py-3 px-4 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-green-500 bg-white/80">
+                    <label for="username" class="block text-sm font-bold mb-2 opacity-90">用户名</label>
+                    <input type="text" id="username" name="username" required autofocus class="appearance-none border rounded-lg w-full py-3 px-4 leading-tight focus:outline-none focus:ring-2 focus:ring-green-500 bg-white/50" style="border-color: var(--input-border);">
                 </div>
 
                 <div class="mb-4">
-                    <label for="password" class="block text-green-800 text-sm font-bold mb-2">密码</label>
-                    <input type="password" id="password" name="password" required class="shadow-sm appearance-none border border-green-200 rounded-lg w-full py-3 px-4 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-green-500 bg-white/80">
+                    <label for="password" class="block text-sm font-bold mb-2 opacity-90">密码</label>
+                    <input type="password" id="password" name="password" required class="appearance-none border rounded-lg w-full py-3 px-4 leading-tight focus:outline-none focus:ring-2 focus:ring-green-500 bg-white/50" style="border-color: var(--input-border);">
                 </div>
 
-                <div class="mb-6">
-                    <label for="tfa_token" class="block text-green-800 text-sm font-bold mb-2">两步验证码 (2FA)</label>
-                    <input type="text" id="tfa_token" name="tfa_token" placeholder="如果启用了2FA，此项必填" autocomplete="off" class="shadow-sm appearance-none border border-green-200 rounded-lg w-full py-3 px-4 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-green-500 bg-white/80" pattern="[0-9]{6}" inputmode="numeric">
+                <div id="tfa-container" class="mb-6 hidden">
+                    <label for="tfa_token" class="block text-sm font-bold mb-2 opacity-90">两步验证码 (2FA)</label>
+                    <input type="text" id="tfa_token" name="tfa_token" placeholder="6位数字码" autocomplete="off" class="appearance-none border rounded-lg w-full py-3 px-4 leading-tight focus:outline-none focus:ring-2 focus:ring-green-500 bg-white/50" style="border-color: var(--input-border);" pattern="[0-9]{6}" inputmode="numeric">
                 </div>
 
-                <div class="flex items-center justify-between">
+                <div class="mt-8">
                     <button type="submit" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-lg focus:outline-none focus:shadow-outline transition-colors">
                         登 录
                     </button>
                 </div>
             </form>
         </div>
-        <div class="text-center mt-4 text-sm text-green-700">
-             © 2025 图片画廊
-        </div>
-    </div>
+    </main>
+    
+    <footer class="text-center p-6 text-sm opacity-60">
+        © 2025 图片画廊
+    </footer>
 
     <script>
+        // 1. 错误消息处理
         const urlParams = new URLSearchParams(window.location.search);
         if (urlParams.get('error') === '1') {
             document.getElementById('error-message-creds').classList.remove('hidden');
@@ -788,10 +819,25 @@ cat << 'EOF' > public/login.html
         if (urlParams.get('error') === '2') {
             document.getElementById('error-message-tfa').classList.remove('hidden');
         }
-    </script>
-    <script>
-        // 暗黑模式同步
+
+        // 2. 动态加载2FA输入框和暗黑模式
         document.addEventListener('DOMContentLoaded', function() {
+            // 动态显示2FA
+            const tfaContainer = document.getElementById('tfa-container');
+            const tfaInput = document.getElementById('tfa_token');
+            fetch('/api/2fa/is-enabled')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.enabled) {
+                        tfaContainer.classList.remove('hidden');
+                        tfaInput.required = true;
+                    }
+                })
+                .catch(err => {
+                    console.error('无法检查2FA状态:', err);
+                });
+
+            // 同步暗黑模式
             const storedTheme = localStorage.getItem('theme');
             const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
             if (storedTheme === 'dark' || (!storedTheme && prefersDark)) {
@@ -1314,10 +1360,14 @@ manage_2fa() {
         if [[ "$tfa_choice" == "1" || "$tfa_choice" == "2" ]]; then
             echo -e "${YELLOW}正在移除 2FA 配置...${NC}"
             if [ -f "$config_file" ]; then
-                # Read the file, remove the tfa key, and write it back
                 # This is safer than deleting the whole file if it contains other settings
-                local temp_config; temp_config=$(jq 'del(.tfa)' "$config_file")
-                echo "$temp_config" > "$config_file"
+                if command -v jq &> /dev/null; then
+                    local temp_config; temp_config=$(jq 'del(.tfa)' "$config_file")
+                    echo "$temp_config" > "$config_file"
+                else
+                    # Fallback for when jq is not installed
+                    rm -f "$config_file"
+                fi
             fi
             echo -e "${GREEN}2FA 配置已移除。${NC}"
             echo -e "${YELLOW}请注意：这仅移除了服务器端的密钥。您可能需要手动从您的 Authenticator 应用中删除旧的条目。${NC}"
@@ -1486,11 +1536,13 @@ show_menu() {
 }
 
 # --- 脚本主入口 ---
-# Add jq dependency check for 2FA management
-if ! command -v jq &> /dev/null; then
-    echo -e "${YELLOW}检测到 'jq' (JSON处理器) 未安装，部分高级功能(如2FA管理)可能受限。${NC}"
-    echo -e "${YELLOW}建议安装: sudo apt-get install jq / sudo dnf install jq / sudo yum install jq${NC}"
-fi
+check_jq() {
+    if ! command -v jq &> /dev/null; then
+        echo -e "${YELLOW}警告: 'jq' (JSON 处理器) 未安装，部分高级功能(如2FA管理)可能受限。${NC}"
+        echo -e "${YELLOW}建议安装: sudo apt-get install jq / sudo dnf install jq / sudo yum install jq${NC}"
+    fi
+}
+check_jq
 
 while true; do
     show_menu
