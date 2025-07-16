@@ -1,17 +1,14 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v0.1.3 已验证修复)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v0.1.5 新登录页)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
+#   v0.1.5 更新:
+#   - 优化 (前台): 根据用户提供的源码，全面更新登录页面(login.html)的视觉风格，与主画廊(index.html)保持一致。
+#   - 优化 (后台): 调整了登录接口(server.js)的错误处理逻辑，以匹配新版登录页面的错误提示。
 #   v0.1.3 更新:
 #   - 紧急修复 (后台): 创建并集成了缺失的`login.html`登录页面，解决了访问/admin时出现"Cannot GET /login.html"的致命错误。
-#   - 优化 (后台): 登录页面现在支持动态加载2FA输入框，并能根据URL参数显示友好的错误提示。
-#   - 优化 (后台): 增加了服务器根路径'/'到主画廊的重定向。
-#   v0.1.2 更新:
-#   - 紧急修复 (前台): 修正了v0.1.1中因JavaScript作用域错误导致图片和动画无法加载的严重BUG。
-#   - 优化 (前台): 重构了图片加载的事件处理方式，增强了Masonry布局的稳定性和可靠性。
-#   - 优化 (前台): 改进了画廊清空逻辑，提升了切换分类时的流畅度。
 # =================================================================
 
 # --- 配置 ---
@@ -22,7 +19,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 PROMPT_Y="(${GREEN}y${NC}/${RED}n${NC})"
 
-SCRIPT_VERSION="0.1.3"
+SCRIPT_VERSION="0.1.5"
 APP_NAME="image-gallery"
 
 # --- 路径设置 ---
@@ -49,7 +46,7 @@ overwrite_app_files() {
 cat << 'EOF' > package.json
 {
   "name": "image-gallery-pro",
-  "version": "0.1.3",
+  "version": "0.1.5",
   "description": "A high-performance, full-stack image gallery application with all features.",
   "main": "server.js",
   "scripts": {
@@ -152,18 +149,18 @@ app.post('/api/login', async (req, res) => {
         return res.redirect('/login.html?error=1');
     }
     
-    appConfig = await readDB(configPath, {});
-    if (appConfig.tfa && appConfig.tfa.secret) {
+    const currentConfig = await readDB(configPath, {});
+    if (currentConfig.tfa && currentConfig.tfa.secret) {
         if (!tfa_token) {
              return res.redirect('/login.html?error=2'); 
         }
         const verified = speakeasy.totp.verify({
-            secret: appConfig.tfa.secret,
+            secret: currentConfig.tfa.secret,
             encoding: 'base32',
             token: tfa_token,
         });
         if (!verified) {
-            return res.redirect('/login.html?error=3'); 
+            return res.redirect('/login.html?error=2'); 
         }
     }
 
@@ -425,6 +422,7 @@ apiAdminRouter.delete('/recycle-bin/:id/purge', async (req, res) => {
 
 // 2FA Management
 apiAdminRouter.get('/2fa/status', async(req, res) => {
+    appConfig = await readDB(configPath, {});
     res.json({ enabled: !!(appConfig.tfa && appConfig.tfa.secret) });
 });
 
@@ -438,6 +436,7 @@ apiAdminRouter.post('/2fa/generate', (req, res) => {
 
 apiAdminRouter.post('/2fa/enable', async (req, res) => {
     const { secret, token } = req.body;
+    appConfig = await readDB(configPath, {});
     const verified = speakeasy.totp.verify({ secret, encoding: 'base32', token });
 
     if (verified) {
@@ -450,6 +449,7 @@ apiAdminRouter.post('/2fa/enable', async (req, res) => {
 });
 
 apiAdminRouter.post('/2fa/disable', async (req, res) => {
+    appConfig = await readDB(configPath, {});
     delete appConfig.tfa;
     await writeDB(configPath, appConfig);
     res.json({ message: '2FA 已禁用。' });
@@ -718,92 +718,85 @@ cat << 'EOF' > public/login.html
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>管理员登录 - 图片画廊</title>
+    <title>后台登录 - 图片画廊</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
     <style>
         body {
-            font-family: 'Inter', 'Noto Sans SC', sans-serif;
-        }
-        .form-input {
-            @apply w-full px-4 py-3 rounded-lg bg-gray-200 mt-2 border focus:border-blue-500 focus:bg-white focus:outline-none;
-        }
-        .btn-primary {
-            @apply w-full block bg-green-600 hover:bg-green-700 focus:bg-green-700 text-white font-semibold rounded-lg px-4 py-3 mt-6 transition-colors;
+            background-color: #f0fdf4;
         }
     </style>
 </head>
-<body class="bg-gray-100">
-    <div class="min-h-screen flex items-center justify-center">
-        <div class="max-w-md w-full bg-white rounded-lg shadow-md p-8 m-4">
-            <h1 class="text-3xl font-bold text-center text-gray-800 mb-2">管理员登录</h1>
-            <p class="text-center text-gray-600 mb-8">欢迎回来，请登录以管理您的画廊。</p>
-            
-            <div id="error-banner" class="hidden bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-6" role="alert">
-                <strong class="font-bold">登录失败!</strong>
-                <span class="block sm:inline" id="error-message"></span>
+<body class="antialiased text-green-900">
+
+    <div class="absolute top-0 left-0 p-6">
+        <a href="/" class="text-green-800 hover:text-green-600 font-semibold transition-colors">
+            &larr; 返回主页
+        </a>
+    </div>
+    
+    <div class="min-h-screen flex flex-col items-center justify-center">
+        
+        <h1 class="text-4xl font-bold text-center text-green-900 mb-4">
+            图片画廊
+        </h1>
+        <p class="text-green-800 mb-8">管理员登录入口</p>
+        
+        <div class="max-w-md w-full bg-white/70 backdrop-blur-sm p-8 rounded-xl shadow-lg m-4">
+
+            <div id="error-message-creds" class="hidden bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg relative mb-4" role="alert">
+                <strong class="font-bold">登录失败！</strong>
+                <span class="block sm:inline">用户名或密码不正确。</span>
+            </div>
+            <div id="error-message-tfa" class="hidden bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg relative mb-4" role="alert">
+                <strong class="font-bold">验证失败！</strong>
+                <span class="block sm:inline">两步验证码(2FA)不正确或为空。</span>
             </div>
 
             <form action="/api/login" method="POST">
-                <div>
-                    <label class="block text-gray-700">用户名</label>
-                    <input type="text" name="username" id="username" placeholder="输入用户名" class="form-input" required autofocus>
+                <div class="mb-4">
+                    <label for="username" class="block text-green-800 text-sm font-bold mb-2">用户名</label>
+                    <input type="text" id="username" name="username" required autofocus class="shadow-sm appearance-none border border-green-200 rounded-lg w-full py-3 px-4 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-green-500 bg-white/80">
                 </div>
 
-                <div class="mt-4">
-                    <label class="block text-gray-700">密码</label>
-                    <input type="password" name="password" id="password" placeholder="输入密码" class="form-input" required>
+                <div class="mb-4">
+                    <label for="password" class="block text-green-800 text-sm font-bold mb-2">密码</label>
+                    <input type="password" id="password" name="password" required class="shadow-sm appearance-none border border-green-200 rounded-lg w-full py-3 px-4 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-green-500 bg-white/80">
                 </div>
 
-                <div id="tfa-container" class="mt-4 hidden">
-                     <label class="block text-gray-700">两步验证码 (2FA)</label>
-                    <input type="text" name="tfa_token" id="tfa_token" placeholder="输入6位数字码" class="form-input" pattern="[0-9]{6}" inputmode="numeric">
+                <div class="mb-6">
+                    <label for="tfa_token" class="block text-green-800 text-sm font-bold mb-2">两步验证码 (2FA)</label>
+                    <input type="text" id="tfa_token" name="tfa_token" placeholder="如果启用了2FA，此项必填" autocomplete="off" class="shadow-sm appearance-none border border-green-200 rounded-lg w-full py-3 px-4 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-green-500 bg-white/80" pattern="[0-9]{6}" inputmode="numeric">
                 </div>
 
-                <button type="submit" class="btn-primary">登 录</button>
+                <div class="flex items-center justify-between">
+                    <button type="submit" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-lg focus:outline-none focus:shadow-outline transition-colors">
+                        登 录
+                    </button>
+                </div>
             </form>
+        </div>
+        <div class="text-center mt-4 text-sm text-green-700">
+             © 2025 图片画廊
         </div>
     </div>
 
     <script>
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('error') === '1') {
+            document.getElementById('error-message-creds').classList.remove('hidden');
+        }
+        if (urlParams.get('error') === '2') {
+            document.getElementById('error-message-tfa').classList.remove('hidden');
+        }
+    </script>
+    <script>
+        // 暗黑模式同步
         document.addEventListener('DOMContentLoaded', function() {
-            // 1. 检查URL中是否有错误信息
-            const urlParams = new URLSearchParams(window.location.search);
-            const error = urlParams.get('error');
-            const errorBanner = document.getElementById('error-banner');
-            const errorMessage = document.getElementById('error-message');
-
-            if (error) {
-                let message = '未知错误，请重试。';
-                if (error === '1') {
-                    message = '用户名或密码不正确。';
-                } else if (error === '2') {
-                    message = '需要提供两步验证码。';
-                } else if (error === '3') {
-                    message = '两步验证码不正确或已失效。';
-                }
-                errorMessage.textContent = message;
-                errorBanner.classList.remove('hidden');
+            const storedTheme = localStorage.getItem('theme');
+            const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            if (storedTheme === 'dark' || (!storedTheme && prefersDark)) {
+                document.documentElement.classList.add('dark');
             }
-
-            // 2. 检查2FA是否启用，并动态显示输入框
-            const tfaContainer = document.getElementById('tfa-container');
-            const tfaInput = document.getElementById('tfa_token');
-            
-            fetch('/api/2fa/is-enabled')
-                .then(response => response.json())
-                .then(data => {
-                    if (data.enabled) {
-                        tfaContainer.classList.remove('hidden');
-                        tfaInput.required = true; // 如果启用了2FA，则验证码为必填项
-                    }
-                })
-                .catch(err => {
-                    console.error('无法检查2FA状态:', err);
-                    // 即使检查失败，也让用户可以尝试登录
-                });
         });
     </script>
 </body>
@@ -1320,7 +1313,12 @@ manage_2fa() {
         read -p "您想 [1] 禁用 2FA 还是 [2] 强制重置 2FA? (输入其他任意键取消): " tfa_choice
         if [[ "$tfa_choice" == "1" || "$tfa_choice" == "2" ]]; then
             echo -e "${YELLOW}正在移除 2FA 配置...${NC}"
-            rm -f "$config_file"
+            if [ -f "$config_file" ]; then
+                # Read the file, remove the tfa key, and write it back
+                # This is safer than deleting the whole file if it contains other settings
+                local temp_config; temp_config=$(jq 'del(.tfa)' "$config_file")
+                echo "$temp_config" > "$config_file"
+            fi
             echo -e "${GREEN}2FA 配置已移除。${NC}"
             echo -e "${YELLOW}请注意：这仅移除了服务器端的密钥。您可能需要手动从您的 Authenticator 应用中删除旧的条目。${NC}"
             echo -e "${YELLOW}正在重启应用...${NC}"
@@ -1488,6 +1486,12 @@ show_menu() {
 }
 
 # --- 脚本主入口 ---
+# Add jq dependency check for 2FA management
+if ! command -v jq &> /dev/null; then
+    echo -e "${YELLOW}检测到 'jq' (JSON处理器) 未安装，部分高级功能(如2FA管理)可能受限。${NC}"
+    echo -e "${YELLOW}建议安装: sudo apt-get install jq / sudo dnf install jq / sudo yum install jq${NC}"
+fi
+
 while true; do
     show_menu
 done
