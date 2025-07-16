@@ -1,15 +1,13 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v0.4.0 最终版)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v0.4.1 修复与增强)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
-#   v0.4.0 更新:
-#   - UI定稿 (后台): 根据最终确认，后台图库采用固定尺寸卡片布局。预览区使用固定方形尺寸和“完整显示”模式，以平衡布局整齐性与图片展示效果。
-#   - 交互优化 (后台): 删除图片后不再刷新页面，改为即时移除卡片。
-#   - 稳定性增强 (后台): 全面升级了API请求的错误处理机制。
-#   - 布局优化 (前台): 横向图片可占据两列宽度，视觉效果更佳。
-#   - 功能优化 (登录页): 2FA输入框仅在后台启用时动态显示。
+#   v0.4.1 更新:
+#   - 修复 (后台): 修复了图片预览按钮和分页按钮点击无响应的BUG。
+#   - 功能 (后台): 为回收站中的图片增加了预览功能。
+#   - 健壮性 (后台): 重构了分页逻辑，使其更直接、更稳定。
 # =================================================================
 
 # --- 配置 ---
@@ -20,7 +18,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 PROMPT_Y="(${GREEN}y${NC}/${RED}n${NC})"
 
-SCRIPT_VERSION="0.4.0"
+SCRIPT_VERSION="0.4.1"
 APP_NAME="image-gallery"
 
 # --- 路径设置 ---
@@ -47,7 +45,7 @@ overwrite_app_files() {
 cat << 'EOF' > package.json
 {
   "name": "image-gallery-pro",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "A high-performance, full-stack image gallery application with all features.",
   "main": "server.js",
   "scripts": {
@@ -752,10 +750,9 @@ cat << 'EOF' > public/admin.html
         .admin-image-card { transition: opacity 0.4s ease, transform 0.4s ease; }
         .admin-image-card.fading-out { opacity: 0; transform: scale(0.95); }
         
-        /* -- Final Backend Layout -- */
         .image-preview-container {
             height: 9rem; /* 144px. A balanced, fixed height. */
-            background-color: #f1f5f9; /* A light grey background for empty space */
+            background-color: #f1f5f9;
             border-radius: 0.25rem;
             overflow: hidden;
             display: flex;
@@ -921,10 +918,22 @@ cat << 'EOF' > public/admin.html
         async function loadImages(category, name) { DOMElements.imageLoader.classList.remove('hidden'); DOMElements.imageList.innerHTML = ''; DOMElements.paginationContainer.innerHTML = ''; try { const url = `/api/images?category=${category}&search=${encodeURIComponent(currentSearchTerm)}&page=${currentAdminPage}&limit=12`; const response = await apiRequest(url); const data = await response.json(); adminLoadedImages = data.images; const totalSize = adminLoadedImages.reduce((acc, img) => acc + (img.size || 0), 0); const titleText = currentSearchTerm ? `在 "${name}" 中搜索 "${currentSearchTerm}"` : name; DOMElements.imageListHeader.innerHTML = `${titleText} <span class="text-base text-gray-500 font-normal">(共 ${data.totalImages} 张)</span>`; if (adminLoadedImages.length === 0) { DOMElements.imageList.innerHTML = '<p class="text-slate-500 col-span-full text-center py-10">没有找到图片。</p>'; } else { adminLoadedImages.forEach(renderImageCard); } renderPaginationControls(data.page, data.totalPages); } catch (error) { if(error.message !== 'Unauthorized') DOMElements.imageList.innerHTML = `<p class="text-red-500 col-span-full text-center py-10">加载图片失败: ${error.message}</p>`; } finally { DOMElements.imageLoader.classList.add('hidden'); } }
         async function loadRecycleBin() { DOMElements.imageLoader.classList.remove('hidden'); DOMElements.imageList.innerHTML = ''; DOMElements.paginationContainer.innerHTML = ''; try { const url = `/api/admin/recycle-bin?search=${encodeURIComponent(currentSearchTerm)}&page=${currentAdminPage}&limit=12`; const response = await apiRequest(url); const data = await response.json(); adminLoadedImages = data.images; const titleText = currentSearchTerm ? `在回收站中搜索 "${currentSearchTerm}"` : "回收站"; DOMElements.imageListHeader.innerHTML = `${titleText}`; if (adminLoadedImages.length === 0) { DOMElements.imageList.innerHTML = '<p class="text-slate-500 col-span-full text-center py-10">回收站是空的。</p>'; } else { adminLoadedImages.forEach(renderPurgeableImageCard); } renderPaginationControls(data.page, data.totalPages); } catch (error) { if (error.message !== 'Unauthorized') DOMElements.imageList.innerHTML = `<p class="text-red-500 col-span-full text-center py-10">加载回收站失败: ${error.message}</p>`; } finally { DOMElements.imageLoader.classList.add('hidden'); } }
 
-        function renderImageCard(image) { const card = document.createElement('div'); card.className = 'admin-image-card border rounded-lg shadow-sm bg-white overflow-hidden flex flex-col'; card.innerHTML = `<a class="image-preview-container" data-id="${image.id}"><img src="/image-proxy/${image.filename}?w=400" alt="${image.description}"></a><div class="p-3 flex-grow flex flex-col"><p class="font-bold text-sm truncate" title="${image.originalFilename}">${image.originalFilename}</p><p class="text-xs text-slate-500 -mt-1 mb-2">${formatBytes(image.size)}</p><p class="text-xs text-slate-500 mb-2">${image.category}</p><p class="text-xs text-slate-600 flex-grow mb-3 break-words">${image.description || '无描述'}</p></div><div class="bg-slate-50 p-2 flex justify-end items-center gap-1"><button title="预览" data-id="${image.id}" class="preview-btn p-2 rounded-full text-slate-600 hover:bg-slate-200 hover:text-slate-800 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg></button><a href="${image.src}" download="${image.originalFilename}" title="下载" class="download-btn p-2 rounded-full text-slate-600 hover:bg-slate-200 hover:text-slate-800 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg></a><button title="编辑" data-image='${JSON.stringify(image)}' class="edit-btn p-2 rounded-full text-slate-600 hover:bg-slate-200 hover:text-slate-800 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487zm0 0L19.5 7.125" /></svg></button><button title="移至回收站" data-id="${image.id}" class="delete-btn p-2 rounded-full text-red-500 hover:bg-red-100 hover:text-red-700 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.134-2.036-2.134H8.718c-1.126 0-2.037.955-2.037 2.134v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg></button></div>`; DOMElements.imageList.appendChild(card); }
-        function renderPurgeableImageCard(image) { const card = document.createElement('div'); card.className = 'admin-image-card border rounded-lg shadow-sm bg-white overflow-hidden flex flex-col'; card.innerHTML = `<a class="image-preview-container" data-id="${image.id}"><img src="/image-proxy/${image.filename}?w=400" alt="${image.description || image.originalFilename}"></a><div class="p-3 flex-grow flex flex-col space-y-2"><p class="font-bold text-sm truncate" title="${image.originalFilename}">${image.originalFilename}</p><div class="text-xs text-slate-500 space-y-1"><p><strong>大小:</strong> ${formatBytes(image.size)}</p><p><strong>分类:</strong> ${image.category}</p></div><p class="text-xs text-slate-600 flex-grow break-words">${image.description || '无描述'}</p><p class="text-xs text-red-500 mt-2"><strong>删除于:</strong> ${new Date(image.deletedAt).toLocaleString()}</p></div><div class="bg-slate-50 p-2 flex justify-end items-center gap-1"><button title="恢复" data-id="${image.id}" class="restore-btn p-2 rounded-full text-green-600 hover:bg-green-100 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" /></svg></button><button title="彻底删除" data-id="${image.id}" class="purge-btn p-2 rounded-full text-red-500 hover:bg-red-100 hover:text-red-700 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.134-2.036-2.134H8.718c-1.126 0-2.037.955-2.037 2.134v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg></button></div>`; DOMElements.imageList.appendChild(card); }
+        function renderImageCard(image) { const card = document.createElement('div'); card.className = 'admin-image-card border rounded-lg shadow-sm bg-white overflow-hidden flex flex-col'; card.innerHTML = `<a class="image-preview-container preview-btn" data-id="${image.id}"><img src="/image-proxy/${image.filename}?w=400" alt="${image.description}"></a><div class="p-3 flex-grow flex flex-col"><p class="font-bold text-sm truncate" title="${image.originalFilename}">${image.originalFilename}</p><p class="text-xs text-slate-500 -mt-1 mb-2">${formatBytes(image.size)}</p><p class="text-xs text-slate-500 mb-2">${image.category}</p><p class="text-xs text-slate-600 flex-grow mb-3 break-words">${image.description || '无描述'}</p></div><div class="bg-slate-50 p-2 flex justify-end items-center gap-1"><button title="预览" data-id="${image.id}" class="preview-btn p-2 rounded-full text-slate-600 hover:bg-slate-200 hover:text-slate-800 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg></button><a href="${image.src}" download="${image.originalFilename}" title="下载" class="download-btn p-2 rounded-full text-slate-600 hover:bg-slate-200 hover:text-slate-800 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg></a><button title="编辑" data-image='${JSON.stringify(image)}' class="edit-btn p-2 rounded-full text-slate-600 hover:bg-slate-200 hover:text-slate-800 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487zm0 0L19.5 7.125" /></svg></button><button title="移至回收站" data-id="${image.id}" class="delete-btn p-2 rounded-full text-red-500 hover:bg-red-100 hover:text-red-700 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.134-2.036-2.134H8.718c-1.126 0-2.037.955-2.037 2.134v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg></button></div>`; DOMElements.imageList.appendChild(card); }
+        function renderPurgeableImageCard(image) { const card = document.createElement('div'); card.className = 'admin-image-card border rounded-lg shadow-sm bg-white overflow-hidden flex flex-col'; card.innerHTML = `<a class="image-preview-container preview-btn" data-id="${image.id}"><img src="/image-proxy/${image.filename}?w=400" alt="${image.description || image.originalFilename}"></a><div class="p-3 flex-grow flex flex-col space-y-2"><p class="font-bold text-sm truncate" title="${image.originalFilename}">${image.originalFilename}</p><div class="text-xs text-slate-500 space-y-1"><p><strong>大小:</strong> ${formatBytes(image.size)}</p><p><strong>分类:</strong> ${image.category}</p></div><p class="text-xs text-slate-600 flex-grow break-words">${image.description || '无描述'}</p><p class="text-xs text-red-500 mt-2"><strong>删除于:</strong> ${new Date(image.deletedAt).toLocaleString()}</p></div><div class="bg-slate-50 p-2 flex justify-end items-center gap-1"><button title="预览" data-id="${image.id}" class="preview-btn p-2 rounded-full text-slate-600 hover:bg-slate-200 hover:text-slate-800 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg></button><button title="恢复" data-id="${image.id}" class="restore-btn p-2 rounded-full text-green-600 hover:bg-green-100 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" /></svg></button><button title="彻底删除" data-id="${image.id}" class="purge-btn p-2 rounded-full text-red-500 hover:bg-red-100 hover:text-red-700 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.134-2.036-2.134H8.718c-1.126 0-2.037.955-2.037 2.134v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg></button></div>`; DOMElements.imageList.appendChild(card); }
         
-        const changePage = (page) => { currentAdminPage = page; const activeNav = document.querySelector('.nav-item.active'); if (activeNav) { activeNav.click(); } };
+        const changePage = (page) => {
+            currentAdminPage = page;
+            const activeNav = document.querySelector('.nav-item.active');
+            if (!activeNav) return;
+            const view = activeNav.dataset.view;
+            const categoryName = activeNav.dataset.categoryName;
+            const headerText = activeNav.querySelector('.category-name')?.textContent || '所有图片';
+            if (view === 'recycle_bin') {
+                loadRecycleBin();
+            } else {
+                loadImages(categoryName || 'all', headerText);
+            }
+        };
         function renderPaginationControls(currentPage, totalPages) {
             if (totalPages <= 1) { DOMElements.paginationContainer.innerHTML = ''; return; }
             let html = '<div class="flex items-center space-x-1">';
@@ -957,13 +966,16 @@ cat << 'EOF' > public/admin.html
             navItem.classList.add('active');
             DOMElements.searchInput.value = ''; currentSearchTerm = ''; currentAdminPage = 1;
             const view = navItem.dataset.view;
-            if (view === 'all') { await loadImages('all', '所有图片'); }
+            const categoryName = navItem.dataset.categoryName;
+            const headerText = navItem.querySelector('.category-name')?.textContent || '所有图片';
+            if (view === 'all') { await loadImages('all', headerText); }
             else if (view === 'recycle_bin') { await loadRecycleBin(); }
-            else if (view === 'category') { const category = navItem.dataset.categoryName; await loadImages(category, category); }
+            else if (view === 'category') { await loadImages(categoryName, headerText); }
         });
         
         DOMElements.imageList.addEventListener('click', async (e) => {
             const button = e.target.closest('button, a'); if (!button) return;
+            if (!button.matches('.preview-btn, .edit-btn, .delete-btn, .restore-btn, .purge-btn, .download-btn')) return;
             const imageId = button.dataset.id;
             const card = button.closest('.admin-image-card');
 
