@@ -1,9 +1,13 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v0.1.2 修复版)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v0.1.3 修复版)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
+#   v0.1.3 更新:
+#   - 紧急修复 (后台): 创建并集成了缺失的`login.html`登录页面，解决了访问/admin时出现"Cannot GET /login.html"的致命错误。
+#   - 优化 (后台): 登录页面现在支持动态加载2FA输入框，并能根据URL参数显示友好的错误提示。
+#   - 优化 (后台): 增加了服务器根路径'/'到主画廊的重定向。
 #   v0.1.2 更新:
 #   - 紧急修复 (前台): 修正了v0.1.1中因JavaScript作用域错误导致图片和动画无法加载的严重BUG。
 #   - 优化 (前台): 重构了图片加载的事件处理方式，增强了Masonry布局的稳定性和可靠性。
@@ -18,7 +22,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 PROMPT_Y="(${GREEN}y${NC}/${RED}n${NC})"
 
-SCRIPT_VERSION="0.1.2"
+SCRIPT_VERSION="0.1.3"
 APP_NAME="image-gallery"
 
 # --- 路径设置 ---
@@ -45,7 +49,7 @@ overwrite_app_files() {
 cat << 'EOF' > package.json
 {
   "name": "image-gallery-pro",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "A high-performance, full-stack image gallery application with all features.",
   "main": "server.js",
   "scripts": {
@@ -128,6 +132,14 @@ const authMiddleware = (isApi) => (req, res, next) => {
 const requirePageAuth = authMiddleware(false);
 const requireApiAuth = authMiddleware(true);
 
+// --- Frontend Page Routes ---
+app.get('/', (req, res) => res.redirect('/index.html'));
+app.get('/login.html', (req, res) => res.sendFile(path.join(__dirname, 'public', 'login.html')));
+app.get('/admin.html', requirePageAuth, (req, res) => res.sendFile(path.join(__dirname, 'public', 'admin.html')));
+app.get('/admin', requirePageAuth, (req, res) => res.redirect('/admin.html'));
+
+
+// --- Public API Routes ---
 app.get('/api/2fa/is-enabled', async (req, res) => {
     const currentConfig = await readDB(configPath, {});
     const isEnabled = !!(currentConfig.tfa && currentConfig.tfa.secret);
@@ -161,8 +173,6 @@ app.post('/api/login', async (req, res) => {
 });
 
 app.get('/api/logout', (req, res) => { res.clearCookie(AUTH_TOKEN_NAME); res.redirect('/login.html'); });
-app.get('/admin.html', requirePageAuth, (req, res) => res.sendFile(path.join(__dirname, 'public', 'admin.html')));
-app.get('/admin', requirePageAuth, (req, res) => res.redirect('/admin.html'));
 
 app.get('/api/images', async (req, res) => {
     let images = await readDB(dbPath);
@@ -700,6 +710,106 @@ cat << 'EOF' > public/index.html
 </body>
 </html>
 EOF
+
+    echo "--> 正在生成登录页 public/login.html (v0.1.3)..."
+cat << 'EOF' > public/login.html
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>管理员登录 - 图片画廊</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', 'Noto Sans SC', sans-serif;
+        }
+        .form-input {
+            @apply w-full px-4 py-3 rounded-lg bg-gray-200 mt-2 border focus:border-blue-500 focus:bg-white focus:outline-none;
+        }
+        .btn-primary {
+            @apply w-full block bg-green-600 hover:bg-green-700 focus:bg-green-700 text-white font-semibold rounded-lg px-4 py-3 mt-6 transition-colors;
+        }
+    </style>
+</head>
+<body class="bg-gray-100">
+    <div class="min-h-screen flex items-center justify-center">
+        <div class="max-w-md w-full bg-white rounded-lg shadow-md p-8 m-4">
+            <h1 class="text-3xl font-bold text-center text-gray-800 mb-2">管理员登录</h1>
+            <p class="text-center text-gray-600 mb-8">欢迎回来，请登录以管理您的画廊。</p>
+            
+            <div id="error-banner" class="hidden bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-6" role="alert">
+                <strong class="font-bold">登录失败!</strong>
+                <span class="block sm:inline" id="error-message"></span>
+            </div>
+
+            <form action="/api/login" method="POST">
+                <div>
+                    <label class="block text-gray-700">用户名</label>
+                    <input type="text" name="username" id="username" placeholder="输入用户名" class="form-input" required autofocus>
+                </div>
+
+                <div class="mt-4">
+                    <label class="block text-gray-700">密码</label>
+                    <input type="password" name="password" id="password" placeholder="输入密码" class="form-input" required>
+                </div>
+
+                <div id="tfa-container" class="mt-4 hidden">
+                     <label class="block text-gray-700">两步验证码 (2FA)</label>
+                    <input type="text" name="tfa_token" id="tfa_token" placeholder="输入6位数字码" class="form-input" pattern="[0-9]{6}" inputmode="numeric">
+                </div>
+
+                <button type="submit" class="btn-primary">登 录</button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // 1. 检查URL中是否有错误信息
+            const urlParams = new URLSearchParams(window.location.search);
+            const error = urlParams.get('error');
+            const errorBanner = document.getElementById('error-banner');
+            const errorMessage = document.getElementById('error-message');
+
+            if (error) {
+                let message = '未知错误，请重试。';
+                if (error === '1') {
+                    message = '用户名或密码不正确。';
+                } else if (error === '2') {
+                    message = '需要提供两步验证码。';
+                } else if (error === '3') {
+                    message = '两步验证码不正确或已失效。';
+                }
+                errorMessage.textContent = message;
+                errorBanner.classList.remove('hidden');
+            }
+
+            // 2. 检查2FA是否启用，并动态显示输入框
+            const tfaContainer = document.getElementById('tfa-container');
+            const tfaInput = document.getElementById('tfa_token');
+            
+            fetch('/api/2fa/is-enabled')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.enabled) {
+                        tfaContainer.classList.remove('hidden');
+                        tfaInput.required = true; // 如果启用了2FA，则验证码为必填项
+                    }
+                })
+                .catch(err => {
+                    console.error('无法检查2FA状态:', err);
+                    // 即使检查失败，也让用户可以尝试登录
+                });
+        });
+    </script>
+</body>
+</html>
+EOF
+
 
     echo "--> 正在生成后台管理页 public/admin.html..."
 cat << 'EOF' > public/admin.html
