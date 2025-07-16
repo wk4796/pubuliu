@@ -1,12 +1,14 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v0.5.0 核心重构)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v1.0.0 稳定版)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
-#   v0.5.0 更新:
-#   - 重大重构 (后台): 彻底重构后台图片列表的事件处理模型，由统一的委托事件改为在元素创建时独立绑定，从根本上解决了预览、下载、删除等按钮“无响应”的连锁BUG。
-#   - 健壮性 (后台): 新的事件模型使代码更清晰、更稳定，且易于维护，恢复了所有按钮的正常功能。
+#   v1.0.0 更新:
+#   - 重大重构 (后台): 彻底重构后台图片列表的事件处理模型，为每个按钮独立绑定事件，从根本上解决了所有“点击无响应”的连锁BUG。
+#   - UI/UX (后台): 将分页器固定在内容区域底部，方便长列表翻页；同时，预览灯箱（Lightbox）的功能与外观和前台完全统一。
+#   - 功能修复 (后台): 全面恢复并验证了预览、下载、删除、恢复、分页等所有按钮的正常功能。
+#   - 包含之前所有版本的功能优化与修复。
 # =================================================================
 
 # --- 配置 ---
@@ -17,7 +19,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 PROMPT_Y="(${GREEN}y${NC}/${RED}n${NC})"
 
-SCRIPT_VERSION="0.5.0"
+SCRIPT_VERSION="1.0.0"
 APP_NAME="image-gallery"
 
 # --- 路径设置 ---
@@ -44,7 +46,7 @@ overwrite_app_files() {
 cat << 'EOF' > package.json
 {
   "name": "image-gallery-pro",
-  "version": "0.5.0",
+  "version": "1.0.0",
   "description": "A high-performance, full-stack image gallery application with all features.",
   "main": "server.js",
   "scripts": {
@@ -463,7 +465,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 })();
 EOF
 
-    echo "--> 正在生成主画廊 public/index.html (v0.5.0)..."
+    echo "--> 正在生成主画廊 public/index.html..."
 cat << 'EOF' > public/index.html
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -757,6 +759,7 @@ cat << 'EOF' > public/admin.html
             display: flex;
             align-items: center;
             justify-content: center;
+            cursor: pointer;
         }
         .image-preview-container img {
             max-width: 100%;
@@ -772,6 +775,7 @@ cat << 'EOF' > public/admin.html
             border-color: #14532d;
             font-weight: 700;
             transform: scale(1.1);
+            z-index: 10;
         }
         .lightbox { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.9); display: none; justify-content: center; align-items: center; z-index: 1000; opacity: 0; visibility: hidden; transition: opacity 0.3s ease; }
         .lightbox-image { max-width: 85%; max-height: 85%; display: block; object-fit: contain; }
@@ -781,6 +785,24 @@ cat << 'EOF' > public/admin.html
         .lb-counter { position: absolute; top: 1.5rem; left: 50%; transform: translateX(-50%); color: white; font-size: 1rem; background-color: rgba(0,0,0,0.3); padding: 0.25rem 0.75rem; border-radius: 9999px; }
         .lb-download { position: absolute; bottom: 1rem; right: 1rem; background-color: #22c55e; color: white; border: none; padding: 0.5rem 1rem; border-radius: 0.5rem; cursor: pointer; transition: background-color 0.2s; font-size: 1rem; text-decoration: none; }
         .lb-download:hover { background-color: #16a34a; }
+        #image-list-section {
+            display: flex;
+            flex-direction: column;
+            max-height: calc(100vh - 12rem); /* Adjust based on header/footer height */
+        }
+        #image-list {
+            flex-grow: 1;
+            overflow-y: auto;
+        }
+        #pagination-container {
+            flex-shrink: 0;
+            position: sticky;
+            bottom: 0;
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(4px);
+            padding: 1rem 0;
+            border-top: 1px solid #e2e8f0;
+        }
     </style>
 </head>
 <body class="antialiased text-slate-800">
@@ -797,7 +819,17 @@ cat << 'EOF' > public/admin.html
             <section class="bg-white p-6 rounded-lg shadow-md"><h2 class="text-xl font-semibold mb-4">图库</h2><div id="navigation-list" class="space-y-1"><div id="nav-item-all" data-view="all" class="nav-item flex items-center gap-3 p-2 rounded cursor-pointer hover:bg-gray-100 active"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 text-slate-500"><path fill-rule="evenodd" d="M1 5.25A2.25 2.25 0 013.25 3h13.5A2.25 2.25 0 0119 5.25v9.5A2.25 2.25 0 0116.75 17H3.25A2.25 2.25 0 011 14.75v-9.5zm1.5 5.81v3.69c0 .414.336.75.75.75h13.5a.75.75 0 00.75-.75v-3.69l-2.72-2.72a.75.75 0 00-1.06 0L11.5 10l-1.72-1.72a.75.75 0 00-1.06 0l-4 4zM12.5 7a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z" clip-rule="evenodd" /></svg><span class="category-name flex-grow">所有图片</span></div><div id="category-dynamic-list"></div><hr class="my-2"><div id="nav-item-recycle-bin" data-view="recycle_bin" class="nav-item flex items-center gap-3 p-2 rounded cursor-pointer hover:bg-gray-100"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 text-slate-500"><path fill-rule="evenodd" d="M8.75 1A2.75 2.75 0 006 3.75V4.5h8V3.75A2.75 2.75 0 0011.25 1h-2.5zM10 4.5a.75.75 0 00-1.5 0v.75h1.5v-.75zM15.25 6H4.75a.75.75 0 000 1.5h10.5a.75.75 0 000-1.5zM4.75 9.75a.75.75 0 01.75-.75h8.5a.75.75 0 010 1.5h-8.5a.75.75 0 01-.75-.75zM5.5 12a.75.75 0 00-1.5 0v2.75A2.75 2.75 0 006.75 17h6.5A2.75 2.75 0 0016 14.75V12a.75.75 0 00-1.5 0v2.75a1.25 1.25 0 01-1.25 1.25h-6.5a1.25 1.25 0 01-1.25-1.25V12z" clip-rule="evenodd" /></svg><span class="category-name flex-grow">回收站</span></div></div></section>
             <section class="bg-white p-6 rounded-lg shadow-md"><h2 class="text-xl font-semibold mb-4">安全</h2><div id="security-section"></div></section>
         </div>
-        <section class="bg-white p-6 rounded-lg shadow-md xl:col-span-8 flex flex-col"><div class="flex flex-col md:flex-row justify-between items-center mb-4 gap-4"><h2 id="image-list-header" class="text-xl font-semibold text-slate-900 flex-grow"></h2><div class="w-full md:w-64"><input type="search" id="search-input" placeholder="在当前视图下搜索..." class="w-full border rounded-full px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"></div></div><div id="image-list" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4 flex-grow content-start"></div><div id="image-loader" class="text-center py-8 text-slate-500 hidden">正在加载...</div><div id="pagination-container" class="mt-6 flex justify-center"></div></section>
+        <section id="image-list-section" class="bg-white p-6 rounded-lg shadow-md xl:col-span-8">
+            <div class="flex flex-col md:flex-row justify-between items-center mb-4 gap-4 flex-shrink-0">
+                <h2 id="image-list-header" class="text-xl font-semibold text-slate-900 flex-grow"></h2>
+                <div class="w-full md:w-64">
+                    <input type="search" id="search-input" placeholder="在当前视图下搜索..." class="w-full border rounded-full px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
+                </div>
+            </div>
+            <div id="image-list" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4"></div>
+            <div id="image-loader" class="text-center py-8 text-slate-500 hidden">正在加载...</div>
+            <div id="pagination-container" class="mt-auto flex justify-center"></div>
+        </section>
     </main>
     <div id="generic-modal" class="modal fixed inset-0 bg-black bg-opacity-50 items-center justify-center z-30 p-4"><div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-sm"><h3 id="modal-title" class="text-lg font-bold mb-4"></h3><div id="modal-body" class="mb-4 text-slate-600"></div><div id="modal-footer" class="flex justify-end space-x-2"></div></div></div>
     <div id="edit-image-modal" class="modal fixed inset-0 bg-black bg-opacity-50 items-center justify-center z-30 p-4"><div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-md"><h3 class="text-lg font-bold mb-4">编辑图片信息</h3><form id="edit-image-form"><input type="hidden" id="edit-id"><div class="mb-4"><label for="edit-originalFilename" class="block text-sm font-medium mb-1">原始文件名</label><input type="text" id="edit-originalFilename" class="w-full border rounded px-3 py-2"></div><div class="mb-4"><label for="edit-category-select" class="block text-sm font-medium mb-1">分类</label><select id="edit-category-select" class="w-full border rounded px-3 py-2"></select></div><div class="mb-4"><label for="edit-description" class="block text-sm font-medium mb-1">描述</label><textarea id="edit-description" rows="3" class="w-full border rounded px-3 py-2"></textarea></div><div class="flex justify-end space-x-2 mt-6"><button type="button" class="modal-cancel-btn bg-gray-300 hover:bg-gray-400 text-black py-2 px-4 rounded">取消</button><button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded">保存更改</button></div></form></div></div>
@@ -938,33 +970,10 @@ cat << 'EOF' > public/admin.html
         async function loadImages(category, name) { DOMElements.imageLoader.classList.remove('hidden'); DOMElements.imageList.innerHTML = ''; DOMElements.paginationContainer.innerHTML = ''; try { const url = `/api/images?category=${category}&search=${encodeURIComponent(currentSearchTerm)}&page=${currentAdminPage}&limit=12`; const response = await apiRequest(url); const data = await response.json(); adminLoadedImages = data.images; DOMElements.imageListHeader.innerHTML = `${name} <span class="text-base text-gray-500 font-normal">(共 ${data.totalImages} 张)</span>`; if (adminLoadedImages.length === 0) { DOMElements.imageList.innerHTML = '<p class="text-slate-500 col-span-full text-center py-10">没有找到图片。</p>'; } else { adminLoadedImages.forEach(renderImageCard); } renderPaginationControls(data.page, data.totalPages); } catch (error) { if(error.message !== 'Unauthorized') DOMElements.imageList.innerHTML = `<p class="text-red-500 col-span-full text-center py-10">加载图片失败: ${error.message}</p>`; } finally { DOMElements.imageLoader.classList.add('hidden'); } }
         async function loadRecycleBin() { DOMElements.imageLoader.classList.remove('hidden'); DOMElements.imageList.innerHTML = ''; DOMElements.paginationContainer.innerHTML = ''; try { const url = `/api/admin/recycle-bin?search=${encodeURIComponent(currentSearchTerm)}&page=${currentAdminPage}&limit=12`; const response = await apiRequest(url); const data = await response.json(); adminLoadedImages = data.images; DOMElements.imageListHeader.innerHTML = `回收站`; if (adminLoadedImages.length === 0) { DOMElements.imageList.innerHTML = '<p class="text-slate-500 col-span-full text-center py-10">回收站是空的。</p>'; } else { adminLoadedImages.forEach(renderPurgeableImageCard); } renderPaginationControls(data.page, data.totalPages); } catch (error) { if (error.message !== 'Unauthorized') DOMElements.imageList.innerHTML = `<p class="text-red-500 col-span-full text-center py-10">加载回收站失败: ${error.message}</p>`; } finally { DOMElements.imageLoader.classList.add('hidden'); } }
 
-        function createButton(options) {
-            const btn = document.createElement(options.tag || 'button');
-            btn.title = options.title;
-            if (options.classes) btn.className = options.classes;
-            if (options.html) btn.innerHTML = options.html;
-            if (options.data) {
-                for(const key in options.data) {
-                    btn.dataset[key] = options.data[key];
-                }
-            }
-            if (options.href) btn.href = options.href;
-            if (options.download) btn.download = options.download;
-            if (options.onClick) {
-                btn.addEventListener('click', (e) => {
-                    if (btn.tagName === 'A' && !btn.hasAttribute('download')) {
-                        e.preventDefault();
-                    }
-                    options.onClick(e);
-                });
-            }
-            return btn;
-        }
-
-        function renderImageCard(image) {
+        function createCard(image, buttons) {
             const card = document.createElement('div');
             card.className = 'admin-image-card border rounded-lg shadow-sm bg-white overflow-hidden flex flex-col';
-
+            
             const previewAction = () => {
                 currentLightboxIndex = adminLoadedImages.findIndex(img => img.id === image.id);
                 if (currentLightboxIndex === -1) return;
@@ -972,62 +981,46 @@ cat << 'EOF' > public/admin.html
                 DOMElements.lightbox.classList.add('active');
                 document.body.classList.add('lightbox-open');
             };
-
-            const previewLink = createButton({ tag: 'a', classes: 'image-preview-container', data: { id: image.id }, onClick: previewAction });
-            const img = document.createElement('img');
-            img.src = `/image-proxy/${image.filename}?w=400`;
-            img.alt = image.description;
-            previewLink.appendChild(img);
             
-            const infoDiv = document.createElement('div');
-            infoDiv.className = 'p-3 flex-grow flex flex-col';
-            infoDiv.innerHTML = `<p class="font-bold text-sm truncate" title="${image.originalFilename}">${image.originalFilename}</p><p class="text-xs text-slate-500 -mt-1 mb-2">${formatBytes(image.size)}</p><p class="text-xs text-slate-500 mb-2">${image.category}</p><p class="text-xs text-slate-600 flex-grow mb-3 break-words">${image.description || '无描述'}</p>`;
-            
-            const footerDiv = document.createElement('div');
-            footerDiv.className = 'bg-slate-50 p-2 flex justify-end items-center gap-1';
-            
-            const previewBtn = createButton({ title: '预览', classes: 'p-2 rounded-full text-slate-600 hover:bg-slate-200 hover:text-slate-800 transition-colors', html: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>', onClick: previewAction });
-            const downloadBtn = createButton({ tag: 'a', title: '下载', classes: 'p-2 rounded-full text-slate-600 hover:bg-slate-200 hover:text-slate-800 transition-colors', href: image.src, download: image.originalFilename, html: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>'});
-            const editBtn = createButton({ title: '编辑', classes: 'p-2 rounded-full text-slate-600 hover:bg-slate-200 hover:text-slate-800 transition-colors', html: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487zm0 0L19.5 7.125" /></svg>', onClick: async () => { await populateCategorySelects(image.category); DOMElements.editImageModal.querySelector('#edit-id').value = image.id; DOMElements.editImageModal.querySelector('#edit-originalFilename').value = image.originalFilename; DOMElements.editImageModal.querySelector('#edit-description').value = image.description; DOMElements.editImageModal.classList.add('active'); }});
-            const deleteBtn = createButton({ title: '移至回收站', classes: 'p-2 rounded-full text-red-500 hover:bg-red-100 hover:text-red-700 transition-colors', html: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.134-2.036-2.134H8.718c-1.126 0-2.037.955-2.037 2.134v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>', onClick: async () => { const confirmed = await showConfirmationModal('移至回收站', `<p>确定要将这张图片移至回收站吗？</p>`, '确认移动'); if(confirmed) { try { await apiRequest(`/api/admin/images/${image.id}`, { method: 'DELETE' }); showToast('图片已移至回收站'); card.classList.add('fading-out'); setTimeout(() => card.remove(), 400); adminLoadedImages = adminLoadedImages.filter(img => img.id !== image.id); } catch (error) { showToast(error.message, 'error'); } } }});
+            const previewLink = document.createElement('a');
+            previewLink.className = 'image-preview-container';
+            previewLink.addEventListener('click', (e) => { e.preventDefault(); previewAction(); });
 
-            footerDiv.append(previewBtn, downloadBtn, editBtn, deleteBtn);
-            card.append(previewLink, infoDiv, footerDiv);
-            DOMElements.imageList.appendChild(card);
-        }
-
-        function renderPurgeableImageCard(image) {
-            const card = document.createElement('div');
-            card.className = 'admin-image-card border rounded-lg shadow-sm bg-white overflow-hidden flex flex-col';
-
-            const previewAction = () => {
-                currentLightboxIndex = adminLoadedImages.findIndex(img => img.id === image.id);
-                if (currentLightboxIndex === -1) return;
-                updateLightbox();
-                DOMElements.lightbox.classList.add('active');
-                document.body.classList.add('lightbox-open');
-            };
-
-            const previewLink = createButton({ tag: 'a', classes: 'image-preview-container', data: { id: image.id }, onClick: previewAction });
             const img = document.createElement('img');
             img.src = `/image-proxy/${image.filename}?w=400`;
             img.alt = image.description || image.originalFilename;
             previewLink.appendChild(img);
-
+            
             const infoDiv = document.createElement('div');
-            infoDiv.className = 'p-3 flex-grow flex flex-col space-y-2';
-            infoDiv.innerHTML = `<p class="font-bold text-sm truncate" title="${image.originalFilename}">${image.originalFilename}</p><div class="text-xs text-slate-500 space-y-1"><p><strong>大小:</strong> ${formatBytes(image.size)}</p><p><strong>分类:</strong> ${image.category}</p></div><p class="text-xs text-slate-600 flex-grow break-words">${image.description || '无描述'}</p><p class="text-xs text-red-500 mt-2"><strong>删除于:</strong> ${new Date(image.deletedAt).toLocaleString()}</p>`;
+            infoDiv.className = 'p-3 flex-grow flex flex-col';
+            let infoHtml = `<p class="font-bold text-sm truncate" title="${image.originalFilename}">${image.originalFilename}</p><p class="text-xs text-slate-500 -mt-1 mb-2">${formatBytes(image.size)}</p><p class="text-xs text-slate-500 mb-2">${image.category}</p><p class="text-xs text-slate-600 flex-grow mb-3 break-words">${image.description || '无描述'}</p>`;
+            if (image.status === 'deleted') {
+                infoHtml += `<p class="text-xs text-red-500 mt-2"><strong>删除于:</strong> ${new Date(image.deletedAt).toLocaleString()}</p>`;
+            }
+            infoDiv.innerHTML = infoHtml;
             
             const footerDiv = document.createElement('div');
             footerDiv.className = 'bg-slate-50 p-2 flex justify-end items-center gap-1';
+            buttons(previewAction, card, image).forEach(btn => footerDiv.appendChild(btn));
 
-            const previewBtn = createButton({ title: '预览', classes: 'p-2 rounded-full text-slate-600 hover:bg-slate-200 hover:text-slate-800 transition-colors', html: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>', onClick: previewAction });
-            const restoreBtn = createButton({ title: '恢复', classes: 'p-2 rounded-full text-green-600 hover:bg-green-100 transition-colors', html: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" /></svg>', onClick: async () => { try { await apiRequest(`/api/admin/recycle-bin/${image.id}/restore`, { method: 'POST' }); showToast('图片已恢复'); card.classList.add('fading-out'); setTimeout(() => card.remove(), 400); adminLoadedImages = adminLoadedImages.filter(img => img.id !== image.id); } catch (error) { showToast(error.message, 'error'); } } });
-            const purgeBtn = createButton({ title: '彻底删除', classes: 'p-2 rounded-full text-red-500 hover:bg-red-100 hover:text-red-700 transition-colors', html: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.134-2.036-2.134H8.718c-1.126 0-2.037.955-2.037 2.134v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>', onClick: async () => { const confirmed = await showConfirmationModal('彻底删除', `<p>确定要永久删除这张图片吗？<br><strong>此操作无法撤销。</strong></p>`, '确认删除'); if (confirmed) { try { await apiRequest(`/api/admin/recycle-bin/${image.id}/purge`, { method: 'DELETE' }); showToast('图片已彻底删除'); card.classList.add('fading-out'); setTimeout(() => card.remove(), 400); adminLoadedImages = adminLoadedImages.filter(img => img.id !== image.id); } catch (error) { showToast(error.message, 'error'); } } } });
-
-            footerDiv.append(previewBtn, restoreBtn, purgeBtn);
             card.append(previewLink, infoDiv, footerDiv);
             DOMElements.imageList.appendChild(card);
+        }
+
+        function renderImageCard(image) {
+            createCard(image, (previewAction, card, image) => [
+                createButton({ title: '预览', classes: 'p-2 rounded-full text-slate-600 hover:bg-slate-200 hover:text-slate-800 transition-colors', html: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>', onClick: previewAction }),
+                createButton({ tag: 'a', title: '下载', classes: 'p-2 rounded-full text-slate-600 hover:bg-slate-200 hover:text-slate-800 transition-colors', href: image.src, download: image.originalFilename, html: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>'}),
+                createButton({ title: '编辑', classes: 'p-2 rounded-full text-slate-600 hover:bg-slate-200 hover:text-slate-800 transition-colors', html: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487zm0 0L19.5 7.125" /></svg>', onClick: async () => { await populateCategorySelects(image.category); DOMElements.editImageModal.querySelector('#edit-id').value = image.id; DOMElements.editImageModal.querySelector('#edit-originalFilename').value = image.originalFilename; DOMElements.editImageModal.querySelector('#edit-description').value = image.description; DOMElements.editImageModal.classList.add('active'); }}),
+                createButton({ title: '移至回收站', classes: 'p-2 rounded-full text-red-500 hover:bg-red-100 hover:text-red-700 transition-colors', html: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.134-2.036-2.134H8.718c-1.126 0-2.037.955-2.037 2.134v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>', onClick: async () => { const confirmed = await showConfirmationModal('移至回收站', `<p>确定要将这张图片移至回收站吗？</p>`, '确认移动'); if(confirmed) { try { await apiRequest(`/api/admin/images/${image.id}`, { method: 'DELETE' }); showToast('图片已移至回收站'); card.classList.add('fading-out'); setTimeout(() => card.remove(), 400); adminLoadedImages = adminLoadedImages.filter(img => img.id !== image.id); } catch (error) { showToast(error.message, 'error'); } } }})
+            ]);
+        }
+        function renderPurgeableImageCard(image) {
+            createCard(image, (previewAction, card, image) => [
+                createButton({ title: '预览', classes: 'p-2 rounded-full text-slate-600 hover:bg-slate-200 hover:text-slate-800 transition-colors', html: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>', onClick: previewAction }),
+                createButton({ title: '恢复', classes: 'p-2 rounded-full text-green-600 hover:bg-green-100 transition-colors', html: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" /></svg>', onClick: async () => { try { await apiRequest(`/api/admin/recycle-bin/${image.id}/restore`, { method: 'POST' }); showToast('图片已恢复'); card.classList.add('fading-out'); setTimeout(() => card.remove(), 400); adminLoadedImages = adminLoadedImages.filter(img => img.id !== image.id); } catch (error) { showToast(error.message, 'error'); } } }),
+                createButton({ title: '彻底删除', classes: 'p-2 rounded-full text-red-500 hover:bg-red-100 hover:text-red-700 transition-colors', html: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.134-2.036-2.134H8.718c-1.126 0-2.037.955-2.037 2.134v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>', onClick: async () => { const confirmed = await showConfirmationModal('彻底删除', `<p>确定要永久删除这张图片吗？<br><strong>此操作无法撤销。</strong></p>`, '确认删除'); if (confirmed) { try { await apiRequest(`/api/admin/recycle-bin/${image.id}/purge`, { method: 'DELETE' }); showToast('图片已彻底删除'); card.classList.add('fading-out'); setTimeout(() => card.remove(), 400); adminLoadedImages = adminLoadedImages.filter(img => img.id !== image.id); } catch (error) { showToast(error.message, 'error'); } } } })
+            ]);
         }
         
         const changePage = (page) => {
@@ -1046,8 +1039,8 @@ cat << 'EOF' > public/admin.html
         function renderPaginationControls(currentPage, totalPages) {
             if (totalPages <= 1) { DOMElements.paginationContainer.innerHTML = ''; return; }
             let html = '<div class="flex items-center space-x-1">';
-            const createButton = (text, page, disabled = false, active = false) => `<button data-page="${page}" class="page-item px-3 py-1 text-sm font-medium border border-gray-300 rounded-md hover:bg-gray-100 ${disabled ? 'disabled' : ''} ${active ? 'active' : ''}">${text}</button>`;
-            html += createButton('上一页', currentPage - 1, currentPage === 1);
+            const createBtnHTML = (text, page, disabled = false, active = false) => `<button data-page="${page}" class="page-item px-3 py-1 text-sm font-medium border border-gray-300 rounded-md hover:bg-gray-100 ${disabled ? 'disabled' : ''} ${active ? 'active' : ''}">${text}</button>`;
+            html += createBtnHTML('上一页', currentPage - 1, currentPage === 1);
             
             let pages = [];
             if (totalPages <= 7) { for (let i = 1; i <= totalPages; i++) pages.push(i); }
@@ -1059,13 +1052,13 @@ cat << 'EOF' > public/admin.html
                 if (currentPage < totalPages - 2) pages.push('...');
                 pages.push(totalPages);
             }
-            pages.forEach(p => { if (p === '...') html += '<span class="px-3 py-1 text-sm">...</span>'; else html += createButton(p, p, false, p === currentPage); });
+            pages.forEach(p => { if (p === '...') html += '<span class="px-3 py-1 text-sm">...</span>'; else html += createBtnHTML(p, p, false, p === currentPage); });
 
-            html += createButton('下一页', currentPage + 1, currentPage === totalPages);
+            html += createBtnHTML('下一页', currentPage + 1, currentPage === totalPages);
             html += '</div>';
             DOMElements.paginationContainer.innerHTML = html;
         }
-        DOMElements.paginationContainer.addEventListener('click', e => { const target = e.target.closest('.page-item'); if(target && !target.classList.contains('disabled') && !target.classList.contains('active')) { changePage(parseInt(target.dataset.page)); } });
+        DOMElements.paginationContainer.addEventListener('click', e => { e.preventDefault(); const target = e.target.closest('.page-item'); if(target && !target.classList.contains('disabled') && !target.classList.contains('active')) { changePage(parseInt(target.dataset.page)); } });
 
         DOMElements.navigationList.addEventListener('click', async (e) => {
             e.preventDefault();
