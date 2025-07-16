@@ -1,12 +1,12 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v1.0.7 修复版)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v1.0.8 终版)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
-#   v1.0.7 更新:
-#   - 修复 (后台): 重构了后台预览逻辑，通过图片唯一ID进行查找，彻底修复了预览无响应的BUG。
-#   - 优化 (前端): 移除了分类按钮的重复点击限制，现在点击已激活的分类可刷新图片列表。
+#   v1.0.8 更新:
+#   - 修复 (后台): 通过事件委托模式重构了后台预览的事件处理，彻底根治了“点击无响应”的顽固bug，并提升了性能。
+#   - 确认 (前端): 保持v1.0.7中“重复点击分类可刷新”的优化。
 # =================================================================
 
 # --- 配置 ---
@@ -17,7 +17,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 PROMPT_Y="(${GREEN}y${NC}/${RED}n${NC})"
 
-SCRIPT_VERSION="1.0.7"
+SCRIPT_VERSION="1.0.8"
 APP_NAME="image-gallery"
 
 # --- 路径设置 ---
@@ -44,7 +44,7 @@ overwrite_app_files() {
 cat << 'EOF' > package.json
 {
   "name": "image-gallery-pro",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "A high-performance, full-stack image gallery application with all features.",
   "main": "server.js",
   "scripts": {
@@ -699,7 +699,7 @@ cat << 'EOF' > public/index.html
         
         const createFilterButtons = async () => { try { const categories = await fetchJSON('/api/public/categories'); filterButtonsContainer.querySelectorAll('.dynamic-filter').forEach(btn => btn.remove()); categories.forEach(category => { const button = document.createElement('button'); button.className = 'filter-btn dynamic-filter'; button.dataset.filter = category; button.textContent = category; filterButtonsContainer.appendChild(button); }); } catch (error) { console.error('无法加载分类按钮:', error); } };
         
-        // --- v1.0.7 修改 ---
+        // --- v1.0.8 确认 ---
         // 移除了 target.classList.contains('active') 的判断，允许重复点击当前分类以刷新内容
         filterButtonsContainer.addEventListener('click', (e) => {
             const target = e.target.closest('.filter-btn');
@@ -1017,13 +1017,7 @@ cat << 'EOF' > public/admin.html
             if (options.html) btn.innerHTML = options.html;
             if (options.href) btn.href = options.href;
             if (options.download) btn.download = options.download;
-            if (options.onClick) {
-                btn.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    options.onClick(e);
-                });
-            }
+            // onClick logic is removed from here for event delegation
             return btn;
         };
 
@@ -1149,9 +1143,8 @@ cat << 'EOF' > public/admin.html
 
             const previewLink = document.createElement('a');
             previewLink.href = "#";
-            previewLink.className = 'image-preview-container flex-shrink-0';
-            // --- v1.0.7 修改: 传递 image.id 而不是 index ---
-            previewLink.addEventListener('click', (e) => { e.preventDefault(); openAdminLightbox(image.id); });
+            // --- v1.0.8 修改: 移除独立的事件监听，添加 js-preview 类用于事件委托 ---
+            previewLink.className = 'image-preview-container flex-shrink-0 js-preview'; 
 
             const spinner = document.createElement('div');
             spinner.className = 'card-spinner';
@@ -1186,8 +1179,8 @@ cat << 'EOF' > public/admin.html
             const footerDiv = document.createElement('div');
             footerDiv.className = 'bg-slate-50 p-2 flex justify-end items-center gap-1 mt-auto flex-shrink-0';
             
-            // --- v1.0.7 修改: 传递 image.id 而不是 index ---
-            const previewButton = createButton({ title: '预览', classes: 'p-2 rounded-full text-slate-600 hover:bg-slate-200 hover:text-slate-800 transition-colors', html: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>', onClick: () => openAdminLightbox(image.id) });
+            // --- v1.0.8 修改: 移除 onClick 绑定，添加 js-preview 类用于事件委托 ---
+            const previewButton = createButton({ title: '预览', classes: 'js-preview p-2 rounded-full text-slate-600 hover:bg-slate-200 hover:text-slate-800 transition-colors', html: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>' });
             footerDiv.appendChild(previewButton);
 
             if (isRecycleBinView) {
@@ -1268,6 +1261,20 @@ cat << 'EOF' > public/admin.html
             changePage(1);
         });
         
+        // --- v1.0.8 新增: 使用事件委托处理所有预览点击 ---
+        DOMElements.imageList.addEventListener('click', (e) => {
+            const trigger = e.target.closest('.js-preview');
+            if (!trigger) return;
+
+            e.preventDefault();
+            e.stopPropagation();
+
+            const card = trigger.closest('.admin-image-card');
+            if (card && card.dataset.id) {
+                openAdminLightbox(card.dataset.id);
+            }
+        });
+
         DOMElements.editImageForm.addEventListener('submit', async (e) => { e.preventDefault(); const id = document.getElementById('edit-id').value; const body = JSON.stringify({ originalFilename: document.getElementById('edit-originalFilename').value, category: DOMElements.editCategorySelect.value, description: document.getElementById('edit-description').value }); try { await apiRequest(`/api/admin/images/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body }); hideModal(DOMElements.editImageModal); showToast('更新成功'); changePage(currentAdminPage); } catch (error) { showToast(`更新失败: ${error.message}`, 'error'); } });
         
         async function renderSecuritySection() { try { const response = await apiRequest('/api/admin/2fa/status'); const { enabled } = await response.json(); let content; if (enabled) { content = `<p class="text-sm text-slate-600 mb-3">两步验证 (2FA) 当前已<span class="font-bold text-green-600">启用</span>。</p><button id="disable-tfa-btn" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg">禁用 2FA</button>`; } else { content = `<p class="text-sm text-slate-600 mb-3">通过启用两步验证，为您的账户增加一层额外的安全保障。</p><button id="enable-tfa-btn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg">启用 2FA</button>`; } DOMElements.securitySection.innerHTML = content; } catch (error) { DOMElements.securitySection.innerHTML = `<p class="text-red-500">无法加载安全状态: ${error.message}</p>`; } }
@@ -1307,17 +1314,12 @@ cat << 'EOF' > public/admin.html
             };
         };
         
-        // --- v1.0.7 修改: 接收 imageId, 并通过它查找 index ---
         const openAdminLightbox = (imageId) => {
-            // 根据 imageId 从当前加载的图片数组中查找正确的索引
             const index = adminLoadedImages.findIndex(img => img.id === imageId);
-            
-            // 如果找不到（例如数据不同步），则提示错误并返回
             if (index === -1) {
                 showToast('无法找到预览图片的数据', 'error');
                 return;
             }
-
             DOMElements.lightbox.classList.add('active');
             document.body.classList.add('lightbox-open');
             preloadAndShowImage(index);
