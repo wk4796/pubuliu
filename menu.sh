@@ -1,16 +1,13 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v0.3.0 重大优化)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v0.3.1 修复版)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
-#   v0.3.0 更新:
-#   - 交互优化 (后台): 删除图片后不再刷新页面，改为即时移除卡片并播放淡出动画，提升操作流畅性。
-#   - UI优化 (后台): 移除了后台图片预览区的固定高度，改为自适应，解决了横图卡片过高的问题。
-#   - 稳定性增强 (后台): 全面升级了API请求的错误处理机制，失败时会返回更具体的信息。
-#   - 布局优化 (前台): 新增响应式多列布局，横向图片可占据两列宽度，视觉效果更佳。
-#   - 功能优化 (登录页): 登录页面的2FA输入框现在仅在后台启用2FA时才动态显示。
-#   - UI优化 (后台): 统一了回收站中图片卡片的信息展示，使其与主图库样式一致。
+#   v0.3.1 更新:
+#   - 修复 (后台): 修正了因JavaScript调用错误导致的“上传文件无响应”的问题。
+#   - 修复 (后台): 修正了因JavaScript调用错误导致的“无法加载安全状态”的问题。
+#   - 稳定性 (后端): 为多个API接口增加了更可靠的错误捕获，提升了服务器健壮性。
 # =================================================================
 
 # --- 配置 ---
@@ -21,7 +18,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 PROMPT_Y="(${GREEN}y${NC}/${RED}n${NC})"
 
-SCRIPT_VERSION="0.3.0"
+SCRIPT_VERSION="0.3.1"
 APP_NAME="image-gallery"
 
 # --- 路径设置 ---
@@ -48,7 +45,7 @@ overwrite_app_files() {
 cat << 'EOF' > package.json
 {
   "name": "image-gallery-pro",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "A high-performance, full-stack image gallery application with all features.",
   "main": "server.js",
   "scripts": {
@@ -131,120 +128,109 @@ const authMiddleware = (isApi) => (req, res, next) => {
 const requirePageAuth = authMiddleware(false);
 const requireApiAuth = authMiddleware(true);
 
-// 公开接口，用于查询2FA是否启用
-app.get('/api/2fa/is-enabled', async (req, res) => {
+const handleApiError = (handler) => async (req, res, next) => {
     try {
-        const currentConfig = await readDB(configPath, {});
-        const isEnabled = !!(currentConfig.tfa && currentConfig.tfa.secret);
-        res.json({ enabled: isEnabled });
+        await handler(req, res, next);
     } catch (error) {
-        res.status(500).json({ message: '无法读取服务器配置。' });
+        console.error(`API Error on ${req.method} ${req.path}:`, error);
+        res.status(500).json({ message: error.message || '服务器发生未知错误。' });
     }
-});
+};
 
-app.post('/api/login', async (req, res) => {
+// 公开接口，用于查询2FA是否启用
+app.get('/api/2fa/is-enabled', handleApiError(async (req, res) => {
+    const currentConfig = await readDB(configPath, {});
+    const isEnabled = !!(currentConfig.tfa && currentConfig.tfa.secret);
+    res.json({ enabled: isEnabled });
+}));
+
+app.post('/api/login', handleApiError(async (req, res) => {
     const { username, password, tfa_token } = req.body;
     if (username !== ADMIN_USERNAME || password !== ADMIN_PASSWORD) {
         return res.redirect('/login.html?error=1');
     }
     
-    try {
-        appConfig = await readDB(configPath, {});
-        if (appConfig.tfa && appConfig.tfa.secret) {
-            if (!tfa_token) {
-                 return res.redirect('/login.html?error=2'); 
-            }
-            const verified = speakeasy.totp.verify({
-                secret: appConfig.tfa.secret,
-                encoding: 'base32',
-                token: tfa_token,
-            });
-            if (!verified) {
-                return res.redirect('/login.html?error=3'); 
-            }
+    appConfig = await readDB(configPath, {});
+    if (appConfig.tfa && appConfig.tfa.secret) {
+        if (!tfa_token) {
+             return res.redirect('/login.html?error=2'); 
         }
-    
-        const token = jwt.sign({ username }, JWT_SECRET, { expiresIn: '1d' });
-        res.cookie(AUTH_TOKEN_NAME, token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', maxAge: 86400000 });
-        res.redirect('/admin.html');
-    } catch (error) {
-        res.status(500).send('服务器内部错误，无法处理登录请求。');
+        const verified = speakeasy.totp.verify({
+            secret: appConfig.tfa.secret,
+            encoding: 'base32',
+            token: tfa_token,
+        });
+        if (!verified) {
+            return res.redirect('/login.html?error=3'); 
+        }
     }
-});
+
+    const token = jwt.sign({ username }, JWT_SECRET, { expiresIn: '1d' });
+    res.cookie(AUTH_TOKEN_NAME, token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', maxAge: 86400000 });
+    res.redirect('/admin.html');
+}));
 
 app.get('/api/logout', (req, res) => { res.clearCookie(AUTH_TOKEN_NAME); res.redirect('/login.html'); });
 app.get('/admin.html', requirePageAuth, (req, res) => res.sendFile(path.join(__dirname, 'public', 'admin.html')));
 app.get('/admin', requirePageAuth, (req, res) => res.redirect('/admin.html'));
 
-app.get('/api/images', async (req, res) => {
-    try {
-        let images = await readDB(dbPath);
-        images = images.filter(img => img.status !== 'deleted');
-        
-        const { category, search, page = 1, limit = 20 } = req.query;
+app.get('/api/images', handleApiError(async (req, res) => {
+    let images = await readDB(dbPath);
+    images = images.filter(img => img.status !== 'deleted');
     
-        if (search) {
-            const searchTerm = search.toLowerCase();
-            images = images.filter(img => (img.originalFilename && img.originalFilename.toLowerCase().includes(searchTerm)) || (img.description && img.description.toLowerCase().includes(searchTerm)));
-        }
-        
-        if (category && category !== 'all' && category !== 'random') {
-            images = images.filter(img => img.category === category);
-        } else if (category === 'random') {
-            images.sort(() => 0.5 - Math.random());
-        } else {
-            images.sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt));
-        }
-        
-        const pageNum = parseInt(page);
-        const limitNum = parseInt(limit);
-        const startIndex = (pageNum - 1) * limitNum;
-        const endIndex = pageNum * limitNum;
-        
-        const paginatedImages = images.slice(startIndex, endIndex);
-        const totalImages = images.length;
-        const totalPages = Math.ceil(totalImages / limitNum);
+    const { category, search, page = 1, limit = 20 } = req.query;
+
+    if (search) {
+        const searchTerm = search.toLowerCase();
+        images = images.filter(img => (img.originalFilename && img.originalFilename.toLowerCase().includes(searchTerm)) || (img.description && img.description.toLowerCase().includes(searchTerm)));
+    }
     
-        res.json({
-            images: paginatedImages,
-            page: pageNum,
-            limit: limitNum,
-            totalPages: totalPages,
-            totalImages: totalImages,
-            hasMore: pageNum < totalPages
-        });
-    } catch(error) {
-        res.status(500).json({ message: error.message });
+    if (category && category !== 'all' && category !== 'random') {
+        images = images.filter(img => img.category === category);
+    } else if (category === 'random') {
+        images.sort(() => 0.5 - Math.random());
+    } else {
+        images.sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt));
     }
-});
+    
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const startIndex = (pageNum - 1) * limitNum;
+    const endIndex = pageNum * limitNum;
+    
+    const paginatedImages = images.slice(startIndex, endIndex);
+    const totalImages = images.length;
+    const totalPages = Math.ceil(totalImages / limitNum);
 
-app.get('/api/categories', async (req, res) => {
-    try {
-        const categories = await readDB(categoriesPath, [UNCATEGORIZED]);
-        if (!categories.includes(UNCATEGORIZED)) {
-            categories.unshift(UNCATEGORIZED);
-        }
-        res.json(categories.sort((a,b) => a === UNCATEGORIZED ? -1 : b === UNCATEGORIZED ? 1 : a.localeCompare(b, 'zh-CN')));
-    } catch(error) {
-        res.status(500).json({ message: error.message });
-    }
-});
+    res.json({
+        images: paginatedImages,
+        page: pageNum,
+        limit: limitNum,
+        totalPages: totalPages,
+        totalImages: totalImages,
+        hasMore: pageNum < totalPages
+    });
+}));
 
-app.get('/api/public/categories', async (req, res) => {
-    try {
-        const allDefinedCategories = await readDB(categoriesPath, [UNCATEGORIZED]);
-        let images = await readDB(dbPath);
-        images = images.filter(img => img.status !== 'deleted');
-        const categoriesInUse = new Set(images.map(img => img.category || UNCATEGORIZED));
-        if (!allDefinedCategories.includes(UNCATEGORIZED)) {
-            allDefinedCategories.unshift(UNCATEGORIZED);
-        }
-        let categoriesToShow = allDefinedCategories.filter(cat => categoriesInUse.has(cat));
-        res.json(categoriesToShow.sort((a,b) => a === UNCATEGORIZED ? -1 : b === UNCATEGORIZED ? 1 : a.localeCompare(b, 'zh-CN')));
-    } catch(error) {
-        res.status(500).json({ message: error.message });
+app.get('/api/categories', handleApiError(async (req, res) => {
+    const categories = await readDB(categoriesPath, [UNCATEGORIZED]);
+    if (!categories.includes(UNCATEGORIZED)) {
+        categories.unshift(UNCATEGORIZED);
     }
-});
+    res.json(categories.sort((a,b) => a === UNCATEGORIZED ? -1 : b === UNCATEGORIZED ? 1 : a.localeCompare(b, 'zh-CN')));
+}));
+
+app.get('/api/public/categories', handleApiError(async (req, res) => {
+    const allDefinedCategories = await readDB(categoriesPath, [UNCATEGORIZED]);
+    let images = await readDB(dbPath);
+    images = images.filter(img => img.status !== 'deleted');
+    const categoriesInUse = new Set(images.map(img => img.category || UNCATEGORIZED));
+    if (!allDefinedCategories.includes(UNCATEGORIZED)) {
+        allDefinedCategories.unshift(UNCATEGORIZED);
+    }
+    let categoriesToShow = allDefinedCategories.filter(cat => categoriesInUse.has(cat));
+    res.json(categoriesToShow.sort((a,b) => a === UNCATEGORIZED ? -1 : b === UNCATEGORIZED ? 1 : a.localeCompare(b, 'zh-CN')));
+}));
 
 app.get('/image-proxy/:filename', async (req, res) => {
     const { filename } = req.params;
@@ -277,34 +263,17 @@ app.get('/image-proxy/:filename', async (req, res) => {
 
 const apiAdminRouter = express.Router();
 apiAdminRouter.use(requireApiAuth);
-const storage = multer.diskStorage({ destination: (req, file, cb) => cb(null, uploadsDir), filename: (req, file, cb) => { const uniqueSuffix = uuidv4(); const extension = path.extname(file.originalname); cb(null, `${uniqueSuffix}${extension}`); } });
-const upload = multer({ storage: storage });
 
-// All admin routes are wrapped in a try-catch block for global error handling
-apiAdminRouter.use((req, res, next) => {
-    const handler = req.route.stack[0].handle;
-    const wrappedHandler = async (req, res, next) => {
-        try {
-            await handler(req, res, next);
-        } catch (error) {
-            console.error(`API Error on ${req.method} ${req.path}:`, error);
-            res.status(500).json({ message: error.message || '服务器发生未知错误。' });
-        }
-    };
-    req.route.stack[0].handle = wrappedHandler;
-    next();
-});
-
-apiAdminRouter.post('/check-filenames', async(req, res) => {
+apiAdminRouter.post('/check-filenames', handleApiError(async(req, res) => {
     const { filenames } = req.body;
     if (!Array.isArray(filenames)) { return res.status(400).json({message: '无效的输入格式。'}); }
     const images = await readDB(dbPath);
     const existingFilenames = new Set(images.filter(img => img.status !== 'deleted').map(img => img.originalFilename));
     const duplicates = filenames.filter(name => existingFilenames.has(name));
     res.json({ duplicates });
-});
+}));
 
-apiAdminRouter.post('/upload', upload.single('image'), async (req, res) => {
+apiAdminRouter.post('/upload', upload.single('image'), handleApiError(async (req, res) => {
     if (!req.file) return res.status(400).json({ message: '没有选择文件。' });
     const metadata = await sharp(req.file.path).metadata();
     const images = await readDB(dbPath);
@@ -333,9 +302,9 @@ apiAdminRouter.post('/upload', upload.single('image'), async (req, res) => {
     images.unshift(newImage);
     await writeDB(dbPath, images);
     res.status(200).json({ message: '上传成功', image: newImage });
-});
+}));
 
-apiAdminRouter.delete('/images/:id', async (req, res) => {
+apiAdminRouter.delete('/images/:id', handleApiError(async (req, res) => {
     let images = await readDB(dbPath);
     const imageIndex = images.findIndex(img => img.id === req.params.id);
     if (imageIndex === -1) return res.status(404).json({ message: '图片未找到' });
@@ -343,9 +312,9 @@ apiAdminRouter.delete('/images/:id', async (req, res) => {
     images[imageIndex].deletedAt = new Date().toISOString();
     await writeDB(dbPath, images);
     res.json({ message: '图片已移至回收站' });
-});
+}));
 
-apiAdminRouter.put('/images/:id', async (req, res) => {
+apiAdminRouter.put('/images/:id', handleApiError(async (req, res) => {
     let images = await readDB(dbPath);
     const { category, description, originalFilename } = req.body;
     const imageIndex = images.findIndex(img => img.id === req.params.id);
@@ -361,9 +330,9 @@ apiAdminRouter.put('/images/:id', async (req, res) => {
     images[imageIndex] = imageToUpdate;
     await writeDB(dbPath, images);
     res.json({ message: '更新成功', image: imageToUpdate });
-});
+}));
 
-apiAdminRouter.post('/categories', async (req, res) => {
+apiAdminRouter.post('/categories', handleApiError(async (req, res) => {
     const { name } = req.body;
     if (!name || name.trim() === '') return res.status(400).json({ message: '分类名称不能为空。' });
     let categories = await readDB(categoriesPath, [UNCATEGORIZED]);
@@ -371,9 +340,9 @@ apiAdminRouter.post('/categories', async (req, res) => {
     categories.push(name);
     await writeDB(categoriesPath, categories);
     res.status(201).json({ message: '分类创建成功', category: name });
-});
+}));
 
-apiAdminRouter.delete('/categories', async (req, res) => {
+apiAdminRouter.delete('/categories', handleApiError(async (req, res) => {
     const { name } = req.body;
     if (!name || name === UNCATEGORIZED) return res.status(400).json({ message: '无效的分类或“未分类”无法删除。' });
     let categories = await readDB(categoriesPath);
@@ -384,9 +353,9 @@ apiAdminRouter.delete('/categories', async (req, res) => {
     images.forEach(img => { if (img.category === name) { img.category = UNCATEGORIZED; } });
     await writeDB(dbPath, images);
     res.status(200).json({ message: `分类 '${name}' 已删除，相关图片已归入 '${UNCATEGORIZED}'。` });
-});
+}));
 
-apiAdminRouter.put('/categories', async (req, res) => {
+apiAdminRouter.put('/categories', handleApiError(async (req, res) => {
     const { oldName, newName } = req.body;
     if (!oldName || !newName || oldName === newName || oldName === UNCATEGORIZED) return res.status(400).json({ message: '无效的分类名称。' });
     let categories = await readDB(categoriesPath);
@@ -398,9 +367,9 @@ apiAdminRouter.put('/categories', async (req, res) => {
     images.forEach(img => { if (img.category === oldName) { img.category = newName; } });
     await writeDB(dbPath, images);
     res.status(200).json({ message: `分类 '${oldName}' 已重命名为 '${newName}'。` });
-});
+}));
 
-apiAdminRouter.get('/recycle-bin', async (req, res) => {
+apiAdminRouter.get('/recycle-bin', handleApiError(async (req, res) => {
     const { search, page = 1, limit = 12 } = req.query;
     let images = await readDB(dbPath);
     let deletedImages = images.filter(img => img.status === 'deleted');
@@ -425,9 +394,9 @@ apiAdminRouter.get('/recycle-bin', async (req, res) => {
         page: pageNum,
         totalPages: Math.ceil(totalImages / limitNum)
     });
-});
+}));
 
-apiAdminRouter.post('/recycle-bin/:id/restore', async (req, res) => {
+apiAdminRouter.post('/recycle-bin/:id/restore', handleApiError(async (req, res) => {
     let images = await readDB(dbPath);
     const imageIndex = images.findIndex(img => img.id === req.params.id);
     if (imageIndex === -1) return res.status(404).json({ message: '图片未找到' });
@@ -435,9 +404,9 @@ apiAdminRouter.post('/recycle-bin/:id/restore', async (req, res) => {
     delete images[imageIndex].deletedAt;
     await writeDB(dbPath, images);
     res.json({ message: '图片已成功恢复' });
-});
+}));
 
-apiAdminRouter.delete('/recycle-bin/:id/purge', async (req, res) => {
+apiAdminRouter.delete('/recycle-bin/:id/purge', handleApiError(async (req, res) => {
     let images = await readDB(dbPath);
     const imageToDelete = images.find(img => img.id === req.params.id);
     if (!imageToDelete) return res.status(404).json({ message: '图片未找到' });
@@ -448,23 +417,23 @@ apiAdminRouter.delete('/recycle-bin/:id/purge', async (req, res) => {
     const updatedImages = images.filter(img => img.id !== req.params.id);
     await writeDB(dbPath, updatedImages);
     res.json({ message: '图片已永久删除' });
-});
+}));
 
 // 2FA Management (Admin)
-apiAdminRouter.get('/2fa/status', async(req, res) => {
+apiAdminRouter.get('/2fa/status', handleApiError(async(req, res) => {
     appConfig = await readDB(configPath, {});
     res.json({ enabled: !!(appConfig.tfa && appConfig.tfa.secret) });
-});
+}));
 
-apiAdminRouter.post('/2fa/generate', (req, res) => {
+apiAdminRouter.post('/2fa/generate', handleApiError((req, res) => {
     const secret = speakeasy.generateSecret({ name: `ImageGallery (${ADMIN_USERNAME})` });
     qrcode.toDataURL(secret.otpauth_url, (err, data_url) => {
         if (err) return res.status(500).json({ message: '无法生成QR码' });
         res.json({ secret: secret.base32, qrCode: data_url });
     });
-});
+}));
 
-apiAdminRouter.post('/2fa/enable', async (req, res) => {
+apiAdminRouter.post('/2fa/enable', handleApiError(async (req, res) => {
     const { secret, token } = req.body;
     const verified = speakeasy.totp.verify({ secret, encoding: 'base32', token });
 
@@ -475,14 +444,14 @@ apiAdminRouter.post('/2fa/enable', async (req, res) => {
     } else {
         res.status(400).json({ message: '验证码不正确。' });
     }
-});
+}));
 
-apiAdminRouter.post('/2fa/disable', async (req, res) => {
+apiAdminRouter.post('/2fa/disable', handleApiError(async (req, res) => {
     appConfig = await readDB(configPath, {});
     delete appConfig.tfa;
     await writeDB(configPath, appConfig);
     res.json({ message: '2FA 已禁用。' });
-});
+}));
 
 
 app.use('/api/admin', apiAdminRouter);
@@ -494,7 +463,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 })();
 EOF
 
-    echo "--> 正在生成主画廊 public/index.html (v0.3.0)..."
+    echo "--> 正在生成主画廊 public/index.html (v0.3.1)..."
 cat << 'EOF' > public/index.html
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -822,21 +791,28 @@ cat << 'EOF' > public/admin.html
         let filesToUpload = []; let adminLoadedImages = []; let currentAdminLightboxIndex = 0; let currentSearchTerm = ''; let debounceTimer; let currentAdminPage = 1;
         
         const apiRequest = async (url, options = {}) => {
-            const response = await fetch(url, options);
-            if (response.status === 401) { 
-                showToast('登录状态已过期', 'error'); 
-                setTimeout(() => window.location.href = '/login.html', 2000); 
-                throw new Error('Unauthorized'); 
+            try {
+                const response = await fetch(url, options);
+                if (response.status === 401) { 
+                    showToast('登录状态已过期', 'error'); 
+                    setTimeout(() => window.location.href = '/login.html', 2000); 
+                    throw new Error('Unauthorized'); 
+                }
+                if (!response.ok) {
+                    let errorMsg = `HTTP Error: ${response.status} ${response.statusText}`;
+                    try {
+                        const errorJson = await response.json();
+                        errorMsg = errorJson.message || errorMsg;
+                    } catch (e) { /* Ignore if body is not JSON */ }
+                    throw new Error(errorMsg);
+                }
+                return response;
+            } catch (error) {
+                if (error instanceof TypeError) { // Network error
+                    throw new Error('网络错误，请检查您的连接。');
+                }
+                throw error; // Re-throw other errors
             }
-            if (!response.ok) {
-                let errorMsg = `HTTP Error: ${response.status} ${response.statusText}`;
-                try {
-                    const errorJson = await response.json();
-                    errorMsg = errorJson.message || errorMsg;
-                } catch (e) { /* Ignore if body is not JSON */ }
-                throw new Error(errorMsg);
-            }
-            return response;
         };
 
         const formatBytes = (bytes, decimals = 2) => { if (!+bytes) return '0 Bytes'; const k = 1024; const dm = decimals < 0 ? 0 : decimals; const sizes = ["Bytes", "KB", "MB", "GB", "TB"]; const i = Math.floor(Math.log(bytes) / Math.log(k)); return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`; };
@@ -852,12 +828,79 @@ cat << 'EOF' > public/admin.html
         DOMElements.unifiedDescription.addEventListener('input', e => { const unifiedText = e.target.value; document.querySelectorAll('.file-preview-item').forEach(item => { const index = parseInt(item.dataset.fileIndex, 10); if (filesToUpload[index] && !filesToUpload[index].userHasTyped) { item.querySelector('.description-input').value = unifiedText; filesToUpload[index].description = unifiedText; } }); });
         DOMElements.filePreviewList.addEventListener('input', e => { if (e.target.classList.contains('description-input')) { const index = parseInt(e.target.dataset.index, 10); if(filesToUpload[index]) { filesToUpload[index].description = e.target.value; filesToUpload[index].userHasTyped = true; } } });
         DOMElements.filePreviewList.addEventListener('click', e => { if (e.target.classList.contains('remove-file-btn')) { const index = parseInt(e.target.dataset.index, 10); filesToUpload.splice(index, 1); renderFilePreviews(); DOMElements.uploadBtn.disabled = filesToUpload.length === 0; } });
-        const processUploadQueue = async (e) => { e.preventDefault(); DOMElements.uploadBtn.disabled = true; const pendingFiles = filesToUpload.filter(f => f.status === 'pending'); if (pendingFiles.length === 0) { showToast("没有需要上传的新文件。", "error"); DOMElements.uploadBtn.disabled = filesToUpload.length === 0; return; } const filenamesToCheck = pendingFiles.map(item => item.file.name); const { duplicates } = await apiRequest('/api/admin/check-filenames', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({filenames: filenamesToCheck}) }).then(res => res.json()); for (const item of pendingFiles) { if (duplicates.includes(item.file.name)) { const userConfirmed = await showConfirmationModal('文件已存在', `文件 "<strong>${item.file.name}</strong>" 已存在。是否仍然继续上传？<br>(新文件将被自动重命名)`, '继续上传', '取消此文件'); if (userConfirmed) { item.shouldRename = true; } else { item.status = 'cancelled'; const previewItem = DOMElements.filePreviewList.querySelector(`[data-file-index="${filesToUpload.indexOf(item)}"]`); if(previewItem) previewItem.querySelector('.upload-status').textContent = '已取消'; } } } const uploadableFiles = filesToUpload.filter(f => f.status === 'pending'); let processedCount = 0; const updateButtonText = () => { DOMElements.uploadBtn.textContent = `正在上传 (${processedCount}/${uploadableFiles.length})...`; }; if (uploadableFiles.length > 0) updateButtonText(); for (const item of uploadableFiles) { const originalIndex = filesToUpload.indexOf(item); const previewItem = DOMElements.filePreviewList.querySelector(`[data-file-index="${originalIndex}"]`); if (!previewItem) { processedCount++; updateButtonText(); continue; } const statusEl = previewItem.querySelector('.upload-status'); try { statusEl.textContent = '上传中...'; const formData = new FormData(); formData.append('image', item.file); formData.append('category', DOMElements.categorySelect.value); formData.append('description', item.description); formData.append('rename', item.shouldRename); await apiRequest('/api/admin/upload', { method: 'POST', body: formData }); item.status = 'success'; previewItem.classList.add('upload-success'); statusEl.textContent = '✅ 上传成功'; } catch (err) { if (err.message !== 'Unauthorized') { item.status = 'error'; statusEl.textContent = `❌ ${err.message}`; previewItem.classList.add('upload-error'); } } finally { processedCount++; updateButtonText(); } } showToast(`所有任务处理完成。`); DOMElements.uploadBtn.textContent = '上传文件'; filesToUpload = []; DOMElements.imageInput.value = ''; DOMElements.unifiedDescription.value = ''; setTimeout(() => { DOMElements.filePreviewContainer.classList.add('hidden'); DOMElements.uploadBtn.disabled = true; }, 3000); await refreshAllData(); };
+        
+        const processUploadQueue = async (e) => {
+            e.preventDefault();
+            DOMElements.uploadBtn.disabled = true;
+            const pendingFiles = filesToUpload.filter(f => f.status === 'pending');
+            if (pendingFiles.length === 0) {
+                showToast("没有需要上传的新文件。", "error");
+                DOMElements.uploadBtn.disabled = filesToUpload.length === 0;
+                return;
+            }
+            try {
+                const filenamesToCheck = pendingFiles.map(item => item.file.name);
+                const response = await apiRequest('/api/admin/check-filenames', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({filenames: filenamesToCheck}) });
+                const { duplicates } = await response.json();
+
+                for (const item of pendingFiles) {
+                    if (duplicates.includes(item.file.name)) {
+                        const userConfirmed = await showConfirmationModal('文件已存在', `文件 "<strong>${item.file.name}</strong>" 已存在。是否仍然继续上传？<br>(新文件将被自动重命名)`, '继续上传', '取消此文件');
+                        if (userConfirmed) { item.shouldRename = true; } 
+                        else { item.status = 'cancelled'; const previewItem = DOMElements.filePreviewList.querySelector(`[data-file-index="${filesToUpload.indexOf(item)}"]`); if(previewItem) previewItem.querySelector('.upload-status').textContent = '已取消'; }
+                    }
+                }
+            } catch (error) {
+                showToast(`检查文件名出错: ${error.message}`, 'error');
+                DOMElements.uploadBtn.disabled = false;
+                return;
+            }
+            
+            const uploadableFiles = filesToUpload.filter(f => f.status === 'pending');
+            let processedCount = 0;
+            const updateButtonText = () => { DOMElements.uploadBtn.textContent = `正在上传 (${processedCount}/${uploadableFiles.length})...`; };
+            if (uploadableFiles.length > 0) updateButtonText();
+
+            for (const item of uploadableFiles) {
+                const originalIndex = filesToUpload.indexOf(item);
+                const previewItem = DOMElements.filePreviewList.querySelector(`[data-file-index="${originalIndex}"]`);
+                if (!previewItem) { processedCount++; updateButtonText(); continue; }
+                const statusEl = previewItem.querySelector('.upload-status');
+                try {
+                    statusEl.textContent = '上传中...';
+                    const formData = new FormData();
+                    formData.append('image', item.file);
+                    formData.append('category', DOMElements.categorySelect.value);
+                    formData.append('description', item.description);
+                    formData.append('rename', item.shouldRename);
+                    await apiRequest('/api/admin/upload', { method: 'POST', body: formData });
+                    item.status = 'success';
+                    previewItem.classList.add('upload-success');
+                    statusEl.textContent = '✅ 上传成功';
+                } catch (err) {
+                    if (err.message !== 'Unauthorized') {
+                        item.status = 'error';
+                        statusEl.textContent = `❌ ${err.message}`;
+                        previewItem.classList.add('upload-error');
+                    }
+                } finally {
+                    processedCount++;
+                    updateButtonText();
+                }
+            }
+            showToast(`所有任务处理完成。`);
+            DOMElements.uploadBtn.textContent = '上传文件';
+            filesToUpload = [];
+            DOMElements.imageInput.value = '';
+            DOMElements.unifiedDescription.value = '';
+            setTimeout(() => { DOMElements.filePreviewContainer.classList.add('hidden'); DOMElements.uploadBtn.disabled = true; }, 3000);
+            await refreshAllData();
+        };
         DOMElements.uploadForm.addEventListener('submit', processUploadQueue);
 
         async function refreshAllData() { await refreshNavigation(); const activeNav = document.querySelector('.nav-item.active'); if (activeNav) { activeNav.click(); } else { document.getElementById('nav-item-all').click(); } }
-        async function populateCategorySelects(selectedCategory = null) { try { const response = await apiRequest('/api/categories'); const categories = await response.json(); [DOMElements.categorySelect, DOMElements.editCategorySelect].forEach(select => { const currentVal = select.value; select.innerHTML = ''; categories.forEach(cat => select.add(new Option(cat, cat))); select.value = categories.includes(currentVal) ? currentVal : selectedCategory || categories[0] || ''; }); } catch (error) { if (error.message !== 'Unauthorized') console.error('加载分类失败:', error); } }
-        async function refreshNavigation() { try { const response = await apiRequest('/api/categories'); const categories = await response.json(); DOMElements.categoryDynamicList.innerHTML = ''; categories.forEach(cat => { const isUncategorized = cat === UNCATEGORIZED; const item = document.createElement('div'); item.className = 'nav-item flex items-center justify-between p-2 rounded cursor-pointer hover:bg-gray-100'; item.dataset.view = 'category'; item.dataset.categoryName = cat; item.innerHTML = `<span class="category-name flex-grow">${cat}</span>` + (isUncategorized ? '' : `<div class="space-x-2 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"><button data-name="${cat}" class="rename-cat-btn text-blue-500 hover:text-blue-700 text-sm">重命名</button><button data-name="${cat}" class="delete-cat-btn text-red-500 hover:red-700 text-sm">删除</button></div>`); item.addEventListener('mouseenter', () => item.classList.add('group')); item.addEventListener('mouseleave', () => item.classList.remove('group')); DOMElements.categoryDynamicList.appendChild(item); }); await populateCategorySelects(); } catch (error) { if (error.message !== 'Unauthorized') console.error('加载导航列表失败:', error); } }
+        async function populateCategorySelects(selectedCategory = null) { try { const response = await apiRequest('/api/categories'); const categories = await response.json(); [DOMElements.categorySelect, DOMElements.editCategorySelect].forEach(select => { const currentVal = select.value; select.innerHTML = ''; categories.forEach(cat => select.add(new Option(cat, cat))); select.value = categories.includes(currentVal) ? currentVal : selectedCategory || categories[0] || ''; }); } catch (error) { if (error.message !== 'Unauthorized') console.error('加载分类失败:', error.message); } }
+        async function refreshNavigation() { try { const response = await apiRequest('/api/categories'); const categories = await response.json(); DOMElements.categoryDynamicList.innerHTML = ''; categories.forEach(cat => { const isUncategorized = cat === UNCATEGORIZED; const item = document.createElement('div'); item.className = 'nav-item flex items-center justify-between p-2 rounded cursor-pointer hover:bg-gray-100'; item.dataset.view = 'category'; item.dataset.categoryName = cat; item.innerHTML = `<span class="category-name flex-grow">${cat}</span>` + (isUncategorized ? '' : `<div class="space-x-2 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"><button data-name="${cat}" class="rename-cat-btn text-blue-500 hover:text-blue-700 text-sm">重命名</button><button data-name="${cat}" class="delete-cat-btn text-red-500 hover:red-700 text-sm">删除</button></div>`); item.addEventListener('mouseenter', () => item.classList.add('group')); item.addEventListener('mouseleave', () => item.classList.remove('group')); DOMElements.categoryDynamicList.appendChild(item); }); await populateCategorySelects(); } catch (error) { if (error.message !== 'Unauthorized') console.error('加载导航列表失败:', error.message); } }
         
         async function loadImages(category, name) { DOMElements.imageLoader.classList.remove('hidden'); DOMElements.imageList.innerHTML = ''; DOMElements.paginationContainer.innerHTML = ''; try { const url = `/api/images?category=${category}&search=${encodeURIComponent(currentSearchTerm)}&page=${currentAdminPage}&limit=12`; const response = await apiRequest(url); const data = await response.json(); adminLoadedImages = data.images; const totalSize = adminLoadedImages.reduce((acc, img) => acc + (img.size || 0), 0); const titleText = currentSearchTerm ? `在 "${name}" 中搜索 "${currentSearchTerm}"` : name; DOMElements.imageListHeader.innerHTML = `${titleText} <span class="text-base text-gray-500 font-normal">(共 ${data.totalImages} 张)</span>`; if (adminLoadedImages.length === 0) { DOMElements.imageList.innerHTML = '<p class="text-slate-500 col-span-full text-center py-10">没有找到图片。</p>'; } else { adminLoadedImages.forEach(renderImageCard); } renderPaginationControls(data.page, data.totalPages); } catch (error) { if(error.message !== 'Unauthorized') DOMElements.imageList.innerHTML = `<p class="text-red-500 col-span-full text-center py-10">加载图片失败: ${error.message}</p>`; } finally { DOMElements.imageLoader.classList.add('hidden'); } }
         async function loadRecycleBin() { DOMElements.imageLoader.classList.remove('hidden'); DOMElements.imageList.innerHTML = ''; DOMElements.paginationContainer.innerHTML = ''; try { const url = `/api/admin/recycle-bin?search=${encodeURIComponent(currentSearchTerm)}&page=${currentAdminPage}&limit=12`; const response = await apiRequest(url); const data = await response.json(); adminLoadedImages = data.images; const titleText = currentSearchTerm ? `在回收站中搜索 "${currentSearchTerm}"` : "回收站"; DOMElements.imageListHeader.innerHTML = `${titleText}`; if (adminLoadedImages.length === 0) { DOMElements.imageList.innerHTML = '<p class="text-slate-500 col-span-full text-center py-10">回收站是空的。</p>'; } else { adminLoadedImages.forEach(renderPurgeableImageCard); } renderPaginationControls(data.page, data.totalPages); } catch (error) { if (error.message !== 'Unauthorized') DOMElements.imageList.innerHTML = `<p class="text-red-500 col-span-full text-center py-10">加载回收站失败: ${error.message}</p>`; } finally { DOMElements.imageLoader.classList.add('hidden'); } }
@@ -919,8 +962,8 @@ cat << 'EOF' > public/admin.html
         DOMElements.addCategoryBtn.addEventListener('click', () => { showGenericModal('添加新分类', '<form id="modal-form"><input type="text" id="modal-input" placeholder="输入新分类的名称" required class="w-full border rounded px-3 py-2"></form>', '<button type="button" class="modal-cancel-btn bg-gray-300 hover:bg-gray-400 text-black py-2 px-4 rounded">取消</button><button type="submit" form="modal-form" class="bg-green-600 hover:bg-green-700 text-white py-2 px-4 rounded">保存</button>'); document.getElementById('modal-form').onsubmit = async (e) => { e.preventDefault(); const newName = document.getElementById('modal-input').value.trim(); if (!newName) return; try { await apiRequest('/api/admin/categories', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: newName }) }); hideModal(DOMElements.genericModal); showToast('分类创建成功'); await refreshNavigation(); } catch (error) { showToast(`添加失败: ${error.message}`, 'error'); } }; });
         DOMElements.editImageForm.addEventListener('submit', async (e) => { e.preventDefault(); const id = document.getElementById('edit-id').value; const body = JSON.stringify({ originalFilename: document.getElementById('edit-originalFilename').value, category: DOMElements.editCategorySelect.value, description: document.getElementById('edit-description').value }); try { await apiRequest(`/api/admin/images/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body }); hideModal(DOMElements.editImageModal); showToast('更新成功'); const activeNav = document.querySelector('.nav-item.active'); if (activeNav) { activeNav.click(); } } catch (error) { showToast(`更新失败: ${error.message}`, 'error'); } });
         
-        async function renderSecuritySection() { try { const { enabled } = await apiRequest('/api/admin/2fa/status').then(res => res.json()); let content; if (enabled) { content = `<p class="text-sm text-slate-600 mb-3">两步验证 (2FA) 当前已<span class="font-bold text-green-600">启用</span>。</p><button id="disable-tfa-btn" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg">禁用 2FA</button>`; } else { content = `<p class="text-sm text-slate-600 mb-3">通过启用两步验证，为您的账户增加一层额外的安全保障。</p><button id="enable-tfa-btn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg">启用 2FA</button>`; } DOMElements.securitySection.innerHTML = content; } catch (error) { DOMElements.securitySection.innerHTML = '<p class="text-red-500">无法加载安全状态。</p>'; } }
-        DOMElements.securitySection.addEventListener('click', async e => { if (e.target.id === 'enable-tfa-btn') { try { const data = await apiRequest('/api/admin/2fa/generate', {method: 'POST'}).then(res => res.json()); DOMElements.tfaModal.querySelector('#tfa-setup-content').innerHTML = `<p class="text-sm mb-4">1. 使用您的 Authenticator 应用 (如 Google Authenticator, Authy) 扫描下方的二维码。</p><img src="${data.qrCode}" alt="2FA QR Code" class="mx-auto border p-2 bg-white"><p class="text-sm mt-4 mb-2">或者手动输入密钥:</p><p class="font-mono bg-gray-100 p-2 rounded text-center text-sm break-all">${data.secret}</p><p class="text-sm mt-6 mb-2">2. 在下方输入应用生成的6位验证码以完成设置：</p><form id="tfa-verify-form" class="flex gap-2"><input type="text" id="tfa-token-input" required maxlength="6" class="w-full border rounded px-3 py-2" placeholder="6位数字码"><button type="submit" class="bg-green-600 hover:bg-green-700 text-white py-2 px-4 rounded">验证并启用</button></form><p id="tfa-error" class="text-red-500 text-sm mt-2 hidden"></p>`; DOMElements.tfaModal.classList.add('active'); document.getElementById('tfa-verify-form').addEventListener('submit', async ev => { ev.preventDefault(); const token = document.getElementById('tfa-token-input').value; try { const result = await apiRequest('/api/admin/2fa/enable', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ secret: data.secret, token })}).then(res => res.json()); showToast(result.message); hideModal(DOMElements.tfaModal); await renderSecuritySection(); } catch (err) { document.getElementById('tfa-error').textContent = err.message; document.getElementById('tfa-error').classList.remove('hidden'); } }); } catch (error) { showToast('无法生成2FA信息', 'error'); } } else if (e.target.id === 'disable-tfa-btn') { const confirmed = await showConfirmationModal('禁用 2FA', `<p>确定要禁用两步验证吗？您的账户安全性将会降低。</p>`, '确认禁用'); if (confirmed) { try { await apiRequest('/api/admin/2fa/disable', {method: 'POST'}); showToast('2FA已禁用'); await renderSecuritySection(); } catch(err) { showToast(err.message, 'error'); } } } });
+        async function renderSecuritySection() { try { const response = await apiRequest('/api/admin/2fa/status'); const { enabled } = await response.json(); let content; if (enabled) { content = `<p class="text-sm text-slate-600 mb-3">两步验证 (2FA) 当前已<span class="font-bold text-green-600">启用</span>。</p><button id="disable-tfa-btn" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg">禁用 2FA</button>`; } else { content = `<p class="text-sm text-slate-600 mb-3">通过启用两步验证，为您的账户增加一层额外的安全保障。</p><button id="enable-tfa-btn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg">启用 2FA</button>`; } DOMElements.securitySection.innerHTML = content; } catch (error) { DOMElements.securitySection.innerHTML = `<p class="text-red-500">无法加载安全状态: ${error.message}</p>`; } }
+        DOMElements.securitySection.addEventListener('click', async e => { if (e.target.id === 'enable-tfa-btn') { try { const response = await apiRequest('/api/admin/2fa/generate', {method: 'POST'}); const data = await response.json(); DOMElements.tfaModal.querySelector('#tfa-setup-content').innerHTML = `<p class="text-sm mb-4">1. 使用您的 Authenticator 应用 (如 Google Authenticator, Authy) 扫描下方的二维码。</p><img src="${data.qrCode}" alt="2FA QR Code" class="mx-auto border p-2 bg-white"><p class="text-sm mt-4 mb-2">或者手动输入密钥:</p><p class="font-mono bg-gray-100 p-2 rounded text-center text-sm break-all">${data.secret}</p><p class="text-sm mt-6 mb-2">2. 在下方输入应用生成的6位验证码以完成设置：</p><form id="tfa-verify-form" class="flex gap-2"><input type="text" id="tfa-token-input" required maxlength="6" class="w-full border rounded px-3 py-2" placeholder="6位数字码"><button type="submit" class="bg-green-600 hover:bg-green-700 text-white py-2 px-4 rounded">验证并启用</button></form><p id="tfa-error" class="text-red-500 text-sm mt-2 hidden"></p>`; DOMElements.tfaModal.classList.add('active'); document.getElementById('tfa-verify-form').addEventListener('submit', async ev => { ev.preventDefault(); const token = document.getElementById('tfa-token-input').value; try { const response = await apiRequest('/api/admin/2fa/enable', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ secret: data.secret, token })}); const result = await response.json(); showToast(result.message); hideModal(DOMElements.tfaModal); await renderSecuritySection(); } catch (err) { document.getElementById('tfa-error').textContent = err.message; document.getElementById('tfa-error').classList.remove('hidden'); } }); } catch (error) { showToast(error.message, 'error'); } } else if (e.target.id === 'disable-tfa-btn') { const confirmed = await showConfirmationModal('禁用 2FA', `<p>确定要禁用两步验证吗？您的账户安全性将会降低。</p>`, '确认禁用'); if (confirmed) { try { await apiRequest('/api/admin/2fa/disable', {method: 'POST'}); showToast('2FA已禁用'); await renderSecuritySection(); } catch(err) { showToast(err.message, 'error'); } } } });
         
         function updateAdminLightbox() { const item = adminLoadedImages[currentAdminLightboxIndex]; if (!item) return; const lightbox = DOMElements.adminLightbox; lightbox.querySelector('.lightbox-image').src = item.src; lightbox.querySelector('#admin-lightbox-download-link').href = item.src; lightbox.querySelector('#admin-lightbox-download-link').download = item.originalFilename; }
         function showNextAdminImage() { currentAdminLightboxIndex = (currentAdminLightboxIndex + 1) % adminLoadedImages.length; updateAdminLightbox(); }
