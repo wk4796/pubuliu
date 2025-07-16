@@ -1,12 +1,14 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v0.1.0 终版优化)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v0.1.1 终版优化)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
-#   v0.1.0 更新:
-#   - 修复 (前台): 修正了画廊容器宽度在宽屏下不自适应的问题，实现了真正的响应式布局。
-#   - 优化 (前台): 在图片加载占位符中增加了“旋转”加载动画，提供了更清晰的加载反馈。
+#   v0.1.1 更新:
+#   - 核心重构 (前台): 引入 Masonry.js 和 imagesLoaded.js，实现稳定、流畅、可平滑缩放的瀑布流布局。
+#   - 修复 (前台): 彻底解决因图片加载时机导致的布局重叠和响应式失效问题。
+#   - 确认 (功能): 明确图片排序为“最新上传的在最前”，与现有逻辑保持一致。
+#   - 保留 (动画): 根据用户反馈，保留了“转圈”+“微光”的加载动画效果。
 # =================================================================
 
 # --- 配置 ---
@@ -17,7 +19,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 PROMPT_Y="(${GREEN}y${NC}/${RED}n${NC})"
 
-SCRIPT_VERSION="0.1.0"
+SCRIPT_VERSION="0.1.1"
 APP_NAME="image-gallery"
 
 # --- 路径设置 ---
@@ -44,7 +46,7 @@ overwrite_app_files() {
 cat << 'EOF' > package.json
 {
   "name": "image-gallery-pro",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A high-performance, full-stack image gallery application with all features.",
   "main": "server.js",
   "scripts": {
@@ -167,7 +169,7 @@ app.get('/api/images', async (req, res) => {
     let images = await readDB(dbPath);
     images = images.filter(img => img.status !== 'deleted');
     
-    const { category, search, page = 1, limit = 20 } = req.query; // Default limit 20 for public API
+    const { category, search, page = 1, limit = 20 } = req.query;
 
     if (search) {
         const searchTerm = search.toLowerCase();
@@ -179,6 +181,7 @@ app.get('/api/images', async (req, res) => {
     } else if (category === 'random') {
         images.sort(() => 0.5 - Math.random());
     } else {
+        // 默认排序：最新上传的在最前 ( descending order)
         images.sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt));
     }
     
@@ -453,7 +456,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 })();
 EOF
 
-    echo "--> 正在生成主画廊 public/index.html (v0.1.0)..."
+    echo "--> 正在生成主画廊 public/index.html (v0.1.1)..."
 cat << 'EOF' > public/index.html
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -467,6 +470,8 @@ cat << 'EOF' > public/index.html
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/masonry-layout@4/dist/masonry.pkgd.min.js"></script>
+    <script src="https://unpkg.com/imagesloaded@5/imagesloaded.pkgd.min.js"></script>
 
     <style>
         :root {
@@ -498,13 +503,15 @@ cat << 'EOF' > public/index.html
         #search-overlay.active #search-box { transform: translateY(0) scale(1); opacity: 1; }
         #search-input:focus { outline: none; }
         
-        #gallery-container { column-gap: 1rem; column-count: 2; }
-        @media (min-width: 640px) { #gallery-container { column-count: 3; } }
-        @media (min-width: 768px) { #gallery-container { column-count: 4; } }
-        @media (min-width: 1024px) { #gallery-container { column-count: 5; } }
-        @media (min-width: 1280px) { #gallery-container { column-count: 6; } }
+        .grid-item {
+            width: 48%; /* For 2-column layout on mobile */
+            margin-bottom: 1rem;
+        }
+        @media (min-width: 640px) { .grid-item { width: 32%; } } /* 3 columns */
+        @media (min-width: 768px) { .grid-item { width: 24%; } } /* 4 columns */
+        @media (min-width: 1024px) { .grid-item { width: 19%; } } /* 5 columns */
+        @media (min-width: 1280px) { .grid-item { width: 15.8%; } } /* 6 columns */
 
-        .grid-item { margin-bottom: 1rem; break-inside: avoid; }
         .grid-item > a { display: block; border-radius: 0.5rem; overflow: hidden; cursor: pointer; text-decoration: none; }
         
         .image-placeholder { position: relative; width: 100%; height: 0; background-color: var(--grid-item-bg); border-radius: 0.5rem; overflow: hidden; }
@@ -516,7 +523,7 @@ cat << 'EOF' > public/index.html
         @keyframes spin { to { transform: rotate(360deg); } }
         .image-placeholder.item-loaded .spinner { opacity: 0; }
 
-        .image-placeholder img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity 0.4s ease-in-out; }
+        .image-placeholder img { display: block; width: 100%; height: auto; opacity: 0; transition: opacity 0.4s ease-in-out; }
         .image-placeholder img.loaded { opacity: 1; }
 
         .filter-btn { padding: 0.5rem 1rem; border-radius: 9999px; font-weight: 500; transition: all 0.2s ease; border: 1px solid transparent; cursor: pointer; background-color: transparent; color: var(--filter-btn-color); }
@@ -555,7 +562,7 @@ cat << 'EOF' > public/index.html
     <div class="border-b-2" style="border-color: var(--divider-color);"></div>
 
     <main class="max-w-7xl mx-auto w-full px-4 py-8 md:py-10">
-        <div id="gallery-container"></div>
+        <div id="gallery-container" class="mx-auto"></div>
         <div id="loader" class="text-center py-8 hidden">正在加载更多...</div>
     </main>
     
@@ -573,6 +580,7 @@ cat << 'EOF' > public/index.html
         const filterButtonsContainer = document.getElementById('filter-buttons');
         const header = document.querySelector('.header-sticky');
         
+        let masonry;
         let allLoadedImages = []; let currentFilter = 'all'; let currentSearch = ''; let currentPage = 1; let isLoading = false; let hasMoreImages = true; let lastFocusedElement;
         
         const searchToggleBtn = document.getElementById('search-toggle-btn');
@@ -596,7 +604,7 @@ cat << 'EOF' > public/index.html
         applyTheme(localStorage.getItem('theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
 
         const fetchJSON = async (url) => { const response = await fetch(url); if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`); return response.json(); };
-        const resetGallery = () => { galleryContainer.innerHTML = ''; allLoadedImages = []; currentPage = 1; hasMoreImages = true; window.scrollTo(0, 0); loader.textContent = '正在加载更多...'; };
+        const resetGallery = () => { masonry.remove(galleryContainer.children); masonry.layout(); allLoadedImages = []; currentPage = 1; hasMoreImages = true; window.scrollTo(0, 0); loader.textContent = '正在加载更多...'; };
         const fetchAndRenderImages = async () => {
             if (isLoading || !hasMoreImages) return;
             isLoading = true;
@@ -606,7 +614,12 @@ cat << 'EOF' > public/index.html
                 const data = await fetchJSON(url);
                 loader.classList.add('hidden');
                 if (data.images && data.images.length > 0) {
-                    renderItems(data.images);
+                    const items = renderItems(data.images);
+                    galleryContainer.appendChild(items);
+                    masonry.appended(Array.from(items.children));
+                    imagesLoaded(galleryContainer, () => {
+                        masonry.layout();
+                    });
                     allLoadedImages.push(...data.images);
                     currentPage++;
                     hasMoreImages = data.hasMore;
@@ -626,17 +639,18 @@ cat << 'EOF' > public/index.html
                 const aspectRatio = (image.height && image.width) ? (image.height / image.width) * 100 : 100;
                 const link = document.createElement('a');
                 link.href = "#"; link.setAttribute('role', 'button'); link.setAttribute('aria-label', image.description || image.originalFilename);
+                // The placeholder height is now handled by the image itself having intrinsic dimensions
                 link.innerHTML = `
-                    <div class="image-placeholder" style="padding-bottom: ${aspectRatio}%;">
+                    <div class="image-placeholder">
                         <div class="spinner"></div>
                         <img src="/image-proxy/${image.filename}?w=500" alt="${image.description || image.originalFilename}"
-                             onload="this.classList.add('loaded'); this.parentElement.classList.add('item-loaded');"
-                             onerror="this.closest('.grid-item').style.display='none';">
+                             onload="this.classList.add('loaded'); this.parentElement.classList.add('item-loaded'); masonry.layout();"
+                             onerror="this.closest('.grid-item').style.display='none'; masonry.layout();">
                     </div>`;
                 item.appendChild(link);
                 fragment.appendChild(item);
             });
-            galleryContainer.appendChild(fragment);
+            return fragment;
         };
         
         const createFilterButtons = async () => { try { const categories = await fetchJSON('/api/public/categories'); filterButtonsContainer.querySelectorAll('.dynamic-filter').forEach(btn => btn.remove()); categories.forEach(category => { const button = document.createElement('button'); button.className = 'filter-btn dynamic-filter'; button.dataset.filter = category; button.textContent = category; filterButtonsContainer.appendChild(button); }); } catch (error) { console.error('无法加载分类按钮:', error); } };
@@ -658,7 +672,17 @@ cat << 'EOF' > public/index.html
         function handleScroll() { const currentScrollY = window.scrollY; if (currentScrollY > 300) backToTopBtn.classList.add('visible'); else backToTopBtn.classList.remove('visible'); if (currentScrollY > lastScrollY && currentScrollY > header.offsetHeight) { header.classList.add('is-hidden'); } else { header.classList.remove('is-hidden'); } lastScrollY = currentScrollY <= 0 ? 0 : currentScrollY; if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 500) { fetchAndRenderImages(); } }
         window.addEventListener('scroll', () => { if (!ticking) { window.requestAnimationFrame(() => { handleScroll(); ticking = false; }); ticking = true; } }); 
         
-        async function init() { await createFilterButtons(); await fetchAndRenderImages(); }
+        async function init() { 
+            masonry = new Masonry(galleryContainer, {
+                itemSelector: '.grid-item',
+                columnWidth: '.grid-item',
+                percentPosition: true,
+                gutter: 16,
+                transitionDuration: '0.3s'
+            });
+            await createFilterButtons(); 
+            await fetchAndRenderImages(); 
+        }
         init();
     });
     </script>
