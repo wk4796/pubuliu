@@ -1,18 +1,16 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v0.0.1 全新功能版)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v0.0.2 功能优化版)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
-#   v0.0.1 更新:
-#   - 新增(功能): 菜单增加端口修改功能，并检查端口是否被占用。
-#   - 新增(功能): 增加 2FA (双因素认证) 功能，可在后台配置，增强安全性。
-#   - 新增(功能): 增加回收站功能，防止误删图片，可在后台恢复或彻底删除。
-#   - 新增(功能): 增加数据备份与恢复功能，保障数据安全。
-#   - 优化(UI): 前台画廊标题实现真正的水平居中。
-#   - 优化(UI): 实现页脚在内容不足一屏时依然固定在底部。
-#   - 优化(UI): 针对手机、平板、电脑优化了瀑布流的图片列宽，提升浏览体验。
-#   - 更新(版本): 版本号更新为 0.0.1，标志着新的开始。
+#   v0.0.2 更新:
+#   - 优化(菜单): 管理脚本的菜单选项改为单列垂直排列，更清晰。
+#   - 优化(UI): 前端画廊的顶部栏（标题和分类）在向下滚动时会自动隐藏，向上滚动时出现。
+#   - 优化(UI): 美化了前端的搜索弹窗，使用模糊背景和更现代的输入框样式。
+#   - 优化(后台): 登录页面会动态检查2FA状态，仅在启用时才显示2FA输入框。
+#   - 优化(后台): "导航"模块改名为"图库"。
+#   - 修复(后台): 重构了图库的分类和回收站的结构，修复了分类无法点击筛选的BUG。
 # =================================================================
 
 # --- 配置 ---
@@ -23,7 +21,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 PROMPT_Y="(${GREEN}y${NC}/${RED}n${NC})"
 
-SCRIPT_VERSION="0.0.1"
+SCRIPT_VERSION="0.0.2"
 APP_NAME="image-gallery"
 
 # --- 路径设置 ---
@@ -52,7 +50,7 @@ EOF
 cat << 'EOF' > package.json
 {
   "name": "image-gallery-pro",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "A high-performance, full-stack image gallery application with all features.",
   "main": "server.js",
   "scripts": {
@@ -135,6 +133,14 @@ const authMiddleware = (isApi) => (req, res, next) => {
 const requirePageAuth = authMiddleware(false);
 const requireApiAuth = authMiddleware(true);
 
+// New endpoint to check 2FA status without authentication
+app.get('/api/2fa/is-enabled', async (req, res) => {
+    // We need to read the config fresh here as this is unauthenticated
+    const currentConfig = await readDB(configPath, {});
+    const isEnabled = !!(currentConfig.tfa && currentConfig.tfa.secret);
+    res.json({ enabled: isEnabled });
+});
+
 app.post('/api/login', async (req, res) => {
     const { username, password, tfa_token } = req.body;
     if (username !== ADMIN_USERNAME || password !== ADMIN_PASSWORD) {
@@ -143,13 +149,16 @@ app.post('/api/login', async (req, res) => {
     
     appConfig = await readDB(configPath, {});
     if (appConfig.tfa && appConfig.tfa.secret) {
+        if (!tfa_token) {
+             return res.redirect('/login.html?error=2'); // 2 for TFA missing
+        }
         const verified = speakeasy.totp.verify({
             secret: appConfig.tfa.secret,
             encoding: 'base32',
             token: tfa_token,
         });
         if (!verified) {
-            return res.redirect('/login.html?error=2'); // 2 for TFA error
+            return res.redirect('/login.html?error=3'); // 3 for TFA incorrect
         }
     }
 
@@ -434,7 +443,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 })();
 EOF
 
-    echo "--> 正在生成主画廊 public/index.html (v0.0.1 全新功能版)..."
+    echo "--> 正在生成主画廊 public/index.html (v0.0.2 功能优化版)..."
 cat << 'EOF' > public/index.html
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -451,20 +460,19 @@ cat << 'EOF' > public/index.html
 
     <style>
         :root {
-            --bg-color: #f0fdf4; --text-color: #14532d; --header-bg-scrolled: rgba(240, 253, 244, 0.85);
+            --bg-color: #f0fdf4; --text-color: #14532d; --header-bg: rgba(240, 253, 244, 0.85);
             --filter-btn-color: #166534; --filter-btn-hover-bg: #dcfce7; --filter-btn-active-bg: #22c55e;
             --filter-btn-active-border: #16a34a; --grid-item-bg: #e4e4e7; --search-bg: #ffffff;
             --search-placeholder-color: #9ca3af; --divider-color: #dcfce7;
         }
         body.dark {
-            --bg-color: #111827; --text-color: #a7f3d0; --header-bg-scrolled: rgba(17, 24, 39, 0.85);
+            --bg-color: #111827; --text-color: #a7f3d0; --header-bg: rgba(17, 24, 39, 0.85);
             --filter-btn-color: #a7f3d0; --filter-btn-hover-bg: #1f2937; --filter-btn-active-bg: #16a34a;
             --filter-btn-active-border: #15803d; --grid-item-bg: #374151; --search-bg: #1f2937;
             --search-placeholder-color: #6b7280; --divider-color: #166534;
         }
         
-        /* 核心修改 #6: Sticky Footer */
-        html { height: 100%; }
+        html { height: 100%; scroll-behavior: smooth; }
         body { 
             font-family: 'Inter', 'Noto Sans SC', sans-serif; 
             background-color: var(--bg-color); color: var(--text-color);
@@ -473,24 +481,43 @@ cat << 'EOF' > public/index.html
         main { flex-grow: 1; }
         body.overflow-hidden { overflow: hidden; }
 
-        .header-sticky { padding-top: 1rem; padding-bottom: 1rem; background-color: rgba(240, 253, 244, 0); position: sticky; top: 0; z-index: 40; box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05); transition: padding 0.3s ease-in-out, background-color 0.3s ease-in-out; }
-        .header-sticky #header-top { transition: opacity 0.3s ease-in-out, height 0.3s ease-in-out, margin-bottom 0.3s ease-in-out; }
-        .header-sticky.is-scrolled { padding-top: 0.5rem; padding-bottom: 0.5rem; background-color: var(--header-bg-scrolled); backdrop-filter: blur(8px); }
-        .header-sticky.is-scrolled #header-top { opacity: 0; height: 0; margin-bottom: 0; pointer-events: none; overflow: hidden; }
+        /* 优化 #2: 自动隐藏的顶部栏 */
+        .header-sticky { 
+            background-color: var(--header-bg);
+            backdrop-filter: blur(8px);
+            position: sticky; top: 0; z-index: 40; 
+            box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+            transition: transform 0.3s ease-in-out;
+            will-change: transform;
+        }
+        .header-sticky.is-hidden {
+            transform: translateY(-100%);
+        }
         
-        #search-overlay { opacity: 0; visibility: hidden; transition: opacity 0.3s ease, visibility 0s 0.3s; }
+        /* 优化 #3: 搜索框美化 */
+        #search-overlay { 
+            opacity: 0; visibility: hidden; transition: opacity 0.3s ease, visibility 0s 0.3s;
+            background-color: rgba(0,0,0,0.3);
+            -webkit-backdrop-filter: blur(8px);
+            backdrop-filter: blur(8px);
+        }
         #search-overlay.active { opacity: 1; visibility: visible; transition: opacity 0.3s ease, visibility 0s 0s; }
-        #search-box { transform: scale(0.95); opacity: 0; transition: transform 0.3s ease, opacity 0.3s ease; }
-        #search-overlay.active #search-box { transform: scale(1); opacity: 1; }
+        #search-box { transform: translateY(-20px) scale(0.98); opacity: 0; transition: transform 0.3s ease, opacity 0.3s ease; }
+        #search-overlay.active #search-box { transform: translateY(0) scale(1); opacity: 1; }
+        #search-input {
+             background-color: var(--search-bg); color: var(--text-color);
+             border-width: 1px; border-color: transparent;
+        }
+        #search-input:focus {
+            outline: none;
+            border-color: #22c55e;
+            box-shadow: 0 0 0 2px var(--bg-color), 0 0 0 4px #22c55e;
+        }
         
-        /* 核心修改 #7: 响应式瀑布流 */
-        /* 默认 (手机) */
+        /* 响应式瀑布流 */
         .grid-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); grid-auto-rows: 10px; gap: 0.75rem; }
-        /* 平板 */
         @media (min-width: 768px) { .grid-gallery { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 1rem; } }
-        /* 桌面 */
         @media (min-width: 1024px) { .grid-gallery { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; } }
-
         .grid-item { position: relative; border-radius: 0.5rem; overflow: hidden; background-color: var(--grid-item-bg); box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1); opacity: 0; transform: translateY(20px); transition: opacity 0.5s ease-out, transform 0.5s ease-out, box-shadow 0.3s ease; }
         .grid-item-wide { grid-column: span 2; }
         @media (max-width: 400px) { .grid-item-wide { grid-column: span 1; } }
@@ -517,21 +544,25 @@ cat << 'EOF' > public/index.html
 </head>
 <body class="antialiased">
 
-    <header class="text-center header-sticky">
-        <div id="header-top" class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between h-auto md:h-14 mb-4">
-            <div class="flex-1"></div> <h1 class="text-4xl md:text-5xl font-bold text-center whitespace-nowrap">图片画廊</h1>
-            <div class="flex-1 flex items-center justify-end gap-1"> <button id="search-toggle-btn" title="搜索" class="p-2 rounded-full text-[var(--text-color)] hover:bg-gray-500/10">
-                    <svg class="w-6 h-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg>
-                </button>
-                <button id="theme-toggle" title="切换主题" class="p-2 rounded-full text-[var(--text-color)] hover:bg-gray-500/10">
-                    <svg id="theme-icon-sun" class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
-                    <svg id="theme-icon-moon" class="w-6 h-6 hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" /></svg>
-                </button>
+    <header class="text-center header-sticky py-3">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center justify-between h-auto md:h-14 mb-4">
+                <div class="flex-1"></div>
+                <h1 class="text-4xl md:text-5xl font-bold text-center whitespace-nowrap">图片画廊</h1>
+                <div class="flex-1 flex items-center justify-end gap-1">
+                    <button id="search-toggle-btn" title="搜索" class="p-2 rounded-full text-[var(--text-color)] hover:bg-gray-500/10">
+                        <svg class="w-6 h-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg>
+                    </button>
+                    <button id="theme-toggle" title="切换主题" class="p-2 rounded-full text-[var(--text-color)] hover:bg-gray-500/10">
+                        <svg id="theme-icon-sun" class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
+                        <svg id="theme-icon-moon" class="w-6 h-6 hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" /></svg>
+                    </button>
+                </div>
             </div>
-        </div>
-        <div id="filter-buttons" class="flex justify-center flex-wrap gap-2 px-4">
-            <button class="filter-btn active" data-filter="all">全部</button>
-            <button class="filter-btn" data-filter="random">随机</button>
+            <div id="filter-buttons" class="flex justify-center flex-wrap gap-2 px-4">
+                <button class="filter-btn active" data-filter="all">全部</button>
+                <button class="filter-btn" data-filter="random">随机</button>
+            </div>
         </div>
     </header>
     
@@ -546,13 +577,10 @@ cat << 'EOF' > public/index.html
         <p>© 2025 图片画廊</p>
     </footer>
 
-    <div id="search-overlay" class="fixed inset-0 z-50 flex items-start justify-center pt-24 md:pt-32 p-4 bg-black/30">
-        <div id="search-box" class="w-full max-w-lg relative flex items-center gap-2">
-            <div class="absolute top-1/2 left-5 -translate-y-1/2 text-gray-400">
-                <svg class="w-6 h-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg>
-            </div>
-            <input type="search" id="search-input" placeholder="输入关键词，按 Enter 或点击按钮..." class="w-full py-4 pl-14 pr-5 text-lg rounded-lg border-0 shadow-2xl focus:ring-2 focus:ring-green-500" style="background-color: var(--search-bg); color: var(--text-color);">
-            <button id="search-exec-btn" class="bg-green-600 hover:bg-green-700 text-white font-bold py-4 px-5 rounded-lg transition-colors absolute right-0 top-0 h-full">
+    <div id="search-overlay" class="fixed inset-0 z-50 flex items-start justify-center pt-24 md:pt-32 p-4">
+        <div id="search-box" class="w-full max-w-lg relative">
+            <input type="search" id="search-input" placeholder="输入关键词，按 Enter 搜索..." class="w-full py-4 pl-6 pr-16 text-lg rounded-lg shadow-lg">
+             <button id="search-exec-btn" class="absolute h-full right-0 top-0 text-gray-500 hover:text-green-600 px-5 transition-colors">
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg>
             </button>
         </div>
@@ -586,6 +614,7 @@ cat << 'EOF' > public/index.html
         
         const performSearch = () => {
             const newSearchTerm = searchInput.value.trim();
+            if (newSearchTerm === currentSearch) { closeSearch(); return; }
             currentSearch = newSearchTerm;
             document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
             filterButtonsContainer.querySelector('[data-filter="all"]').classList.add('active');
@@ -678,19 +707,33 @@ cat << 'EOF' > public/index.html
         lightbox.addEventListener('click', (e) => { const target = e.target; if (target.matches('.lb-next')) showNextImage(); else if (target.matches('.lb-prev')) showPrevImage(); else if (target.matches('.lb-close') || target === lightbox) closeLightbox(); });
         document.addEventListener('keydown', (e) => { if (lightbox.classList.contains('active')) { if (e.key === 'ArrowLeft') showPrevImage(); else if (e.key === 'ArrowRight') showNextImage(); else if (e.key === 'Escape') closeLightbox(); } });
         
-        const backToTopBtn = document.querySelector('.back-to-top'); let ticking = false;
+        const backToTopBtn = document.querySelector('.back-to-top');
         backToTopBtn.addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' })); 
         
+        let lastScrollY = window.scrollY;
+        let ticking = false;
+
         function handleScroll() {
             const currentScrollY = window.scrollY;
-            if (currentScrollY > 300) { backToTopBtn.classList.add('visible'); } 
-            else { backToTopBtn.classList.remove('visible'); } 
-            if (currentScrollY > 10) { header.classList.add('is-scrolled'); } 
-            else { header.classList.remove('is-scrolled'); }
+            
+            // Back to top button visibility
+            if (currentScrollY > 300) backToTopBtn.classList.add('visible'); 
+            else backToTopBtn.classList.remove('visible'); 
+            
+            // Auto-hide header
+            if (currentScrollY > lastScrollY && currentScrollY > header.offsetHeight) {
+                header.classList.add('is-hidden');
+            } else {
+                header.classList.remove('is-hidden');
+            }
+            lastScrollY = currentScrollY;
+
+            // Infinite scroll
             if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 500) { fetchAndRenderImages(); } 
         }
 
         window.addEventListener('scroll', () => { if (!ticking) { window.requestAnimationFrame(() => { handleScroll(); ticking = false; }); ticking = true; } }); 
+        
         (async function init() { await createFilterButtons(); await fetchAndRenderImages(); })();
     });
     </script>
@@ -700,7 +743,7 @@ EOF
 
     echo "--> 正在生成后台登录页 public/login.html..."
 cat << 'EOF' > public/login.html
-<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>后台登录 - 图片画廊</title><script src="https://cdn.tailwindcss.com"></script><style> body { background-color: #f0fdf4; } </style></head><body class="antialiased text-green-900"><div class="min-h-screen flex items-center justify-center"><div class="max-w-md w-full bg-white p-8 rounded-lg shadow-lg"><h1 class="text-3xl font-bold text-center text-green-900 mb-6">后台管理登录</h1><div id="error-message-creds" class="hidden bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4" role="alert"><strong class="font-bold">登录失败！</strong><span class="block sm:inline">用户名或密码不正确。</span></div><div id="error-message-tfa" class="hidden bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4" role="alert"><strong class="font-bold">验证失败！</strong><span class="block sm:inline">两步验证码(2FA)不正确。</span></div><form action="/api/login" method="POST"><div class="mb-4"><label for="username" class="block text-green-800 text-sm font-bold mb-2">用户名</label><input type="text" id="username" name="username" required class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-green-500"></div><div class="mb-4"><label for="password" class="block text-green-800 text-sm font-bold mb-2">密码</label><input type="password" id="password" name="password" required class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 mb-3 leading-tight focus:outline-none focus:ring-2 focus:ring-green-500"></div><div class="mb-6"><label for="tfa_token" class="block text-green-800 text-sm font-bold mb-2">两步验证码 (2FA)</label><input type="text" id="tfa_token" name="tfa_token" placeholder="如果启用了2FA，请填写" autocomplete="off" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-green-500"></div><div class="flex items-center justify-between"><button type="submit" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg focus:outline-none focus:shadow-outline transition-colors"> 登 录 </button></div></form></div></div><script> const urlParams = new URLSearchParams(window.location.search); if (urlParams.get('error') === '1') { document.getElementById('error-message-creds').classList.remove('hidden'); } if (urlParams.get('error') === '2') { document.getElementById('error-message-tfa').classList.remove('hidden'); } </script></body></html>
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>后台登录 - 图片画廊</title><script src="https://cdn.tailwindcss.com"></script><style> body { background-color: #f0fdf4; } </style></head><body class="antialiased text-green-900"><div class="min-h-screen flex items-center justify-center"><div class="max-w-md w-full bg-white p-8 rounded-lg shadow-lg"><h1 class="text-3xl font-bold text-center text-green-900 mb-6">后台管理登录</h1><div id="error-message-creds" class="hidden bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4" role="alert"><strong class="font-bold">登录失败！</strong><span class="block sm:inline">用户名或密码不正确。</span></div><div id="error-message-tfa" class="hidden bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4" role="alert"><strong class="font-bold">验证失败！</strong><span class="block sm:inline">两步验证码(2FA)不正确或未填写。</span></div><form action="/api/login" method="POST"><div class="mb-4"><label for="username" class="block text-green-800 text-sm font-bold mb-2">用户名</label><input type="text" id="username" name="username" required class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-green-500"></div><div class="mb-4"><label for="password" class="block text-green-800 text-sm font-bold mb-2">密码</label><input type="password" id="password" name="password" required class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 mb-3 leading-tight focus:outline-none focus:ring-2 focus:ring-green-500"></div><div id="tfa-container" class="mb-6 hidden"><label for="tfa_token" class="block text-green-800 text-sm font-bold mb-2">两步验证码 (2FA)</label><input type="text" id="tfa_token" name="tfa_token" placeholder="6位数字验证码" autocomplete="off" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-green-500"></div><div class="flex items-center justify-between"><button type="submit" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg focus:outline-none focus:shadow-outline transition-colors"> 登 录 </button></div></form></div></div><script>document.addEventListener('DOMContentLoaded', function() { const urlParams = new URLSearchParams(window.location.search); if (urlParams.get('error') === '1') { document.getElementById('error-message-creds').classList.remove('hidden'); } else if (urlParams.get('error') === '2' || urlParams.get('error') === '3') { document.getElementById('error-message-tfa').classList.remove('hidden'); } fetch('/api/2fa/is-enabled').then(res => res.json()).then(data => { if (data.enabled) { document.getElementById('tfa-container').classList.remove('hidden'); } }).catch(err => console.error("Could not check 2FA status", err)); });</script></body></html>
 EOF
 
     echo "--> 正在生成后台管理页 public/admin.html..."
@@ -710,7 +753,7 @@ cat << 'EOF' > public/admin.html
 <head>
     <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>后台管理 - 图片画廊</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <style> body { background-color: #f8fafc; } .modal, .toast, .lightbox { display: none; } .modal.active, .lightbox.active { display: flex; } body.lightbox-open { overflow: hidden; } .category-item.active { background-color: #dcfce7; font-weight: bold; } .toast { position: fixed; top: 1.5rem; right: 1.5rem; z-index: 9999; transform: translateX(120%); transition: transform 0.3s ease-in-out; } .toast.show { transform: translateX(0); } .file-preview-item.upload-success { background-color: #f0fdf4; } .file-preview-item.upload-error { background-color: #fef2f2; } .lightbox { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.9); justify-content: center; align-items: center; z-index: 1000; opacity: 0; visibility: hidden; transition: opacity 0.3s ease; } .lightbox.active { opacity: 1; visibility: visible; } .lightbox-image { max-width: 85%; max-height: 85%; display: block; object-fit: contain; } .lightbox-btn { position: absolute; top: 50%; transform: translateY(-50%); background-color: rgba(255,255,255,0.1); color: white; border: none; font-size: 2.5rem; cursor: pointer; padding: 0.5rem 1rem; border-radius: 0.5rem; transition: background-color 0.2s; } .lb-prev { left: 1rem; } .lb-next { right: 1rem; } .lb-close { top: 1rem; right: 1rem; font-size: 2rem; } .lb-download { position: absolute; bottom: 1rem; right: 1rem; background-color: #22c55e; color: white; border: none; padding: 0.5rem 1rem; border-radius: 0.5rem; cursor: pointer; transition: background-color 0.2s; font-size: 1rem; text-decoration: none; } .lb-download:hover { background-color: #16a34a; } #file-preview-list { resize: vertical; } .category-item { outline: none !important; } .category-item:focus { box-shadow: none !important; ring: 0 !important; } </style>
+    <style> body { background-color: #f8fafc; } .modal, .toast, .lightbox { display: none; } .modal.active, .lightbox.active { display: flex; } body.lightbox-open { overflow: hidden; } .nav-item.active { background-color: #dcfce7; font-weight: bold; } .toast { position: fixed; top: 1.5rem; right: 1.5rem; z-index: 9999; transform: translateX(120%); transition: transform 0.3s ease-in-out; } .toast.show { transform: translateX(0); } .file-preview-item.upload-success { background-color: #f0fdf4; } .file-preview-item.upload-error { background-color: #fef2f2; } .lightbox { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.9); justify-content: center; align-items: center; z-index: 1000; opacity: 0; visibility: hidden; transition: opacity 0.3s ease; } .lightbox.active { opacity: 1; visibility: visible; } .lightbox-image { max-width: 85%; max-height: 85%; display: block; object-fit: contain; } .lightbox-btn { position: absolute; top: 50%; transform: translateY(-50%); background-color: rgba(255,255,255,0.1); color: white; border: none; font-size: 2.5rem; cursor: pointer; padding: 0.5rem 1rem; border-radius: 0.5rem; transition: background-color 0.2s; } .lb-prev { left: 1rem; } .lb-next { right: 1rem; } .lb-close { top: 1rem; right: 1rem; font-size: 2rem; } .lb-download { position: absolute; bottom: 1rem; right: 1rem; background-color: #22c55e; color: white; border: none; padding: 0.5rem 1rem; border-radius: 0.5rem; cursor: pointer; transition: background-color 0.2s; font-size: 1rem; text-decoration: none; } .lb-download:hover { background-color: #16a34a; } #file-preview-list { resize: vertical; } .nav-item { outline: none !important; } .nav-item:focus-within { box-shadow: none !important; ring: 0 !important; } </style>
 </head>
 <body class="antialiased text-slate-800">
     <header class="bg-white shadow-md p-4 flex justify-between items-center sticky top-0 z-20">
@@ -740,12 +783,12 @@ cat << 'EOF' > public/admin.html
             </section>
             
             <section class="bg-white p-6 rounded-lg shadow-md">
-                <h2 class="text-xl font-semibold mb-4">导航</h2>
+                <h2 class="text-xl font-semibold mb-4">图库</h2>
                 <div id="navigation-list" class="space-y-1">
-                    <div id="nav-item-all" class="category-item flex items-center gap-3 p-2 rounded cursor-pointer hover:bg-gray-100 active"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 text-slate-500"><path fill-rule="evenodd" d="M1 5.25A2.25 2.25 0 013.25 3h13.5A2.25 2.25 0 0119 5.25v9.5A2.25 2.25 0 0116.75 17H3.25A2.25 2.25 0 011 14.75v-9.5zm1.5 5.81v3.69c0 .414.336.75.75.75h13.5a.75.75 0 00.75-.75v-3.69l-2.72-2.72a.75.75 0 00-1.06 0L11.5 10l-1.72-1.72a.75.75 0 00-1.06 0l-4 4zM12.5 7a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z" clip-rule="evenodd" /></svg><span class="category-name flex-grow">所有图片</span></div>
-                    <div id="nav-item-recycle-bin" class="category-item flex items-center gap-3 p-2 rounded cursor-pointer hover:bg-gray-100"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 text-slate-500"><path fill-rule="evenodd" d="M8.75 1A2.75 2.75 0 006 3.75V4.5h8V3.75A2.75 2.75 0 0011.25 1h-2.5zM10 4.5a.75.75 0 00-1.5 0v.75h1.5v-.75zM15.25 6H4.75a.75.75 0 000 1.5h10.5a.75.75 0 000-1.5zM4.75 9.75a.75.75 0 01.75-.75h8.5a.75.75 0 010 1.5h-8.5a.75.75 0 01-.75-.75zM5.5 12a.75.75 0 00-1.5 0v2.75A2.75 2.75 0 006.75 17h6.5A2.75 2.75 0 0016 14.75V12a.75.75 0 00-1.5 0v2.75a1.25 1.25 0 01-1.25 1.25h-6.5a1.25 1.25 0 01-1.25-1.25V12z" clip-rule="evenodd" /></svg><span class="category-name flex-grow">回收站</span></div>
+                    <div id="nav-item-all" data-view="all" class="nav-item flex items-center gap-3 p-2 rounded cursor-pointer hover:bg-gray-100 active"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 text-slate-500"><path fill-rule="evenodd" d="M1 5.25A2.25 2.25 0 013.25 3h13.5A2.25 2.25 0 0119 5.25v9.5A2.25 2.25 0 0116.75 17H3.25A2.25 2.25 0 011 14.75v-9.5zm1.5 5.81v3.69c0 .414.336.75.75.75h13.5a.75.75 0 00.75-.75v-3.69l-2.72-2.72a.75.75 0 00-1.06 0L11.5 10l-1.72-1.72a.75.75 0 00-1.06 0l-4 4zM12.5 7a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z" clip-rule="evenodd" /></svg><span class="category-name flex-grow">所有图片</span></div>
+                    <div id="category-dynamic-list"></div>
                     <hr class="my-2">
-                    <div id="category-management-list" class="space-y-1"></div>
+                    <div id="nav-item-recycle-bin" data-view="recycle_bin" class="nav-item flex items-center gap-3 p-2 rounded cursor-pointer hover:bg-gray-100"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 text-slate-500"><path fill-rule="evenodd" d="M8.75 1A2.75 2.75 0 006 3.75V4.5h8V3.75A2.75 2.75 0 0011.25 1h-2.5zM10 4.5a.75.75 0 00-1.5 0v.75h1.5v-.75zM15.25 6H4.75a.75.75 0 000 1.5h10.5a.75.75 0 000-1.5zM4.75 9.75a.75.75 0 01.75-.75h8.5a.75.75 0 010 1.5h-8.5a.75.75 0 01-.75-.75zM5.5 12a.75.75 0 00-1.5 0v2.75A2.75 2.75 0 006.75 17h6.5A2.75 2.75 0 0016 14.75V12a.75.75 0 00-1.5 0v2.75a1.25 1.25 0 01-1.25 1.25h-6.5a1.25 1.25 0 01-1.25-1.25V12z" clip-rule="evenodd" /></svg><span class="category-name flex-grow">回收站</span></div>
                 </div>
             </section>
             
@@ -769,7 +812,17 @@ cat << 'EOF' > public/admin.html
     <script>
     document.addEventListener('DOMContentLoaded', function() {
         // --- DOM Elements & State ---
-        const UNCATEGORIZED = '未分类'; const DOMElements = { uploadForm: document.getElementById('upload-form'), uploadBtn: document.getElementById('upload-btn'), imageInput: document.getElementById('image-input'), dropZone: document.getElementById('drop-zone'), unifiedDescription: document.getElementById('unified-description'), filePreviewContainer: document.getElementById('file-preview-container'), filePreviewList: document.getElementById('file-preview-list'), uploadSummary: document.getElementById('upload-summary'), categorySelect: document.getElementById('category-select'), editCategorySelect: document.getElementById('edit-category-select'), addCategoryBtn: document.getElementById('add-category-btn'), navigationList: document.getElementById('navigation-list'), navItemAll: document.getElementById('nav-item-all'), navItemRecycleBin: document.getElementById('nav-item-recycle-bin'), categoryManagementList: document.getElementById('category-management-list'), imageList: document.getElementById('image-list'), imageListHeader: document.getElementById('image-list-header'), imageLoader: document.getElementById('image-loader'), searchInput: document.getElementById('search-input'), genericModal: document.getElementById('generic-modal'), editImageModal: document.getElementById('edit-image-modal'), editImageForm: document.getElementById('edit-image-form'), adminLightbox: document.getElementById('admin-lightbox'), securitySection: document.getElementById('security-section'), tfaModal: document.getElementById('tfa-modal'), };
+        const UNCATEGORIZED = '未分类';
+        const DOMElements = {
+            uploadForm: document.getElementById('upload-form'), uploadBtn: document.getElementById('upload-btn'), imageInput: document.getElementById('image-input'),
+            dropZone: document.getElementById('drop-zone'), unifiedDescription: document.getElementById('unified-description'), filePreviewContainer: document.getElementById('file-preview-container'),
+            filePreviewList: document.getElementById('file-preview-list'), uploadSummary: document.getElementById('upload-summary'), categorySelect: document.getElementById('category-select'),
+            editCategorySelect: document.getElementById('edit-category-select'), addCategoryBtn: document.getElementById('add-category-btn'), navigationList: document.getElementById('navigation-list'),
+            categoryDynamicList: document.getElementById('category-dynamic-list'), imageList: document.getElementById('image-list'), imageListHeader: document.getElementById('image-list-header'),
+            imageLoader: document.getElementById('image-loader'), searchInput: document.getElementById('search-input'), genericModal: document.getElementById('generic-modal'),
+            editImageModal: document.getElementById('edit-image-modal'), editImageForm: document.getElementById('edit-image-form'), adminLightbox: document.getElementById('admin-lightbox'),
+            securitySection: document.getElementById('security-section'), tfaModal: document.getElementById('tfa-modal'),
+        };
         let filesToUpload = []; let adminLoadedImages = []; let currentAdminLightboxIndex = 0; let currentSearchTerm = ''; let debounceTimer; let currentView = 'all'; // 'all', 'category', 'recycle_bin'
         
         // --- API & Helpers ---
@@ -814,14 +867,64 @@ cat << 'EOF' > public/admin.html
             }
             showToast(`所有任务处理完成。`); DOMElements.uploadBtn.textContent = '上传文件'; filesToUpload = []; DOMElements.imageInput.value = ''; DOMElements.unifiedDescription.value = '';
             setTimeout(() => { DOMElements.filePreviewContainer.classList.add('hidden'); DOMElements.uploadBtn.disabled = true; }, 3000);
-            await loadImages('all');
+            await refreshAllData();
         };
         DOMElements.uploadForm.addEventListener('submit', processUploadQueue);
 
         // --- Data Loading & Rendering ---
-        async function refreshCategories() { const currentVal = DOMElements.categorySelect.value; await loadAndPopulateCategories(currentVal); await loadAndDisplayCategoriesForManagement(); }
-        async function loadAndPopulateCategories(selectedCategory = null) { try { const response = await apiRequest('/api/categories'); const categories = await response.json(); [DOMElements.categorySelect, DOMElements.editCategorySelect].forEach(select => { const currentVal = select.value; select.innerHTML = ''; categories.forEach(cat => select.add(new Option(cat, cat))); select.value = categories.includes(currentVal) ? currentVal : selectedCategory || categories[0]; }); } catch (error) { if (error.message !== 'Unauthorized') console.error('加载分类失败:', error); } }
-        async function loadAndDisplayCategoriesForManagement() { try { const response = await apiRequest('/api/categories'); const categories = await response.json(); DOMElements.categoryManagementList.innerHTML = ''; categories.forEach(cat => { const isUncategorized = cat === UNCATEGORIZED; const item = document.createElement('div'); item.className = 'category-item flex items-center justify-between p-2 rounded cursor-pointer hover:bg-gray-100 focus:outline-none focus:ring-0'; item.dataset.categoryName = cat; item.innerHTML = `<span class="category-name flex-grow">${cat}</span>` + (isUncategorized ? '' : `<div class="space-x-2 flex-shrink-0"><button data-name="${cat}" class="rename-cat-btn text-blue-500 hover:text-blue-700 text-sm">重命名</button><button data-name="${cat}" class="delete-cat-btn text-red-500 hover:red-700 text-sm">删除</button></div>`); DOMElements.categoryManagementList.appendChild(item); }); } catch (error) { if (error.message !== 'Unauthorized') console.error('加载分类管理列表失败:', error); } }
+        async function refreshAllData() {
+            await refreshNavigation();
+            const activeNav = document.querySelector('.nav-item.active');
+            if (activeNav) {
+                activeNav.click();
+            } else {
+                document.getElementById('nav-item-all').click();
+            }
+        }
+
+        async function populateCategorySelects(selectedCategory = null) {
+            try {
+                const response = await apiRequest('/api/categories');
+                const categories = await response.json();
+                [DOMElements.categorySelect, DOMElements.editCategorySelect].forEach(select => {
+                    const currentVal = select.value;
+                    select.innerHTML = '';
+                    categories.forEach(cat => select.add(new Option(cat, cat)));
+                    select.value = categories.includes(currentVal) ? currentVal : selectedCategory || categories[0];
+                });
+            } catch (error) {
+                if (error.message !== 'Unauthorized') console.error('加载分类失败:', error);
+            }
+        }
+
+        async function refreshNavigation() {
+            try {
+                const response = await apiRequest('/api/categories');
+                const categories = await response.json();
+                DOMElements.categoryDynamicList.innerHTML = ''; // Clear only dynamic part
+                categories.forEach(cat => {
+                    const isUncategorized = cat === UNCATEGORIZED;
+                    const item = document.createElement('div');
+                    item.className = 'nav-item flex items-center justify-between p-2 rounded cursor-pointer hover:bg-gray-100';
+                    item.dataset.view = 'category';
+                    item.dataset.categoryName = cat;
+                    item.innerHTML = `
+                        <span class="category-name flex-grow">${cat}</span>
+                        ` + (isUncategorized ? '' : `
+                        <div class="space-x-2 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button data-name="${cat}" class="rename-cat-btn text-blue-500 hover:text-blue-700 text-sm">重命名</button>
+                            <button data-name="${cat}" class="delete-cat-btn text-red-500 hover:red-700 text-sm">删除</button>
+                        </div>`);
+                    item.addEventListener('mouseenter', () => item.classList.add('group'));
+                    item.addEventListener('mouseleave', () => item.classList.remove('group'));
+                    DOMElements.categoryDynamicList.appendChild(item);
+                });
+                await populateCategorySelects();
+            } catch (error) {
+                if (error.message !== 'Unauthorized') console.error('加载导航列表失败:', error);
+            }
+        }
+        
         async function loadImages(category = 'all', name = '所有图片') {
             currentView = 'category'; DOMElements.imageList.innerHTML = ''; DOMElements.imageLoader.classList.remove('hidden');
             try {
@@ -829,9 +932,9 @@ cat << 'EOF' > public/admin.html
                 const response = await apiRequest(url); adminLoadedImages = (await response.json()).images;
                 DOMElements.imageLoader.classList.add('hidden');
                 const totalSize = adminLoadedImages.reduce((acc, img) => acc + (img.size || 0), 0);
-                const titleText = currentSearchTerm ? `搜索 "${currentSearchTerm}" 的结果` : name;
-                DOMElements.imageListHeader.innerHTML = `${titleText} <span class="text-base text-gray-500 font-normal">(数量: ${adminLoadedImages.length} 张, 大小: ${formatBytes(totalSize)})</span>`;
-                if (adminLoadedImages.length === 0) { DOMElements.imageList.innerHTML = '<p class="text-slate-500 col-span-full text-center">没有找到图片。</p>'; } 
+                const titleText = currentSearchTerm ? `在 "${name}" 中搜索 "${currentSearchTerm}" 的结果` : name;
+                DOMElements.imageListHeader.innerHTML = `${titleText} <span class="text-base text-gray-500 font-normal">(共 ${adminLoadedImages.length} 张, ${formatBytes(totalSize)})</span>`;
+                if (adminLoadedImages.length === 0) { DOMElements.imageList.innerHTML = '<p class="text-slate-500 col-span-full text-center py-10">没有找到图片。</p>'; } 
                 else { adminLoadedImages.forEach(renderImageCard); }
             } catch (error) { if(error.message !== 'Unauthorized') DOMElements.imageLoader.textContent = '加载图片失败。'; }
         }
@@ -840,8 +943,8 @@ cat << 'EOF' > public/admin.html
             try {
                 const response = await apiRequest('/api/admin/recycle-bin'); adminLoadedImages = await response.json();
                 DOMElements.imageLoader.classList.add('hidden');
-                DOMElements.imageListHeader.textContent = `回收站 (数量: ${adminLoadedImages.length} 张)`;
-                if (adminLoadedImages.length === 0) { DOMElements.imageList.innerHTML = '<p class="text-slate-500 col-span-full text-center">回收站是空的。</p>'; } 
+                DOMElements.imageListHeader.textContent = `回收站 (共 ${adminLoadedImages.length} 张)`;
+                if (adminLoadedImages.length === 0) { DOMElements.imageList.innerHTML = '<p class="text-slate-500 col-span-full text-center py-10">回收站是空的。</p>'; } 
                 else { adminLoadedImages.forEach(renderRecycleBinCard); }
             } catch (error) { if (error.message !== 'Unauthorized') DOMElements.imageLoader.textContent = '加载回收站失败。'; }
         }
@@ -859,37 +962,46 @@ cat << 'EOF' > public/admin.html
         
         // --- Event Listeners & Navigation ---
         DOMElements.navigationList.addEventListener('click', async (e) => {
-            document.querySelectorAll('.category-item').forEach(el => el.classList.remove('active'));
-            const navItem = e.target.closest('.category-item');
+            const navItem = e.target.closest('.nav-item');
             if (!navItem) return;
+
+            // Handle category management buttons first, and stop propagation
+            if (e.target.matches('.rename-cat-btn, .delete-cat-btn')) {
+                e.stopPropagation();
+                const catName = e.target.dataset.name;
+                if (e.target.classList.contains('rename-cat-btn')) {
+                    // Rename logic...
+                    showGenericModal(`重命名分类 "${catName}"`, '<form id="modal-form"><input type="text" id="modal-input" required class="w-full border rounded px-3 py-2"></form>', '<button type="button" class="modal-cancel-btn bg-gray-300 hover:bg-gray-400 text-black py-2 px-4 rounded">取消</button><button type="submit" form="modal-form" class="bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded">保存</button>');
+                    const input = document.getElementById('modal-input'); input.value = catName;
+                    document.getElementById('modal-form').onsubmit = async (ev) => { ev.preventDefault(); const newName = input.value.trim(); if (!newName || newName === catName) { hideModal(DOMElements.genericModal); return; } try { const response = await apiRequest('/api/admin/categories', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ oldName: catName, newName }) }); if (!response.ok) throw new Error((await response.json()).message); hideModal(DOMElements.genericModal); showToast('重命名成功'); await refreshAllData(); } catch (error) { showToast(`重命名失败: ${error.message}`, 'error'); } };
+                } else if (e.target.classList.contains('delete-cat-btn')) {
+                    // Delete logic...
+                    const confirmed = await showConfirmationModal('确认删除', `<p>确定要删除分类 "<strong>${catName}</strong>" 吗？<br>此分类下的图片将归入 "未分类"。</p>`, '确认删除');
+                    if(confirmed) { try { const response = await apiRequest('/api/admin/categories', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: catName }) }); if (!response.ok) throw new Error((await response.json()).message); showToast('删除成功'); await refreshAllData(); } catch (error) { showToast(`删除失败: ${error.message}`, 'error'); } }
+                }
+                return; 
+            }
+            
+            // Handle navigation clicks
+            document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
             navItem.classList.add('active');
             DOMElements.searchInput.value = ''; currentSearchTerm = '';
-            if (navItem.id === 'nav-item-all') { await loadImages('all', '所有图片'); }
-            else if (navItem.id === 'nav-item-recycle-bin') { await loadRecycleBin(); }
-            else if (navItem.dataset.categoryName) { const category = navItem.dataset.categoryName; await loadImages(category, category); }
+            
+            const view = navItem.dataset.view;
+            if (view === 'all') { await loadImages('all', '所有图片'); }
+            else if (view === 'recycle_bin') { await loadRecycleBin(); }
+            else if (view === 'category') { const category = navItem.dataset.categoryName; await loadImages(category, category); }
         });
         
-        DOMElements.categoryManagementList.addEventListener('click', async (e) => {
-            e.stopPropagation(); // prevent parent click
-            const target = e.target; const catName = target.dataset.name;
-            if (target.classList.contains('rename-cat-btn')) {
-                showGenericModal(`重命名分类 "${catName}"`, '<form id="modal-form"><input type="text" id="modal-input" required class="w-full border rounded px-3 py-2"></form>', '<button type="button" class="modal-cancel-btn bg-gray-300 hover:bg-gray-400 text-black py-2 px-4 rounded">取消</button><button type="submit" form="modal-form" class="bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded">保存</button>');
-                const input = document.getElementById('modal-input'); input.value = catName;
-                document.getElementById('modal-form').onsubmit = async (ev) => { ev.preventDefault(); const newName = input.value.trim(); if (!newName || newName === catName) { hideModal(DOMElements.genericModal); return; } try { const response = await apiRequest('/api/admin/categories', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ oldName: catName, newName }) }); if (!response.ok) throw new Error((await response.json()).message); hideModal(DOMElements.genericModal); showToast('重命名成功'); await Promise.all([refreshCategories(), loadImages('all')]); } catch (error) { showToast(`重命名失败: ${error.message}`, 'error'); } };
-            } else if (target.classList.contains('delete-cat-btn')) {
-                const confirmed = await showConfirmationModal('确认删除', `<p>确定要删除分类 "<strong>${catName}</strong>" 吗？<br>此分类下的图片将归入 "未分类"。</p>`, '确认删除');
-                if(confirmed) { try { const response = await apiRequest('/api/admin/categories', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: catName }) }); if (!response.ok) throw new Error((await response.json()).message); showToast('删除成功'); await Promise.all([refreshCategories(), loadImages('all')]); } catch (error) { showToast(`删除失败: ${error.message}`, 'error'); } }
-            }
-        });
         
         DOMElements.imageList.addEventListener('click', async (e) => {
             const target = e.target.closest('button, a'); if (!target) return;
             const imageId = target.dataset.id;
             if (target.matches('.preview-btn')) { currentAdminLightboxIndex = adminLoadedImages.findIndex(img => img.id === imageId); if (currentAdminLightboxIndex === -1) return; updateAdminLightbox(); DOMElements.adminLightbox.classList.add('active'); document.body.classList.add('lightbox-open');
-            } else if (target.matches('.edit-btn')) { const image = JSON.parse(target.dataset.image); await loadAndPopulateCategories(image.category); document.getElementById('edit-id').value = image.id; document.getElementById('edit-originalFilename').value = image.originalFilename; document.getElementById('edit-description').value = image.description; DOMElements.editImageModal.classList.add('active');
+            } else if (target.matches('.edit-btn')) { const image = JSON.parse(target.dataset.image); await populateCategorySelects(image.category); document.getElementById('edit-id').value = image.id; document.getElementById('edit-originalFilename').value = image.originalFilename; document.getElementById('edit-description').value = image.description; DOMElements.editImageModal.classList.add('active');
             } else if (target.matches('.delete-btn')) {
                 const confirmed = await showConfirmationModal('移至回收站', `<p>确定要将这张图片移至回收站吗？</p>`, '确认移动');
-                if(confirmed) { try { const response = await apiRequest(`/api/admin/images/${imageId}`, { method: 'DELETE' }); if (!response.ok) throw new Error('操作失败'); showToast('图片已移至回收站'); await loadImages(document.querySelector('.category-item.active').dataset.categoryName || 'all'); } catch (error) { showToast(error.message, 'error'); } }
+                if(confirmed) { try { const response = await apiRequest(`/api/admin/images/${imageId}`, { method: 'DELETE' }); if (!response.ok) throw new Error('操作失败'); showToast('图片已移至回收站'); const activeNav = document.querySelector('.nav-item.active'); if(activeNav) activeNav.click(); } catch (error) { showToast(error.message, 'error'); } }
             } else if (target.matches('.restore-btn')) {
                 try { const response = await apiRequest(`/api/admin/recycle-bin/${imageId}/restore`, { method: 'POST' }); if (!response.ok) throw new Error('恢复失败'); showToast('图片已恢复'); await loadRecycleBin(); } catch (error) { showToast(error.message, 'error'); }
             } else if (target.matches('.purge-btn')) {
@@ -898,12 +1010,12 @@ cat << 'EOF' > public/admin.html
             }
         });
 
-        DOMElements.searchInput.addEventListener('input', () => { clearTimeout(debounceTimer); debounceTimer = setTimeout(() => { currentSearchTerm = DOMElements.searchInput.value; document.querySelectorAll('.category-item').forEach(el => el.classList.remove('active')); DOMElements.navItemAll.classList.add('active'); loadImages('all'); }, 300); });
-        DOMElements.addCategoryBtn.addEventListener('click', () => { showGenericModal('添加新分类', '<form id="modal-form"><input type="text" id="modal-input" placeholder="输入新分类的名称" required class="w-full border rounded px-3 py-2"></form>', '<button type="button" class="modal-cancel-btn bg-gray-300 hover:bg-gray-400 text-black py-2 px-4 rounded">取消</button><button type="submit" form="modal-form" class="bg-green-600 hover:bg-green-700 text-white py-2 px-4 rounded">保存</button>'); document.getElementById('modal-form').onsubmit = async (e) => { e.preventDefault(); const newName = document.getElementById('modal-input').value.trim(); if (!newName) return; try { const response = await apiRequest('/api/admin/categories', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: newName }) }); if (!response.ok) throw new Error((await response.json()).message); hideModal(DOMElements.genericModal); showToast('分类创建成功'); await refreshCategories(); } catch (error) { showToast(`添加失败: ${error.message}`, 'error'); } }; });
+        DOMElements.searchInput.addEventListener('input', () => { clearTimeout(debounceTimer); debounceTimer = setTimeout(() => { currentSearchTerm = DOMElements.searchInput.value; const activeNav = document.querySelector('.nav-item.active'); if (activeNav) { activeNav.click(); } }, 300); });
+        DOMElements.addCategoryBtn.addEventListener('click', () => { showGenericModal('添加新分类', '<form id="modal-form"><input type="text" id="modal-input" placeholder="输入新分类的名称" required class="w-full border rounded px-3 py-2"></form>', '<button type="button" class="modal-cancel-btn bg-gray-300 hover:bg-gray-400 text-black py-2 px-4 rounded">取消</button><button type="submit" form="modal-form" class="bg-green-600 hover:bg-green-700 text-white py-2 px-4 rounded">保存</button>'); document.getElementById('modal-form').onsubmit = async (e) => { e.preventDefault(); const newName = document.getElementById('modal-input').value.trim(); if (!newName) return; try { const response = await apiRequest('/api/admin/categories', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: newName }) }); if (!response.ok) throw new Error((await response.json()).message); hideModal(DOMElements.genericModal); showToast('分类创建成功'); await refreshNavigation(); } catch (error) { showToast(`添加失败: ${error.message}`, 'error'); } }; });
         DOMElements.editImageForm.addEventListener('submit', async (e) => {
             e.preventDefault(); const id = document.getElementById('edit-id').value;
             const body = JSON.stringify({ originalFilename: document.getElementById('edit-originalFilename').value, category: DOMElements.editCategorySelect.value, description: document.getElementById('edit-description').value });
-            try { const response = await apiRequest(`/api/admin/images/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body }); if (!response.ok) throw new Error((await response.json()).message); hideModal(DOMElements.editImageModal); showToast('更新成功'); await loadImages(document.querySelector('.category-item.active').dataset.categoryName || 'all'); } catch (error) { showToast(`更新失败: ${error.message}`, 'error'); }
+            try { const response = await apiRequest(`/api/admin/images/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body }); if (!response.ok) throw new Error((await response.json()).message); hideModal(DOMElements.editImageModal); showToast('更新成功'); const activeNav = document.querySelector('.nav-item.active'); if (activeNav) { activeNav.click(); } } catch (error) { showToast(`更新失败: ${error.message}`, 'error'); }
         });
         
         // --- Security (2FA) ---
@@ -959,7 +1071,10 @@ cat << 'EOF' > public/admin.html
         [DOMElements.genericModal, DOMElements.editImageModal, DOMElements.tfaModal].forEach(modal => { const cancelBtn = modal.querySelector('.modal-cancel-btn'); if(cancelBtn) { cancelBtn.addEventListener('click', () => hideModal(modal)); } modal.addEventListener('click', (e) => { if (e.target === modal) hideModal(modal); }); });
         
         // --- Init ---
-        async function init() { await Promise.all([ refreshCategories(), loadImages('all'), renderSecuritySection() ]); }
+        async function init() {
+            await Promise.all([refreshNavigation(), renderSecuritySection()]);
+            loadImages('all', '所有图片');
+        }
         init();
     });
     </script>
@@ -1272,6 +1387,9 @@ manage_2fa() {
         read -p "您想 [1] 禁用 2FA 还是 [2] 强制重置 2FA? (输入其他任意键取消): " tfa_choice
         if [[ "$tfa_choice" == "1" || "$tfa_choice" == "2" ]]; then
             echo -e "${YELLOW}正在移除 2FA 配置...${NC}"
+            # A more robust way is to remove only the tfa key, but for simplicity, deleting is fine.
+            # A better approach would be: `jq 'del(.tfa)' data/config.json > tmp.$$.json && mv tmp.$$.json data/config.json`
+            # But that requires jq to be installed.
             rm -f "$config_file"
             echo -e "${GREEN}2FA 配置已移除。${NC}"
             echo -e "${YELLOW}请注意：这仅移除了服务器端的密钥。您可能需要手动从您的 Authenticator 应用中删除旧的条目。${NC}"
@@ -1392,21 +1510,29 @@ show_menu() {
     clear
     display_status
     echo ""
-    echo -e "${YELLOW}---------------------------------- 可用操作 ----------------------------------${NC}"
+    echo -e "${YELLOW}---------------------- 可用操作 ----------------------${NC}"
+    echo ""
     echo -e " ${GREEN}【基础操作】${NC}"
-    printf "   %-2s. %-25s %-2s. %-25s\n" "1" "安装或修复应用" "2" "启动应用"
-    printf "   %-2s. %-25s %-2s. %-25s\n" "3" "停止应用" "4" "重启应用"
+    echo -e "   1. 安装或修复应用"
+    echo -e "   2. 启动应用"
+    echo -e "   3. 停止应用"
+    echo -e "   4. 重启应用"
     echo ""
     echo -e " ${BLUE}【配置与管理】${NC}"
-    printf "   %-2s. %-25s %-2s. %-25s\n" "5" "刷新状态" "6" "修改后台用户/密码"
-    printf "   %-2s. %-25s %-2s. %-25s\n" "7" "修改应用端口" "8" "管理 2FA"
+    echo -e "   5. 刷新状态"
+    echo -e "   6. 修改后台用户/密码"
+    echo -e "   7. 修改应用端口"
+    echo -e "   8. 管理 2FA"
     echo ""
     echo -e " ${YELLOW}【维护与危险操作】${NC}"
-    printf "   %-2s. %-25s %-2s. %-25s\n" "9" "查看实时日志" "10" "数据备份"
-    printf "   %-2s. %b%-25s%b %-2s. %b%-25s%b\n" "11" "${GREEN}" "数据恢复" "${NC}" "12" "${RED}" "彻底卸载应用" "${NC}"
+    echo -e "   9. 查看实时日志"
+    echo -e "   10. 数据备份"
+    echo -e "   11. ${GREEN}数据恢复${NC}"
+    echo -e "   12. ${RED}彻底卸载应用${NC}"
     echo ""
-    printf "   %-2s. %s\n" "0" "退出脚本"
-    echo -e "${YELLOW}------------------------------------------------------------------------------${NC}"
+    echo -e "   0. 退出脚本"
+    echo ""
+    echo -e "${YELLOW}----------------------------------------------------${NC}"
     local choice
     read -p "请输入你的选择 [0-12]: " choice
     
