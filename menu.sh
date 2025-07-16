@@ -1,13 +1,11 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v0.3.1 修复版)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v0.3.2 紧急修复)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
-#   v0.3.1 更新:
-#   - 修复 (后台): 修正了因JavaScript调用错误导致的“上传文件无响应”的问题。
-#   - 修复 (后台): 修正了因JavaScript调用错误导致的“无法加载安全状态”的问题。
-#   - 稳定性 (后端): 为多个API接口增加了更可靠的错误捕获，提升了服务器健壮性。
+#   v0.3.2 更新:
+#   - 紧急修复 (后端): 恢复了被误删的 multer (文件上传) 中间件定义，解决了因“upload is not defined”导致的服务器启动循环崩溃和CPU高占用的严重BUG。
 # =================================================================
 
 # --- 配置 ---
@@ -18,7 +16,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 PROMPT_Y="(${GREEN}y${NC}/${RED}n${NC})"
 
-SCRIPT_VERSION="0.3.1"
+SCRIPT_VERSION="0.3.2"
 APP_NAME="image-gallery"
 
 # --- 路径设置 ---
@@ -45,7 +43,7 @@ overwrite_app_files() {
 cat << 'EOF' > package.json
 {
   "name": "image-gallery-pro",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "A high-performance, full-stack image gallery application with all features.",
   "main": "server.js",
   "scripts": {
@@ -264,6 +262,10 @@ app.get('/image-proxy/:filename', async (req, res) => {
 const apiAdminRouter = express.Router();
 apiAdminRouter.use(requireApiAuth);
 
+// ** FIX: Re-added multer definition **
+const storage = multer.diskStorage({ destination: (req, file, cb) => cb(null, uploadsDir), filename: (req, file, cb) => { const uniqueSuffix = uuidv4(); const extension = path.extname(file.originalname); cb(null, `${uniqueSuffix}${extension}`); } });
+const upload = multer({ storage: storage });
+
 apiAdminRouter.post('/check-filenames', handleApiError(async(req, res) => {
     const { filenames } = req.body;
     if (!Array.isArray(filenames)) { return res.status(400).json({message: '无效的输入格式。'}); }
@@ -419,7 +421,6 @@ apiAdminRouter.delete('/recycle-bin/:id/purge', handleApiError(async (req, res) 
     res.json({ message: '图片已永久删除' });
 }));
 
-// 2FA Management (Admin)
 apiAdminRouter.get('/2fa/status', handleApiError(async(req, res) => {
     appConfig = await readDB(configPath, {});
     res.json({ enabled: !!(appConfig.tfa && appConfig.tfa.secret) });
@@ -463,7 +464,9 @@ app.use(express.static(path.join(__dirname, 'public')));
 })();
 EOF
 
-    echo "--> 正在生成主画廊 public/index.html (v0.3.1)..."
+    echo "--> 正在生成主画廊 public/index.html..."
+    # The content of index.html has not changed from the previous correct version (v0.3.0)
+    # So we can just re-paste it.
 cat << 'EOF' > public/index.html
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -510,28 +513,27 @@ cat << 'EOF' > public/index.html
         #search-overlay.active #search-box { transform: translateY(0) scale(1); opacity: 1; }
         #search-input:focus { outline: none; }
         
-        /* --- Grid Item Sizing --- */
         .grid-item {
             width: 48%;
             margin-bottom: 1rem;
             float: left;
         }
         .grid-item.grid-item--width2 {
-            width: 98%; /* 2 columns on mobile */
+            width: 98%;
         }
-        @media (min-width: 640px) { /* 3 columns */
+        @media (min-width: 640px) {
             .grid-item { width: 32%; } 
             .grid-item.grid-item--width2 { width: 65.3%; }
         } 
-        @media (min-width: 768px) { /* 4 columns */
+        @media (min-width: 768px) {
             .grid-item { width: 24%; }
             .grid-item.grid-item--width2 { width: 49%; }
         } 
-        @media (min-width: 1024px) { /* 5 columns */
+        @media (min-width: 1024px) {
             .grid-item { width: 19%; }
             .grid-item.grid-item--width2 { width: 39%; }
         } 
-        @media (min-width: 1280px) { /* 6 columns */
+        @media (min-width: 1280px) {
             .grid-item { width: 15.8%; }
             .grid-item.grid-item--width2 { width: 32.6%; }
         }
@@ -731,6 +733,7 @@ cat << 'EOF' > public/index.html
 EOF
 
     echo "--> 正在生成后台管理页 public/admin.html..."
+    # The content of admin.html has not changed from the previous correct version (v0.3.1_fixed)
 cat << 'EOF' > public/admin.html
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -808,10 +811,10 @@ cat << 'EOF' > public/admin.html
                 }
                 return response;
             } catch (error) {
-                if (error instanceof TypeError) { // Network error
+                if (error instanceof TypeError) {
                     throw new Error('网络错误，请检查您的连接。');
                 }
-                throw error; // Re-throw other errors
+                throw error;
             }
         };
 
@@ -1024,7 +1027,6 @@ cat << 'EOF' > public/login.html
         </div>
     </div>
     <script>
-        // 动态显示2FA输入框
         document.addEventListener('DOMContentLoaded', () => {
             fetch('/api/2fa/is-enabled')
                 .then(response => {
@@ -1044,7 +1046,6 @@ cat << 'EOF' > public/login.html
                 });
         });
 
-        // 显示登录错误
         const urlParams = new URLSearchParams(window.location.search);
         const error = urlParams.get('error');
         if (error === '1') {
