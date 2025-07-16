@@ -1,9 +1,12 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v1.0.1 优化版)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v1.0.2 最终优化版)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
+#   v1.0.2 更新:
+#   - UI/UX (后台): 重构图片卡片布局，实现固定尺寸与对齐，信息展示更清晰；优化分页器交互，点击后“高亮”状态即时切换，无加载延迟。
+#
 #   v1.0.1 更新:
 #   - 功能增强 (后台): 在图片预览灯箱中增加“删除”按钮，删除后可无缝切换到下一张图片，提升管理效率。
 #   - BUG修复 (后台): 彻底修复了因`createButton`函数缺失导致的图片列表无法加载的严重BUG。
@@ -11,8 +14,6 @@
 #   v1.0.0 更新:
 #   - 重大重构 (后台): 彻底重构后台图片列表的事件处理模型，为每个按钮独立绑定事件，从根本上解决了所有“点击无响应”的连锁BUG。
 #   - UI/UX (后台): 将分页器固定在内容区域底部，方便长列表翻页；同时，预览灯箱（Lightbox）的功能与外观和前台完全统一。
-#   - 功能修复 (后台): 全面恢复并验证了预览、下载、删除、恢复、分页等所有按钮的正常功能。
-#   - 包含之前所有版本的功能优化与修复。
 # =================================================================
 
 # --- 配置 ---
@@ -23,7 +24,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 PROMPT_Y="(${GREEN}y${NC}/${RED}n${NC})"
 
-SCRIPT_VERSION="1.0.1"
+SCRIPT_VERSION="1.0.2"
 APP_NAME="image-gallery"
 
 # --- 路径设置 ---
@@ -50,7 +51,7 @@ overwrite_app_files() {
 cat << 'EOF' > package.json
 {
   "name": "image-gallery-pro",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "A high-performance, full-stack image gallery application with all features.",
   "main": "server.js",
   "scripts": {
@@ -752,11 +753,19 @@ cat << 'EOF' > public/admin.html
         .toast.show { transform: translateX(0); } 
         .file-preview-item.upload-success { background-color: #f0fdf4; } 
         .file-preview-item.upload-error { background-color: #fef2f2; } 
-        .admin-image-card { transition: opacity 0.4s ease, transform 0.4s ease; }
+        .admin-image-card { transition: opacity 0.4s ease, transform 0.4s ease; height: 20rem; /* 320px */ }
         .admin-image-card.fading-out { opacity: 0; transform: scale(0.95); }
         
+        .description-clamp {
+            display: -webkit-box;
+            -webkit-box-orient: vertical;
+            -webkit-line-clamp: 3;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
         .image-preview-container {
-            height: 9rem;
+            height: 9rem; /* 144px */
             background-color: #f1f5f9;
             border-radius: 0.25rem;
             overflow: hidden;
@@ -766,8 +775,8 @@ cat << 'EOF' > public/admin.html
             cursor: pointer;
         }
         .image-preview-container img {
-            max-width: 100%;
-            max-height: 100%;
+            width: 100%;
+            height: 100%;
             object-fit: contain;
         }
         .page-item {
@@ -1005,8 +1014,8 @@ cat << 'EOF' > public/admin.html
         async function populateCategorySelects(selectedCategory = null) { try { const response = await apiRequest('/api/categories'); const categories = await response.json(); [DOMElements.categorySelect, DOMElements.editCategorySelect].forEach(select => { const currentVal = select.value; select.innerHTML = ''; categories.forEach(cat => select.add(new Option(cat, cat))); select.value = categories.includes(currentVal) ? currentVal : selectedCategory || categories[0] || ''; }); } catch (error) { if (error.message !== 'Unauthorized') console.error('加载分类失败:', error.message); } }
         async function refreshNavigation() { try { const response = await apiRequest('/api/categories'); const categories = await response.json(); DOMElements.categoryDynamicList.innerHTML = ''; categories.forEach(cat => { const isUncategorized = cat === UNCATEGORIZED; const item = document.createElement('div'); item.className = 'nav-item flex items-center justify-between p-2 rounded cursor-pointer hover:bg-gray-100'; item.dataset.view = 'category'; item.dataset.categoryName = cat; item.innerHTML = `<span class="category-name flex-grow">${cat}</span>` + (isUncategorized ? '' : `<div class="space-x-2 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"><button data-name="${cat}" class="rename-cat-btn text-blue-500 hover:text-blue-700 text-sm">重命名</button><button data-name="${cat}" class="delete-cat-btn text-red-500 hover:red-700 text-sm">删除</button></div>`); item.addEventListener('mouseenter', () => item.classList.add('group')); item.addEventListener('mouseleave', () => item.classList.remove('group')); DOMElements.categoryDynamicList.appendChild(item); }); await populateCategorySelects(); } catch (error) { if (error.message !== 'Unauthorized') console.error('加载导航列表失败:', error.message); } }
         
-        async function loadImages(category, name) { DOMElements.imageLoader.classList.remove('hidden'); DOMElements.imageList.innerHTML = ''; DOMElements.paginationContainer.innerHTML = ''; try { const url = `/api/images?category=${category}&search=${encodeURIComponent(currentSearchTerm)}&page=${currentAdminPage}&limit=12`; const response = await apiRequest(url); const data = await response.json(); adminLoadedImages = data.images; DOMElements.imageListHeader.innerHTML = `${name} <span class="text-base text-gray-500 font-normal">(共 ${data.totalImages} 张)</span>`; if (adminLoadedImages.length === 0) { DOMElements.imageList.innerHTML = '<p class="text-slate-500 col-span-full text-center py-10">没有找到图片。</p>'; } else { adminLoadedImages.forEach(renderImageCard); } renderPaginationControls(data.page, data.totalPages); } catch (error) { if(error.message !== 'Unauthorized') DOMElements.imageList.innerHTML = `<p class="text-red-500 col-span-full text-center py-10">加载图片失败: ${error.message}</p>`; } finally { DOMElements.imageLoader.classList.add('hidden'); } }
-        async function loadRecycleBin() { DOMElements.imageLoader.classList.remove('hidden'); DOMElements.imageList.innerHTML = ''; DOMElements.paginationContainer.innerHTML = ''; try { const url = `/api/admin/recycle-bin?search=${encodeURIComponent(currentSearchTerm)}&page=${currentAdminPage}&limit=12`; const response = await apiRequest(url); const data = await response.json(); adminLoadedImages = data.images; DOMElements.imageListHeader.innerHTML = `回收站`; if (adminLoadedImages.length === 0) { DOMElements.imageList.innerHTML = '<p class="text-slate-500 col-span-full text-center py-10">回收站是空的。</p>'; } else { adminLoadedImages.forEach(renderPurgeableImageCard); } renderPaginationControls(data.page, data.totalPages); } catch (error) { if (error.message !== 'Unauthorized') DOMElements.imageList.innerHTML = `<p class="text-red-500 col-span-full text-center py-10">加载回收站失败: ${error.message}</p>`; } finally { DOMElements.imageLoader.classList.add('hidden'); } }
+        async function loadImages(category, name) { DOMElements.imageLoader.classList.remove('hidden'); DOMElements.imageList.innerHTML = ''; try { const url = `/api/images?category=${category}&search=${encodeURIComponent(currentSearchTerm)}&page=${currentAdminPage}&limit=12`; const response = await apiRequest(url); const data = await response.json(); adminLoadedImages = data.images; DOMElements.imageListHeader.innerHTML = `${name} <span class="text-base text-gray-500 font-normal">(共 ${data.totalImages} 张)</span>`; if (adminLoadedImages.length === 0) { DOMElements.imageList.innerHTML = '<p class="text-slate-500 col-span-full text-center py-10">没有找到图片。</p>'; } else { adminLoadedImages.forEach(renderImageCard); } renderPaginationControls(data.page, data.totalPages); } catch (error) { if(error.message !== 'Unauthorized') DOMElements.imageList.innerHTML = `<p class="text-red-500 col-span-full text-center py-10">加载图片失败: ${error.message}</p>`; } finally { DOMElements.imageLoader.classList.add('hidden'); } }
+        async function loadRecycleBin() { DOMElements.imageLoader.classList.remove('hidden'); DOMElements.imageList.innerHTML = ''; try { const url = `/api/admin/recycle-bin?search=${encodeURIComponent(currentSearchTerm)}&page=${currentAdminPage}&limit=12`; const response = await apiRequest(url); const data = await response.json(); adminLoadedImages = data.images; DOMElements.imageListHeader.innerHTML = `回收站`; if (adminLoadedImages.length === 0) { DOMElements.imageList.innerHTML = '<p class="text-slate-500 col-span-full text-center py-10">回收站是空的。</p>'; } else { adminLoadedImages.forEach(renderPurgeableImageCard); } renderPaginationControls(data.page, data.totalPages); } catch (error) { if (error.message !== 'Unauthorized') DOMElements.imageList.innerHTML = `<p class="text-red-500 col-span-full text-center py-10">加载回收站失败: ${error.message}</p>`; } finally { DOMElements.imageLoader.classList.add('hidden'); } }
 
         function createCard(image, buttons) {
             const card = document.createElement('div');
@@ -1014,12 +1023,9 @@ cat << 'EOF' > public/admin.html
             card.dataset.id = image.id;
             
             const previewAction = () => {
-                const viewableImages = document.querySelector('#nav-item-recycle-bin').classList.contains('active') 
-                    ? adminLoadedImages.filter(img => img.status === 'deleted')
-                    : adminLoadedImages.filter(img => img.status !== 'deleted');
-
+                const isRecycleBinView = document.querySelector('#nav-item-recycle-bin').classList.contains('active');
+                const viewableImages = isRecycleBinView ? adminLoadedImages.filter(img => img.status === 'deleted') : adminLoadedImages.filter(img => img.status !== 'deleted');
                 currentLightboxIndex = viewableImages.findIndex(img => img.id === image.id);
-
                 if (currentLightboxIndex === -1) return;
                 updateLightbox();
                 DOMElements.lightbox.classList.add('active');
@@ -1027,7 +1033,8 @@ cat << 'EOF' > public/admin.html
             };
             
             const previewLink = document.createElement('a');
-            previewLink.className = 'image-preview-container';
+            previewLink.href = "#";
+            previewLink.className = 'image-preview-container flex-shrink-0';
             previewLink.addEventListener('click', (e) => { e.preventDefault(); previewAction(); });
 
             const img = document.createElement('img');
@@ -1036,15 +1043,28 @@ cat << 'EOF' > public/admin.html
             previewLink.appendChild(img);
             
             const infoDiv = document.createElement('div');
-            infoDiv.className = 'p-3 flex-grow flex flex-col';
-            let infoHtml = `<p class="font-bold text-sm truncate" title="${image.originalFilename}">${image.originalFilename}</p><p class="text-xs text-slate-500 -mt-1 mb-2">${formatBytes(image.size)}</p><p class="text-xs text-slate-500 mb-2">${image.category}</p><p class="text-xs text-slate-600 flex-grow mb-3 break-words">${image.description || '无描述'}</p>`;
-            if (image.status === 'deleted') {
-                infoHtml += `<p class="text-xs text-red-500 mt-2"><strong>删除于:</strong> ${new Date(image.deletedAt).toLocaleString()}</p>`;
-            }
+            infoDiv.className = 'p-3 flex-grow flex flex-col min-h-0';
+            const infoHtml = `
+                <p class="font-bold text-sm truncate" title="${image.originalFilename}">${image.originalFilename}</p>
+                <div class="flex justify-between items-center text-xs text-slate-500 my-2">
+                    <span class="flex items-center gap-1.5" title="文件大小">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-3.5 h-3.5"><path d="M2 3.5A1.5 1.5 0 0 1 3.5 2h9A1.5 1.5 0 0 1 14 3.5v9a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 12.5v-9ZM3.5 3a.5.5 0 0 0-.5.5v9a.5.5 0 0 0 .5.5h9a.5.5 0 0 0 .5-.5v-9a.5.5 0 0 0-.5-.5h-9Z" /><path d="M5 5.5A.5.5 0 0 1 5.5 5h5a.5.5 0 0 1 0 1h-5A.5.5 0 0 1 5 5.5Zm0 2A.5.5 0 0 1 5.5 7h5a.5.5 0 0 1 0 1h-5A.5.5 0 0 1 5 7.5Zm0 2A.5.5 0 0 1 5.5 9h3a.5.5 0 0 1 0 1h-3A.5.5 0 0 1 5 9.5Z" /></svg>
+                        ${formatBytes(image.size)}
+                    </span>
+                    <span class="flex items-center gap-1.5 truncate" title="分类: ${image.category}">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-3.5 h-3.5"><path d="M3.5 2A1.5 1.5 0 0 0 2 3.5v.986c.543-.294 1.25-.486 2-.486h7.5a.5.5 0 0 1 .5.5v2.875a.5.5 0 0 0 .5.5h.875a.5.5 0 0 0 .5-.5V5.125a.5.5 0 0 0-.146-.353l-1.5-1.5A.5.5 0 0 0 12.125 3H6.5a2.5 2.5 0 0 0-2.482 2H3.5A1.5 1.5 0 0 0 2 6.5v6A1.5 1.5 0 0 0 3.5 14h9a1.5 1.5 0 0 0 1.5-1.5v-5A1.5 1.5 0 0 0 12.5 6H4a1.5 1.5 0 0 1-1.5-1.5V3.5ZM3 6.5A.5.5 0 0 1 3.5 6H12a.5.5 0 0 1 .5.5v5a.5.5 0 0 1-.5.5h-9A.5.5 0 0 1 3 12.5v-6Z" /></svg>
+                        <span class="truncate">${image.category}</span>
+                    </span>
+                </div>
+                <p class="text-xs text-slate-600 flex-grow pt-1" title="${image.description || ''}">
+                    <span class="description-clamp">${image.description || '无描述'}</span>
+                </p>
+                ${image.status === 'deleted' ? `<p class="text-xs text-red-500 mt-auto pt-2"><strong>删除于:</strong> ${new Date(image.deletedAt).toLocaleString()}</p>` : ''}
+            `;
             infoDiv.innerHTML = infoHtml;
             
             const footerDiv = document.createElement('div');
-            footerDiv.className = 'bg-slate-50 p-2 flex justify-end items-center gap-1';
+            footerDiv.className = 'bg-slate-50 p-2 flex justify-end items-center gap-1 mt-auto flex-shrink-0';
             buttons(previewAction, card, image).forEach(btn => footerDiv.appendChild(btn));
 
             card.append(previewLink, infoDiv, footerDiv);
@@ -1074,16 +1094,19 @@ cat << 'EOF' > public/admin.html
             const view = activeNav.dataset.view;
             const categoryName = activeNav.dataset.categoryName;
             const headerText = activeNav.querySelector('.category-name')?.textContent || '所有图片';
-            if (view === 'recycle_bin') {
-                loadRecycleBin();
-            } else {
-                loadImages(categoryName || 'all', headerText);
-            }
+            
+            DOMElements.imageList.innerHTML = '';
+            DOMElements.imageLoader.classList.remove('hidden');
+
+            if (view === 'recycle_bin') { loadRecycleBin(); } 
+            else { loadImages(categoryName || 'all', headerText); }
         };
+
         function renderPaginationControls(currentPage, totalPages) {
-            if (totalPages <= 1) { DOMElements.paginationContainer.innerHTML = ''; return; }
+            DOMElements.paginationContainer.innerHTML = '';
+            if (totalPages <= 1) { return; }
             let html = '<div class="flex items-center space-x-1">';
-            const createBtnHTML = (text, page, disabled = false, active = false) => `<button data-page="${page}" class="page-item px-3 py-1 text-sm font-medium border border-gray-300 rounded-md hover:bg-gray-100 ${disabled ? 'disabled' : ''} ${active ? 'active' : ''}">${text}</button>`;
+            const createBtnHTML = (text, page, disabled = false, active = false) => `<button data-page="${page}" class="page-item px-3 py-1 text-sm font-medium border border-gray-300 rounded-md hover:bg-gray-100 ${disabled ? 'opacity-50 cursor-not-allowed' : ''} ${active ? 'active' : ''}">${text}</button>`;
             html += createBtnHTML('上一页', currentPage - 1, currentPage === 1);
             
             let pages = [];
@@ -1102,7 +1125,19 @@ cat << 'EOF' > public/admin.html
             html += '</div>';
             DOMElements.paginationContainer.innerHTML = html;
         }
-        DOMElements.paginationContainer.addEventListener('click', e => { e.preventDefault(); const target = e.target.closest('.page-item'); if(target && !target.classList.contains('disabled') && !target.classList.contains('active')) { changePage(parseInt(target.dataset.page)); } });
+
+        DOMElements.paginationContainer.addEventListener('click', e => { 
+            e.preventDefault(); 
+            const target = e.target.closest('.page-item'); 
+            if(!target || target.disabled || target.classList.contains('active')) return;
+            
+            const newPage = parseInt(target.dataset.page);
+            
+            DOMElements.paginationContainer.querySelector('.page-item.active')?.classList.remove('active');
+            target.classList.add('active');
+
+            changePage(newPage);
+        });
 
         DOMElements.navigationList.addEventListener('click', async (e) => {
             e.preventDefault();
@@ -1111,13 +1146,8 @@ cat << 'EOF' > public/admin.html
             if (e.target.matches('.rename-cat-btn, .delete-cat-btn')) { e.stopPropagation(); const catName = e.target.dataset.name; if (e.target.classList.contains('rename-cat-btn')) { showGenericModal(`重命名分类 "${catName}"`, '<form id="modal-form"><input type="text" id="modal-input" required class="w-full border rounded px-3 py-2"></form>', '<button type="button" class="modal-cancel-btn bg-gray-300 hover:bg-gray-400 text-black py-2 px-4 rounded">取消</button><button type="submit" form="modal-form" class="bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded">保存</button>'); const input = document.getElementById('modal-input'); input.value = catName; document.getElementById('modal-form').onsubmit = async (ev) => { ev.preventDefault(); const newName = input.value.trim(); if (!newName || newName === catName) { hideModal(DOMElements.genericModal); return; } try { await apiRequest('/api/admin/categories', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ oldName: catName, newName }) }); hideModal(DOMElements.genericModal); showToast('重命名成功'); await refreshAllData(); } catch (error) { showToast(`重命名失败: ${error.message}`, 'error'); } }; } else if (e.target.classList.contains('delete-cat-btn')) { const confirmed = await showConfirmationModal('确认删除', `<p>确定要删除分类 "<strong>${catName}</strong>" 吗？<br>此分类下的图片将归入 "未分类"。</p>`, '确认删除'); if(confirmed) { try { await apiRequest('/api/admin/categories', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: catName }) }); showToast('删除成功'); await refreshAllData(); } catch (error) { showToast(`删除失败: ${error.message}`, 'error'); } } } return; }
             document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
             navItem.classList.add('active');
-            DOMElements.searchInput.value = ''; currentSearchTerm = ''; currentAdminPage = 1;
-            const view = navItem.dataset.view;
-            const categoryName = navItem.dataset.categoryName;
-            const headerText = navItem.querySelector('.category-name')?.textContent || '所有图片';
-            if (view === 'all') { await loadImages('all', headerText); }
-            else if (view === 'recycle_bin') { await loadRecycleBin(); }
-            else if (view === 'category') { await loadImages(categoryName, headerText); }
+            DOMElements.searchInput.value = ''; currentSearchTerm = '';
+            changePage(1);
         });
         
         DOMElements.editImageForm.addEventListener('submit', async (e) => { e.preventDefault(); const id = document.getElementById('edit-id').value; const body = JSON.stringify({ originalFilename: document.getElementById('edit-originalFilename').value, category: DOMElements.editCategorySelect.value, description: document.getElementById('edit-description').value }); try { await apiRequest(`/api/admin/images/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body }); hideModal(DOMElements.editImageModal); showToast('更新成功'); const activeNav = document.querySelector('.nav-item.active'); if (activeNav) { activeNav.click(); } } catch (error) { showToast(`更新失败: ${error.message}`, 'error'); } });
@@ -1127,9 +1157,7 @@ cat << 'EOF' > public/admin.html
         
         function updateLightbox() {
             const isRecycleBinView = document.querySelector('#nav-item-recycle-bin').classList.contains('active');
-            const viewableImages = isRecycleBinView 
-                ? adminLoadedImages.filter(img => img.status === 'deleted')
-                : adminLoadedImages.filter(img => img.status !== 'deleted');
+            const viewableImages = isRecycleBinView ? adminLoadedImages.filter(img => img.status === 'deleted') : adminLoadedImages.filter(img => img.status !== 'deleted');
 
             const item = viewableImages[currentLightboxIndex];
             if (!item) { closeLightbox(); return; };
@@ -1140,31 +1168,31 @@ cat << 'EOF' > public/admin.html
             DOMElements.lightboxDownloadLink.href = item.src;
             DOMElements.lightboxDownloadLink.download = item.originalFilename;
             
-            const deleteBtn = document.getElementById('lb-delete');
-            if(isRecycleBinView) { deleteBtn.style.display = 'none'; } 
-            else { deleteBtn.style.display = 'inline-flex'; }
+            document.getElementById('lb-delete').style.display = isRecycleBinView ? 'none' : 'inline-flex';
         }
+
         function showNextImage() { 
-             const viewableImages = document.querySelector('#nav-item-recycle-bin').classList.contains('active') 
-                ? adminLoadedImages.filter(img => img.status === 'deleted')
-                : adminLoadedImages.filter(img => img.status !== 'deleted');
+            const isRecycleBinView = document.querySelector('#nav-item-recycle-bin').classList.contains('active');
+            const viewableImages = isRecycleBinView ? adminLoadedImages.filter(img => img.status === 'deleted') : adminLoadedImages.filter(img => img.status !== 'deleted');
             currentLightboxIndex = (currentLightboxIndex + 1) % viewableImages.length; 
             updateLightbox(); 
         }
+
         function showPrevImage() { 
-            const viewableImages = document.querySelector('#nav-item-recycle-bin').classList.contains('active') 
-                ? adminLoadedImages.filter(img => img.status === 'deleted')
-                : adminLoadedImages.filter(img => img.status !== 'deleted');
+            const isRecycleBinView = document.querySelector('#nav-item-recycle-bin').classList.contains('active');
+            const viewableImages = isRecycleBinView ? adminLoadedImages.filter(img => img.status === 'deleted') : adminLoadedImages.filter(img => img.status !== 'deleted');
             currentLightboxIndex = (currentLightboxIndex - 1 + viewableImages.length) % viewableImages.length; 
             updateLightbox(); 
         }
+
         function closeLightbox() { DOMElements.lightbox.classList.remove('active'); document.body.classList.remove('lightbox-open'); }
 
         DOMElements.lightbox.addEventListener('click', async (e) => { 
-            if (e.target.matches('.lb-next')) { showNextImage(); }
-            else if (e.target.matches('.lb-prev')) { showPrevImage(); }
-            else if (e.target.matches('.lb-close') || e.target === DOMElements.lightbox) { closeLightbox(); }
-            else if (e.target.id === 'lb-delete') {
+            const target = e.target.closest('.lb-action-btn') || e.target;
+            if (target.matches('.lb-next')) { showNextImage(); }
+            else if (target.matches('.lb-prev')) { showPrevImage(); }
+            else if (target.matches('.lb-close') || e.target === DOMElements.lightbox) { closeLightbox(); }
+            else if (target.id === 'lb-delete') {
                 const viewableImages = adminLoadedImages.filter(img => img.status !== 'deleted');
                 const imageToDelete = viewableImages[currentLightboxIndex];
                 if (!imageToDelete) return;
@@ -1185,8 +1213,7 @@ cat << 'EOF' > public/admin.html
                         
                         if (adminLoadedImages.filter(img => img.status !== 'deleted').length === 0) {
                             closeLightbox();
-                            const activeNav = document.querySelector('.nav-item.active');
-                            if (activeNav) activeNav.click();
+                            changePage(currentAdminPage);
                         } else {
                             currentLightboxIndex = Math.min(currentLightboxIndex, adminLoadedImages.filter(img => img.status !== 'deleted').length - 1);
                             updateLightbox();
