@@ -1,13 +1,11 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v0.0.5 最终布局优化版)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v0.0.7 智能更新版)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
-#   v0.0.5 更新:
-#   - 优化(后台): 回收站视图升级为与主图库一致的网格卡片布局，预览和操作更统一。
-#   - 优化(UI): 在保持严格时间排序的前提下，再次优化瀑布流响应式断点，使其在各设备上列数调整更合理。
-#   - 优化(UI): 简化了前端HTML结构，以增强瀑布流布局的稳定性。
+#   v0.0.7 更新:
+#   - 新增(功能): 为“安装”选项增加了智能判断。如果应用已存在，则提供“覆盖更新(保留数据)”和“全新安装”的选项，使更新更安全。
 # =================================================================
 
 # --- 配置 ---
@@ -18,7 +16,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 PROMPT_Y="(${GREEN}y${NC}/${RED}n${NC})"
 
-SCRIPT_VERSION="0.0.5"
+SCRIPT_VERSION="0.0.7"
 APP_NAME="image-gallery"
 
 # --- 路径设置 ---
@@ -28,26 +26,15 @@ BACKUP_DIR="${SCRIPT_DIR}/backups"
 
 
 # --- 核心功能：文件生成 ---
-generate_files() {
-    echo -e "${YELLOW}--> 正在创建项目目录结构: ${INSTALL_DIR}${NC}"
-    mkdir -p "${INSTALL_DIR}/public/uploads"
-    mkdir -p "${INSTALL_DIR}/public/cache"
-    mkdir -p "${INSTALL_DIR}/data"
-    
-    cd "${INSTALL_DIR}" || { echo -e "${RED}错误: 无法进入安装目录 '${INSTALL_DIR}'。${NC}"; return 1; }
-
-    echo "--> 正在生成 data/categories.json..."
-cat << 'EOF' > data/categories.json
-[
-  "未分类"
-]
-EOF
+overwrite_app_files() {
+    # 此函数只覆盖应用逻辑文件，不触及数据和配置
+    echo "--> 正在覆盖更新核心应用文件..."
 
     echo "--> 正在生成 package.json..."
 cat << 'EOF' > package.json
 {
   "name": "image-gallery-pro",
-  "version": "0.0.5",
+  "version": "0.0.7",
   "description": "A high-performance, full-stack image gallery application with all features.",
   "main": "server.js",
   "scripts": {
@@ -442,7 +429,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 })();
 EOF
 
-    echo "--> 正在生成主画廊 public/index.html (v0.0.5 布局优化版)..."
+    echo "--> 正在生成主画廊 public/index.html (v0.0.7 智能更新版)..."
 cat << 'EOF' > public/index.html
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -567,8 +554,8 @@ cat << 'EOF' > public/index.html
     
     <div class="border-b-2" style="border-color: var(--divider-color);"></div>
 
-    <main class="px-4 py-8 md:py-10">
-        <div id="gallery-container" class="max-w-7xl mx-auto"></div>
+    <main class="max-w-7xl mx-auto w-full px-4 py-8 md:py-10">
+        <div id="gallery-container"></div>
         <div id="loader" class="text-center py-8 hidden">正在加载更多...</div>
     </main>
     
@@ -726,7 +713,7 @@ cat << 'EOF' > public/index.html
              macyInstance = Macy({
                 container: '#gallery-container',
                 trueOrder: true,
-                waitForImages: false,
+                waitForImages: true,
                 margin: { x: 16, y: 16 },
                 columns: 2, // 手机默认2列
                 breakAt: {
@@ -885,7 +872,7 @@ cat << 'EOF' > public/admin.html
         }
         function renderPurgeableImageCard(image) {
             const card = document.createElement('div'); card.className = 'border rounded-lg shadow-sm bg-white overflow-hidden flex flex-col';
-            card.innerHTML = `<a class="preview-btn h-40 bg-slate-100 flex items-center justify-center cursor-pointer group" data-id="${image.id}"><img src="/image-proxy/${image.filename}?w=400" alt="${image.description}" class="max-h-full max-w-full object-contain group-hover:scale-105 transition-transform duration-300"></a><div class="p-3 flex-grow flex flex-col"><p class="font-bold text-sm truncate" title="${image.originalFilename}">${image.originalFilename}</p><p class="text-xs text-slate-500">删除于: ${new Date(image.deletedAt).toLocaleString()}</p></div><div class="bg-slate-50 p-2 flex justify-end items-center gap-1"><button title="恢复" data-id="${image.id}" class="restore-btn p-2 rounded-full text-green-600 hover:bg-green-100 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0011.664 0l3.18-3.185m-7.5 0v-4.992m0 0h4.992M9.75 9.348c0-1.031.84-1.875 1.875-1.875h.008c1.036 0 1.875.844 1.875 1.875v4.992m0 0H9.75m-4.992 0h4.992" /></svg></button><button title="彻底删除" data-id="${image.id}" class="purge-btn p-2 rounded-full text-red-500 hover:bg-red-100 hover:text-red-700 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.134-2.036-2.134H8.718c-1.126 0-2.037.955-2.037 2.134v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg></button></div>`;
+            card.innerHTML = `<a class="preview-btn h-40 bg-slate-100 flex items-center justify-center cursor-pointer group" data-id="${image.id}"><img src="/image-proxy/${image.filename}?w=400" alt="${image.description}" class="max-h-full max-w-full object-contain group-hover:scale-105 transition-transform duration-300"></a><div class="p-3 flex-grow flex flex-col"><p class="font-bold text-sm truncate" title="${image.originalFilename}">${image.originalFilename}</p><p class="text-xs text-slate-500">删除于: ${new Date(image.deletedAt).toLocaleString()}</p></div><div class="bg-slate-50 p-2 flex justify-end items-center gap-1"><button title="恢复" data-id="${image.id}" class="restore-btn p-2 rounded-full text-green-600 hover:bg-green-100 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" /></svg></button><button title="彻底删除" data-id="${image.id}" class="purge-btn p-2 rounded-full text-red-500 hover:bg-red-100 hover:text-red-700 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.134-2.036-2.134H8.718c-1.126 0-2.037.955-2.037 2.134v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg></button></div>`;
             DOMElements.imageList.appendChild(card);
         }
         
@@ -940,6 +927,142 @@ EOF
 }
 
 # --- 管理菜单功能 ---
+run_update_procedure() {
+    echo -e "${GREEN}--- 开始覆盖更新(保留数据) ---${NC}"
+    cd "${INSTALL_DIR}" || { echo -e "${RED}错误: 无法进入安装目录 '${INSTALL_DIR}'。${NC}"; return 1; }
+    
+    overwrite_app_files
+    
+    echo -e "${YELLOW}--> 正在检查并安装依赖 (npm install)...${NC}"
+    if npm install; then
+        echo -e "${GREEN}--> 依赖安装成功！${NC}"
+    else
+        echo -e "${RED}--> npm install 失败，请检查错误日志。${NC}"
+        # 不返回错误，因为应用可能仍然可以运行
+    fi
+
+    echo -e "${YELLOW}--> 正在重启应用以应用更新...${NC}"
+    restart_app
+    echo -e "${GREEN}--- 覆盖更新完成！ ---${NC}"
+}
+
+run_fresh_install_procedure() {
+    echo -e "${GREEN}--- 开始全新安装 ---${NC}"
+    # 确保旧目录被清理（如果存在）
+    if [ -d "${INSTALL_DIR}" ]; then
+        echo -e "${YELLOW}--> 正在清理旧的应用目录...${NC}"
+        rm -rf "${INSTALL_DIR}"
+    fi
+
+    generate_files || return 1
+    
+    cd "${INSTALL_DIR}" || { echo -e "${RED}错误: 无法进入安装目录 '${INSTALL_DIR}'。${NC}"; return 1; }
+
+    echo -e "${YELLOW}--- 安全设置向导 ---${NC}"
+    read -p "请输入新的后台管理员用户名 [默认为 admin]: " new_username
+    new_username=${new_username:-admin}
+    
+    local new_password
+    while true; do
+        read -s -p "请输入新的后台管理员密码 (必须填写): " new_password; echo
+        read -s -p "请再次输入密码以确认: " new_password_confirm; echo
+        if [ "$new_password" == "$new_password_confirm" ] && [ -n "$new_password" ]; then
+            break
+        else
+            echo -e "${RED}密码不匹配或为空，请重试。${NC}"
+        fi
+    done
+    
+    local jwt_secret
+    jwt_secret=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 64 | head -n 1)
+    
+    echo "--> 正在创建 .env 配置文件..."
+    (
+        echo "PORT=3000"
+        echo "ADMIN_USERNAME=${new_username}"
+        echo "ADMIN_PASSWORD=${new_password}"
+        echo "JWT_SECRET=${jwt_secret}"
+    ) > .env
+    echo -e "${GREEN}--> .env 配置文件创建成功！${NC}"
+    
+    echo -e "${YELLOW}--> 正在安装项目依赖 (npm install)，这可能需要几分钟...${NC}"
+    if npm install; then
+        echo -e "${GREEN}--> 项目依赖安装成功！${NC}"
+    else
+        echo -e "${RED}--> npm install 失败，请检查错误日志。${NC}"
+        return 1
+    fi
+
+    echo -e "${GREEN}--- 全新安装完成！正在自动启动应用... ---${NC}"
+    start_app
+}
+
+install_app() {
+    echo -e "${YELLOW}--- 1. 安装或修复应用 ---${NC}"
+    echo "--> 正在检查系统环境和核心依赖..."
+    
+    local sudo_cmd=""
+    if [ "$EUID" -ne 0 ]; then
+        if command -v sudo &> /dev/null; then
+            sudo_cmd="sudo"
+        else
+            echo -e "${RED}错误：此脚本需要以 root 用户身份运行，或者需要安装 'sudo' 工具才能继续。${NC}"
+            return 1
+        fi
+    fi
+
+    check_and_install_deps "Node.js & npm" "nodejs npm" "node" "${sudo_cmd}" || return 1
+    check_and_install_deps "编译工具(for sharp)" "build-essential" "make" "${sudo_cmd}" || return 1
+
+    if ! command -v pm2 &> /dev/null; then
+        echo -e "${YELLOW}--> 检测到 PM2 未安装，将通过 npm 全局安装...${NC}"
+        if ${sudo_cmd} npm install -g pm2; then
+            echo -e "${GREEN}--> PM2 安装成功！${NC}"
+        else
+            echo -e "${RED}--> PM2 安装失败，请检查 npm 是否配置正确。${NC}"
+            return 1
+        fi
+    fi
+    echo -e "${GREEN}--> 核心依赖检查完毕。${NC}"
+
+    # --- 智能判断流程 ---
+    if [ -f "${INSTALL_DIR}/.env" ]; then
+        echo -e "${YELLOW}--> 检测到应用已安装。请选择您的操作：${NC}"
+        echo ""
+        echo "  [1] ${GREEN}覆盖更新 (推荐)${NC} - 只更新程序，保留所有数据和配置。"
+        echo "  [2] ${RED}全新覆盖安装 (危险)${NC} - 删除现有应用，包括所有数据，然后全新安装。"
+        echo "  [0] 返回主菜单"
+        echo ""
+        local update_choice
+        read -p "请输入你的选择 [0-2]: " update_choice
+
+        case $update_choice in
+            1)
+                run_update_procedure
+                ;;
+            2)
+                echo -e "${RED}警告：此操作将永久删除现有应用的所有数据和配置！${NC}"
+                read -p "请输入 '确认删除' 以继续: " confirmation
+                if [ "$confirmation" == "确认删除" ]; then
+                    run_fresh_install_procedure
+                else
+                    echo -e "${YELLOW}输入不正确，操作已取消。${NC}"
+                fi
+                ;;
+            0)
+                echo "操作已取消。"
+                return
+                ;;
+            *)
+                echo -e "${RED}无效输入...${NC}"
+                ;;
+        esac
+    else
+        echo -e "${YELLOW}--> 未检测到现有安装，将开始全新安装流程...${NC}"
+        run_fresh_install_procedure
+    fi
+}
+
 check_and_install_deps() {
     local dep_to_check=$1
     local package_name=$2
@@ -1028,83 +1151,6 @@ display_status() {
         printf "  %-15s %b%s%b\n" "安装状态:" "${RED}" "未安装" "${NC}"
     fi
     echo -e "${YELLOW}==============================================================${NC}"
-}
-
-install_app() {
-    echo -e "${GREEN}--- 1. 开始安装或修复应用 ---${NC}"
-    echo "--> 正在检查系统环境和权限..."
-    
-    local sudo_cmd=""
-    if [ "$EUID" -ne 0 ]; then
-        if command -v sudo &> /dev/null; then
-            sudo_cmd="sudo"
-            echo -e "${GREEN}--> 检测到 sudo，将使用 sudo 执行需要权限的命令。${NC}"
-        else
-            echo -e "${RED}错误：此脚本需要以 root 用户身份运行，或者需要安装 'sudo' 工具才能继续。${NC}"
-            return 1
-        fi
-    else
-        echo -e "${GREEN}--> 检测到以 root 用户身份运行。${NC}"
-    fi
-
-    check_and_install_deps "Node.js & npm" "nodejs npm" "node" "${sudo_cmd}" || return 1
-    check_and_install_deps "编译工具(for sharp)" "build-essential" "make" "${sudo_cmd}" || return 1
-
-    echo -e "${YELLOW}--> 正在检查 PM2...${NC}"
-    if ! command -v pm2 &> /dev/null; then
-        echo -e "${YELLOW}--> 检测到 PM2 未安装，将通过 npm 全局安装...${NC}"
-        if ${sudo_cmd} npm install -g pm2; then
-            echo -e "${GREEN}--> PM2 安装成功！${NC}"
-        else
-            echo -e "${RED}--> PM2 安装失败，请检查 npm 是否配置正确。${NC}"
-            return 1
-        fi
-    else
-        echo -e "${GREEN}--> PM2 已安装。${NC}"
-    fi
-
-    echo -e "${GREEN}--> 所有核心依赖均已满足。${NC}"
-    generate_files || return 1
-    
-    cd "${INSTALL_DIR}" || { echo -e "${RED}错误: 无法进入安装目录 '${INSTALL_DIR}'。${NC}"; return 1; }
-
-    echo -e "${YELLOW}--- 安全设置向导 ---${NC}"
-    read -p "请输入新的后台管理员用户名 [默认为 admin]: " new_username
-    new_username=${new_username:-admin}
-    
-    local new_password
-    while true; do
-        read -s -p "请输入新的后台管理员密码 (必须填写): " new_password; echo
-        read -s -p "请再次输入密码以确认: " new_password_confirm; echo
-        if [ "$new_password" == "$new_password_confirm" ] && [ -n "$new_password" ]; then
-            break
-        else
-            echo -e "${RED}密码不匹配或为空，请重试。${NC}"
-        fi
-    done
-    
-    local jwt_secret
-    jwt_secret=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 64 | head -n 1)
-    
-    echo "--> 正在创建 .env 配置文件..."
-    (
-        echo "PORT=3000"
-        echo "ADMIN_USERNAME=${new_username}"
-        echo "ADMIN_PASSWORD=${new_password}"
-        echo "JWT_SECRET=${jwt_secret}"
-    ) > .env
-    echo -e "${GREEN}--> .env 配置文件创建成功！${NC}"
-    
-    echo -e "${YELLOW}--> 正在安装项目依赖 (npm install)，这可能需要几分钟，请耐心等待...${NC}"
-    if npm install; then
-        echo -e "${GREEN}--> 项目依赖安装成功！${NC}"
-    else
-        echo -e "${RED}--> npm install 失败，请检查错误日志。${NC}"
-        return 1
-    fi
-
-    echo -e "${GREEN}--- 安装完成！正在自动启动应用... ---${NC}"
-    start_app
 }
 
 start_app() {
@@ -1362,7 +1408,7 @@ show_menu() {
     echo -e "${YELLOW}---------------------- 可用操作 ----------------------${NC}"
     echo ""
     echo -e " ${GREEN}【基础操作】${NC}"
-    echo -e "   1. 安装或修复应用"
+    echo -e "   1. 安装 / 更新应用"
     echo -e "   2. 启动应用"
     echo -e "   3. 停止应用"
     echo -e "   4. 重启应用"
