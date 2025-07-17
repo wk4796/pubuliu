@@ -1,11 +1,11 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v1.3.1)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v1.4.0)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
-#   v1.3.1 更新:
-#   - 修复 (后台): 最终修复！重构了后台图片卡片的渲染函数，使其与参考脚本(33.sh)的实现方式完全一致，解决了预览功能顽固的无响应问题。
+#   v1.4.0 更新:
+#   - 修复 (后台): 最终修复！根据调试日志，定位到问题为CSS样式缺失，已补全.lightbox.active的透明度和可见性规则，彻底解决预览功能无响应的问题。
 # =================================================================
 
 # --- 配置 ---
@@ -16,7 +16,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 PROMPT_Y="(${GREEN}y${NC}/${RED}n${NC})"
 
-SCRIPT_VERSION="1.3.1"
+SCRIPT_VERSION="1.4.0"
 APP_NAME="image-gallery"
 
 # --- 路径设置 ---
@@ -43,7 +43,7 @@ overwrite_app_files() {
 cat << 'EOF' > package.json
 {
   "name": "image-gallery-pro",
-  "version": "1.3.1",
+  "version": "1.4.0",
   "description": "A high-performance, full-stack image gallery application with all features.",
   "main": "server.js",
   "scripts": {
@@ -885,6 +885,9 @@ cat << 'EOF' > public/admin.html
         }
 
         .lightbox { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.9); display: none; justify-content: center; align-items: center; z-index: 1000; opacity: 0; visibility: hidden; transition: opacity 0.3s ease; }
+        /* ================== 核心CSS修复 ================== */
+        .lightbox.active { opacity: 1; visibility: visible; }
+        /* ================================================ */
         .lightbox .spinner { border-color: rgba(255,255,255,0.2); border-top-color: rgba(255,255,255,0.8); display: none; position: absolute; z-index: 1; width: 3rem; height: 3rem; }
         .lightbox.is-loading .spinner { display: block; animation: spin 1s linear infinite; }
         .lightbox-image { max-width: 85%; max-height: 85%; display: block; object-fit: contain; }
@@ -1119,9 +1122,6 @@ cat << 'EOF' > public/admin.html
         async function loadImages(category, name) { DOMElements.imageLoader.classList.remove('hidden'); DOMElements.imageList.innerHTML = ''; try { const url = `/api/images?category=${category}&search=${encodeURIComponent(currentSearchTerm)}&page=${currentAdminPage}&limit=12`; const response = await apiRequest(url); const data = await response.json(); allLoadedImages = data.images; DOMElements.imageListHeader.innerHTML = `${name} <span class="text-base text-gray-500 font-normal">(共 ${data.totalImages} 张)</span>`; if (allLoadedImages.length === 0) { DOMElements.imageList.innerHTML = '<p class="text-slate-500 col-span-full text-center py-10">没有找到图片。</p>'; } else { allLoadedImages.forEach((image) => renderAdminImage(image)); } renderPaginationControls(data.page, data.totalPages); } catch (error) { if(error.message !== 'Unauthorized') DOMElements.imageList.innerHTML = `<p class="text-red-500 col-span-full text-center py-10">加载图片失败: ${error.message}</p>`; } finally { DOMElements.imageLoader.classList.add('hidden'); } }
         async function loadRecycleBin() { DOMElements.imageLoader.classList.remove('hidden'); DOMElements.imageList.innerHTML = ''; try { const url = `/api/admin/recycle-bin?search=${encodeURIComponent(currentSearchTerm)}&page=${currentAdminPage}&limit=12`; const response = await apiRequest(url); const data = await response.json(); allLoadedImages = data.images; DOMElements.imageListHeader.innerHTML = `回收站`; if (allLoadedImages.length === 0) { DOMElements.imageList.innerHTML = '<p class="text-slate-500 col-span-full text-center py-10">回收站是空的。</p>'; } else { allLoadedImages.forEach((image) => renderAdminImage(image, true)); } renderPaginationControls(data.page, data.totalPages); } catch (error) { if (error.message !== 'Unauthorized') DOMElements.imageList.innerHTML = `<p class="text-red-500 col-span-full text-center py-10">加载回收站失败: ${error.message}</p>`; } finally { DOMElements.imageLoader.classList.add('hidden'); } }
 
-        // =================================================================
-        // =========== 核心修复：重构 renderAdminImage，使其与参考脚本一致 ===========
-        // =================================================================
         function renderAdminImage(image, isRecycleBinView = false) {
             const buttonsHtml = isRecycleBinView 
             ? `
@@ -1265,7 +1265,10 @@ cat << 'EOF' > public/admin.html
             
             if (button.matches('.preview-trigger, .preview-btn')) {
                 const newIndex = allLoadedImages.findIndex(img => img.id === imageId);
-                if (newIndex === -1) { showToast('无法在列表中找到此图片。', 'error'); return; }
+                if (newIndex === -1) { 
+                    showToast('无法在列表中找到此图片。', 'error'); 
+                    return; 
+                }
                 DOMElements.lightbox.classList.add('active');
                 document.body.classList.add('lightbox-open');
                 showImageAtIndex(newIndex);
