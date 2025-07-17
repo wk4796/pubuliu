@@ -1,11 +1,11 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v1.3.0)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v1.3.1)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
-#   v1.3.0 更新:
-#   - 修复 (后台): 彻底修复后台预览、下载等功能无响应的问题。完全遵循参考脚本的模式，重构了ID传递和事件监听机制，确保功能稳定可靠。
+#   v1.3.1 更新:
+#   - 修复 (后台): 最终修复！重构了后台图片卡片的渲染函数，使其与参考脚本(33.sh)的实现方式完全一致，解决了预览功能顽固的无响应问题。
 # =================================================================
 
 # --- 配置 ---
@@ -16,7 +16,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 PROMPT_Y="(${GREEN}y${NC}/${RED}n${NC})"
 
-SCRIPT_VERSION="1.3.0"
+SCRIPT_VERSION="1.3.1"
 APP_NAME="image-gallery"
 
 # --- 路径设置 ---
@@ -43,7 +43,7 @@ overwrite_app_files() {
 cat << 'EOF' > package.json
 {
   "name": "image-gallery-pro",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "description": "A high-performance, full-stack image gallery application with all features.",
   "main": "server.js",
   "scripts": {
@@ -1120,12 +1120,9 @@ cat << 'EOF' > public/admin.html
         async function loadRecycleBin() { DOMElements.imageLoader.classList.remove('hidden'); DOMElements.imageList.innerHTML = ''; try { const url = `/api/admin/recycle-bin?search=${encodeURIComponent(currentSearchTerm)}&page=${currentAdminPage}&limit=12`; const response = await apiRequest(url); const data = await response.json(); allLoadedImages = data.images; DOMElements.imageListHeader.innerHTML = `回收站`; if (allLoadedImages.length === 0) { DOMElements.imageList.innerHTML = '<p class="text-slate-500 col-span-full text-center py-10">回收站是空的。</p>'; } else { allLoadedImages.forEach((image) => renderAdminImage(image, true)); } renderPaginationControls(data.page, data.totalPages); } catch (error) { if (error.message !== 'Unauthorized') DOMElements.imageList.innerHTML = `<p class="text-red-500 col-span-full text-center py-10">加载回收站失败: ${error.message}</p>`; } finally { DOMElements.imageLoader.classList.add('hidden'); } }
 
         // =================================================================
-        // =========== 核心修复：重构 renderAdminImage，确保 data-id 正确添加 ===========
+        // =========== 核心修复：重构 renderAdminImage，使其与参考脚本一致 ===========
         // =================================================================
         function renderAdminImage(image, isRecycleBinView = false) {
-            const card = document.createElement('div');
-            card.className = 'admin-image-card border rounded-lg shadow-sm bg-white overflow-hidden flex flex-col';
-            
             const buttonsHtml = isRecycleBinView 
             ? `
                 <button title="恢复" class="restore-btn p-2 rounded-full text-green-600 hover:bg-green-100 transition-colors" data-id="${image.id}"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 pointer-events-none"><path stroke-linecap="round" stroke-linejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" /></svg></button>
@@ -1138,25 +1135,27 @@ cat << 'EOF' > public/admin.html
                 <button title="移至回收站" class="delete-btn p-2 rounded-full text-red-500 hover:bg-red-100 hover:text-red-700 transition-colors" data-id="${image.id}"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 pointer-events-none"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.134-2.036-2.134H8.718c-1.126 0-2.037.955-2.037 2.134v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg></button>
             `;
             
-            card.innerHTML = `
-                <a href="#" class="image-preview-container flex-shrink-0 preview-trigger" data-id="${image.id}">
-                    <div class="card-spinner"></div>
-                    <img src="/image-proxy/${image.filename}?w=400" alt="${image.description || image.originalFilename}" class="pointer-events-none" onload="this.classList.add('loaded'); this.previousElementSibling.style.display='none';">
-                </a>
-                <div class="p-3 flex-grow flex flex-col min-h-0">
-                    <p class="font-bold text-sm truncate" title="${image.originalFilename}">${image.originalFilename}</p>
-                    <div class="flex justify-between items-center text-xs text-slate-500 my-2">
-                        <span class="flex items-center gap-1.5" title="文件大小"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-3.5 h-3.5"><path d="M2 3.5A1.5 1.5 0 0 1 3.5 2h9A1.5 1.5 0 0 1 14 3.5v9a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 12.5v-9ZM3.5 3a.5.5 0 0 0-.5.5v9a.5.5 0 0 0 .5.5h9a.5.5 0 0 0 .5-.5v-9a.5.5 0 0 0-.5-.5h-9Z" /><path d="M5 5.5A.5.5 0 0 1 5.5 5h5a.5.5 0 0 1 0 1h-5A.5.5 0 0 1 5 5.5Zm0 2A.5.5 0 0 1 5.5 7h5a.5.5 0 0 1 0 1h-5A.5.5 0 0 1 5 7.5Zm0 2A.5.5 0 0 1 5.5 9h3a.5.5 0 0 1 0 1h-3A.5.5 0 0 1 5 9.5Z" /></svg>${formatBytes(image.size)}</span>
-                        <span class="flex items-center gap-1.5 truncate" title="分类: ${image.category}"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-3.5 h-3.5"><path d="M3.5 2A1.5 1.5 0 0 0 2 3.5v.986c.543-.294 1.25-.486 2-.486h7.5a.5.5 0 0 1 .5.5v2.875a.5.5 0 0 0 .5.5h.875a.5.5 0 0 0 .5-.5V5.125a.5.5 0 0 0-.146-.353l-1.5-1.5A.5.5 0 0 0 12.125 3H6.5a2.5 2.5 0 0 0-2.482 2H3.5A1.5 1.5 0 0 0 2 6.5v6A1.5 1.5 0 0 0 3.5 14h9a1.5 1.5 0 0 0 1.5-1.5v-5A1.5 1.5 0 0 0 12.5 6H4a1.5 1.5 0 0 1-1.5-1.5V3.5ZM3 6.5A.5.5 0 0 1 3.5 6H12a.5.5 0 0 1 .5.5v5a.5.5 0 0 1-.5.5h-9A.5.5 0 0 1 3 12.5v-6Z" /></svg><span class="truncate">${image.category || UNCATEGORIZED}</span></span>
+            const cardHtml = `
+                <div class="admin-image-card border rounded-lg shadow-sm bg-white overflow-hidden flex flex-col">
+                    <a href="#" class="image-preview-container flex-shrink-0 preview-trigger" data-id="${image.id}">
+                        <div class="card-spinner"></div>
+                        <img src="/image-proxy/${image.filename}?w=400" alt="${image.description || image.originalFilename}" class="pointer-events-none" onload="this.classList.add('loaded'); this.previousElementSibling.style.display='none';">
+                    </a>
+                    <div class="p-3 flex-grow flex flex-col min-h-0">
+                        <p class="font-bold text-sm truncate" title="${image.originalFilename}">${image.originalFilename}</p>
+                        <div class="flex justify-between items-center text-xs text-slate-500 my-2">
+                            <span class="flex items-center gap-1.5" title="文件大小"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-3.5 h-3.5"><path d="M2 3.5A1.5 1.5 0 0 1 3.5 2h9A1.5 1.5 0 0 1 14 3.5v9a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 12.5v-9ZM3.5 3a.5.5 0 0 0-.5.5v9a.5.5 0 0 0 .5.5h9a.5.5 0 0 0 .5-.5v-9a.5.5 0 0 0-.5-.5h-9Z" /><path d="M5 5.5A.5.5 0 0 1 5.5 5h5a.5.5 0 0 1 0 1h-5A.5.5 0 0 1 5 5.5Zm0 2A.5.5 0 0 1 5.5 7h5a.5.5 0 0 1 0 1h-5A.5.5 0 0 1 5 7.5Zm0 2A.5.5 0 0 1 5.5 9h3a.5.5 0 0 1 0 1h-3A.5.5 0 0 1 5 9.5Z" /></svg>${formatBytes(image.size)}</span>
+                            <span class="flex items-center gap-1.5 truncate" title="分类: ${image.category}"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-3.5 h-3.5"><path d="M3.5 2A1.5 1.5 0 0 0 2 3.5v.986c.543-.294 1.25-.486 2-.486h7.5a.5.5 0 0 1 .5.5v2.875a.5.5 0 0 0 .5.5h.875a.5.5 0 0 0 .5-.5V5.125a.5.5 0 0 0-.146-.353l-1.5-1.5A.5.5 0 0 0 12.125 3H6.5a2.5 2.5 0 0 0-2.482 2H3.5A1.5 1.5 0 0 0 2 6.5v6A1.5 1.5 0 0 0 3.5 14h9a1.5 1.5 0 0 0 1.5-1.5v-5A1.5 1.5 0 0 0 12.5 6H4a1.5 1.5 0 0 1-1.5-1.5V3.5ZM3 6.5A.5.5 0 0 1 3.5 6H12a.5.5 0 0 1 .5.5v5a.5.5 0 0 1-.5.5h-9A.5.5 0 0 1 3 12.5v-6Z" /></svg><span class="truncate">${image.category || UNCATEGORIZED}</span></span>
+                        </div>
+                        <p class="text-xs text-slate-600 flex-grow pt-1" title="${image.description || ''}"><span class="description-clamp">${image.description || '无描述'}</span></p>
+                        ${isRecycleBinView ? `<p class="text-xs text-red-500 mt-auto pt-2"><strong>删除于:</strong> ${new Date(image.deletedAt).toLocaleString()}</p>` : ''}
                     </div>
-                    <p class="text-xs text-slate-600 flex-grow pt-1" title="${image.description || ''}"><span class="description-clamp">${image.description || '无描述'}</span></p>
-                    ${isRecycleBinView ? `<p class="text-xs text-red-500 mt-auto pt-2"><strong>删除于:</strong> ${new Date(image.deletedAt).toLocaleString()}</p>` : ''}
-                </div>
-                <div class="bg-slate-50 p-2 flex justify-end items-center gap-1 mt-auto flex-shrink-0">
-                    ${buttonsHtml}
+                    <div class="bg-slate-50 p-2 flex justify-end items-center gap-1 mt-auto flex-shrink-0">
+                        ${buttonsHtml}
+                    </div>
                 </div>
             `;
-            DOMElements.imageList.appendChild(card);
+            DOMElements.imageList.insertAdjacentHTML('beforeend', cardHtml);
         }
         
         const changePage = (page) => {
@@ -1249,9 +1248,6 @@ cat << 'EOF' > public/admin.html
             changePage(1);
         });
         
-        // =================================================================
-        // =========== 核心修复：重构事件委托，精确处理并直接从按钮获取ID ===========
-        // =================================================================
         DOMElements.imageList.addEventListener('click', async (e) => {
             const button = e.target.closest('button, a');
             if (!button) return;
