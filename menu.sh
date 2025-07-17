@@ -1,12 +1,11 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v1.5.0)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v1.5.1)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
-#   v1.5.0 更新:
-#   - 新增(后台): 为回收站中的图片增加预览功能。
-#   - 优化(后台): 为后台图片预览窗口添加加载动画，提升切换图片时的用户体验。
+#   v1.5.1 更新:
+#   - 优化(后台): 为后台图片预览(Lightbox)的切换增加了与前台一致的加载动画，提升体验。
 # =================================================================
 
 # --- 配置 ---
@@ -17,7 +16,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 PROMPT_Y="(${GREEN}y${NC}/${RED}n${NC})"
 
-SCRIPT_VERSION="1.5.0"
+SCRIPT_VERSION="1.5.1"
 APP_NAME="image-gallery"
 
 # --- 路径设置 ---
@@ -44,7 +43,7 @@ overwrite_app_files() {
 cat << 'EOF' > package.json
 {
   "name": "image-gallery-pro",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "description": "A high-performance, full-stack image gallery application with all features.",
   "main": "server.js",
   "scripts": {
@@ -1136,7 +1135,7 @@ cat << 'EOF' > public/admin.html
             `;
             
             const cardHtml = `
-                <div class="admin-image-card border rounded-lg shadow-sm bg-white overflow-hidden flex flex-col">
+                <div class="admin-image-card border rounded-lg shadow-sm bg-white overflow-hidden flex flex-col" data-id="${image.id}">
                     <a href="#" class="image-preview-container flex-shrink-0 preview-trigger" data-id="${image.id}">
                         <div class="card-spinner"></div>
                         <img src="/image-proxy/${image.filename}?w=400" alt="${image.description || image.originalFilename}" class="pointer-events-none" onload="this.classList.add('loaded'); this.previousElementSibling.style.display='none';">
