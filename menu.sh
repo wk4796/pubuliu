@@ -1,16 +1,12 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v1.5.2)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v1.6.0)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
-#   v1.5.2 更新:
-#   - 优化(后台): 优化图片预览中的删除体验，删除后自动切换到下一张，而不是退出预览。
-#   v1.5.1 更新:
-#   - 重构(后台): 对齐后台与前台的图片预览(Lightbox)逻辑，确保代码结构和行为的完全一致性。
-#   v1.5.0 更新:
-#   - 新增(后台): 为回收站中的图片增加预览功能。
-#   - 优化(后台): 为后台图片预览窗口添加加载动画，提升切换图片时的用户体验。
+#   v1.6.0 更新:
+#   - 新增(后台): 增加后台图片批量操作功能，包括批量删除、批量修改分类、批量恢复、批量彻底删除。
+#   - 优化(后台): 增加“全选”功能和上下文感知的浮动操作栏，大幅提升管理效率和交互体验。
 # =================================================================
 
 # --- 配置 ---
@@ -21,7 +17,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 PROMPT_Y="(${GREEN}y${NC}/${RED}n${NC})"
 
-SCRIPT_VERSION="1.5.2"
+SCRIPT_VERSION="1.6.0"
 APP_NAME="image-gallery"
 
 # --- 路径设置 ---
@@ -48,7 +44,7 @@ overwrite_app_files() {
 cat << 'EOF' > package.json
 {
   "name": "image-gallery-pro",
-  "version": "1.5.2",
+  "version": "1.6.0",
   "description": "A high-performance, full-stack image gallery application with all features.",
   "main": "server.js",
   "scripts": {
@@ -109,8 +105,8 @@ const initializeApp = async () => {
     } catch (error) { console.error('初始化失败:', error); process.exit(1); }
 };
 
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
+app.use(bodyParser.json({ limit: '50mb' }));
+app.use(bodyParser.urlencoded({ extended: true, limit: '50mb' }));
 app.use(cookieParser());
 
 const readDB = async (filePath, defaultVal = []) => {
@@ -336,6 +332,63 @@ apiAdminRouter.put('/images/:id', handleApiError(async (req, res) => {
     await writeDB(dbPath, images);
     res.json({ message: '更新成功', image: imageToUpdate });
 }));
+
+
+// =========== 新增：批量操作API ===========
+apiAdminRouter.post('/images/bulk-action', handleApiError(async (req, res) => {
+    const { action, ids, payload } = req.body;
+
+    if (!action || !Array.isArray(ids) || ids.length === 0) {
+        return res.status(400).json({ message: '无效的请求：缺少 action 或 ids。' });
+    }
+
+    let allImages = await readDB(dbPath);
+    const idsToProcess = new Set(ids);
+    let modified = false;
+
+    if (action === 'purge') {
+        const imagesToDelete = allImages.filter(img => idsToProcess.has(img.id));
+        for (const image of imagesToDelete) {
+            const filePath = path.join(uploadsDir, image.filename);
+            try {
+                await fs.unlink(filePath);
+            } catch (error) {
+                console.error(`永久删除文件失败: ${filePath}`, error);
+            }
+        }
+        allImages = allImages.filter(img => !idsToProcess.has(img.id));
+        modified = true;
+    } else {
+        allImages.forEach(img => {
+            if (idsToProcess.has(img.id)) {
+                modified = true;
+                switch (action) {
+                    case 'delete':
+                        img.status = 'deleted';
+                        img.deletedAt = new Date().toISOString();
+                        break;
+                    case 'restore':
+                        delete img.status;
+                        delete img.deletedAt;
+                        break;
+                    case 'recategorize':
+                        if (payload && payload.newCategory) {
+                            img.category = payload.newCategory;
+                        }
+                        break;
+                }
+            }
+        });
+    }
+
+    if (modified) {
+        await writeDB(dbPath, allImages);
+    }
+    
+    res.json({ message: `批量操作 '${action}' 已成功完成。` });
+}));
+// ===================================
+
 
 apiAdminRouter.post('/categories', handleApiError(async (req, res) => {
     const { name } = req.body;
@@ -836,8 +889,18 @@ cat << 'EOF' > public/admin.html
         .toast.show { transform: translateX(0); } 
         .file-preview-item.upload-success { background-color: #f0fdf4; } 
         .file-preview-item.upload-error { background-color: #fef2f2; } 
-        .admin-image-card { transition: opacity 0.4s ease, transform 0.4s ease; height: 20rem; /* 320px */ }
+        .admin-image-card { position: relative; transition: opacity 0.4s ease, transform 0.4s ease; height: 20rem; /* 320px */ }
         .admin-image-card.fading-out { opacity: 0; transform: scale(0.95); }
+        .admin-image-card .bulk-checkbox {
+            position: absolute;
+            top: 0.75rem;
+            left: 0.75rem;
+            z-index: 10;
+            width: 1.25rem;
+            height: 1.25rem;
+            border-radius: 0.25rem;
+            cursor: pointer;
+        }
         
         .description-clamp {
             display: -webkit-box;
@@ -876,7 +939,6 @@ cat << 'EOF' > public/admin.html
         }
         @keyframes spin { to { transform: rotate(360deg); } }
 
-
         .page-item {
             transition: all 0.2s ease-in-out;
         }
@@ -891,8 +953,8 @@ cat << 'EOF' > public/admin.html
 
         .lightbox { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.9); display: none; justify-content: center; align-items: center; z-index: 1000; opacity: 0; visibility: hidden; transition: opacity 0.3s ease; }
         .lightbox.active { opacity: 1; visibility: visible; }
-        .lightbox .spinner { border-color: rgba(255,255,255,0.2); border-top-color: rgba(255,255,255,0.8); display: none; position: absolute; z-index: 1; width: 3rem; height: 3rem; animation: spin 1s linear infinite; }
-        .lightbox.is-loading .spinner { display: block; }
+        .lightbox .spinner { border-color: rgba(255,255,255,0.2); border-top-color: rgba(255,255,255,0.8); display: none; position: absolute; z-index: 1; width: 3rem; height: 3rem; }
+        .lightbox.is-loading .spinner { display: block; animation: spin 1s linear infinite; }
         .lightbox-image { max-width: 85%; max-height: 85%; display: block; object-fit: contain; }
         .lightbox-btn { position: absolute; top: 50%; transform: translateY(-50%); background-color: rgba(255,255,255,0.1); color: white; border: none; font-size: 2.5rem; cursor: pointer; padding: 0.5rem 1rem; border-radius: 0.5rem; transition: background-color 0.2s; z-index: 10;}
         .lightbox-btn:hover { background-color: rgba(255,255,255,0.2); }
@@ -922,6 +984,24 @@ cat << 'EOF' > public/admin.html
             padding: 1rem 0;
             border-top: 1px solid #e2e8f0;
         }
+        
+        /* 新增：批量操作浮动栏样式 */
+        #bulk-action-bar {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            z-index: 25;
+            background-color: rgba(17, 24, 39, 0.95);
+            backdrop-filter: blur(8px);
+            color: white;
+            transform: translateY(100%);
+            transition: transform 0.3s ease-in-out;
+            box-shadow: 0 -4px 6px -1px rgb(0 0 0 / 0.1), 0 -2px 4px -2px rgb(0 0 0 / 0.1);
+        }
+        #bulk-action-bar.visible {
+            transform: translateY(0);
+        }
     </style>
 </head>
 <body class="antialiased text-slate-800">
@@ -940,7 +1020,13 @@ cat << 'EOF' > public/admin.html
         </div>
         <section id="image-list-section" class="bg-white p-6 rounded-lg shadow-md xl:col-span-8">
             <div class="flex flex-col md:flex-row justify-between items-center mb-4 gap-4 flex-shrink-0">
-                <h2 id="image-list-header" class="text-xl font-semibold text-slate-900 flex-grow"></h2>
+                <div class="flex items-center gap-4 flex-grow">
+                    <h2 id="image-list-header" class="text-xl font-semibold text-slate-900"></h2>
+                    <div id="select-all-container" class="hidden items-center gap-2">
+                        <input type="checkbox" id="select-all-checkbox" class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
+                        <label for="select-all-checkbox" class="text-sm text-slate-600">全选当前页</label>
+                    </div>
+                </div>
                 <div class="w-full md:w-64">
                     <input type="search" id="search-input" placeholder="在当前视图下搜索..." class="w-full border rounded-full px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
                 </div>
@@ -965,6 +1051,17 @@ cat << 'EOF' > public/admin.html
             <button id="lb-delete" title="移至回收站" class="lb-action-btn lb-delete">删除</button>
         </div>
     </div>
+    <div id="bulk-action-bar">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center gap-4">
+                     <span id="bulk-counter" class="font-medium">已选择 0 张图片</span>
+                </div>
+                <div id="bulk-buttons-container" class="flex items-center gap-3">
+                    </div>
+            </div>
+        </div>
+    </div>
     <div id="toast" class="toast max-w-xs bg-gray-800 text-white text-sm rounded-lg shadow-lg p-3" role="alert"><div class="flex items-center"><div id="toast-icon" class="mr-2"></div><span id="toast-message"></span></div></div>
     <script>
     document.addEventListener('DOMContentLoaded', function() {
@@ -982,9 +1079,16 @@ cat << 'EOF' > public/admin.html
             lightboxImage: document.querySelector('#lightbox .lightbox-image'),
             lightboxCounter: document.getElementById('lb-counter'),
             lightboxDownloadLink: document.getElementById('lb-download'),
-            lightboxDeleteBtn: document.getElementById('lb-delete')
+            lightboxDeleteBtn: document.getElementById('lb-delete'),
+            // 新增批量操作元素
+            bulkActionBar: document.getElementById('bulk-action-bar'),
+            bulkCounter: document.getElementById('bulk-counter'),
+            bulkButtonsContainer: document.getElementById('bulk-buttons-container'),
+            selectAllContainer: document.getElementById('select-all-container'),
+            selectAllCheckbox: document.getElementById('select-all-checkbox'),
         };
-        let filesToUpload = []; let allLoadedImages = []; let currentImageIndex = 0; let currentSearchTerm = ''; let debounceTimer; let currentAdminPage = 1; let lastFocusedElement;
+        let filesToUpload = []; let allLoadedImages = []; let currentImageIndex = 0; let currentSearchTerm = ''; let debounceTimer; let currentAdminPage = 1; let isLightboxLoading = false;
+        let selectedImageIds = new Set();
         
         const apiRequest = async (url, options = {}) => {
             try {
@@ -1016,6 +1120,74 @@ cat << 'EOF' > public/admin.html
         const showConfirmationModal = (title, bodyHtml, confirmText = '确认', cancelText = '取消') => { return new Promise(resolve => { const footerHtml = `<button type="button" class="modal-cancel-btn bg-gray-300 hover:bg-gray-400 text-black py-2 px-4 rounded">${cancelText}</button><button type="button" id="modal-confirm-btn" class="bg-red-600 hover:bg-red-700 text-white py-2 px-4 rounded">${confirmText}</button>`; showGenericModal(title, bodyHtml, footerHtml); DOMElements.genericModal.querySelector('#modal-confirm-btn').onclick = () => { hideModal(DOMElements.genericModal); resolve(true); }; const cancelBtn = DOMElements.genericModal.querySelector('.modal-cancel-btn'); cancelBtn.onclick = () => { hideModal(DOMElements.genericModal); resolve(false); }; DOMElements.genericModal.onclick = (e) => { if (e.target === DOMElements.genericModal) { cancelBtn.click(); } }; }); };
         const hideModal = (modal) => modal.classList.remove('active');
 
+        // 新增：批量操作相关逻辑
+        const updateBulkActionBar = () => {
+            const count = selectedImageIds.size;
+            DOMElements.bulkCounter.textContent = `已选择 ${count} 张图片`;
+            if (count > 0) {
+                DOMElements.bulkActionBar.classList.add('visible');
+                generateBulkActionButtons();
+            } else {
+                DOMElements.bulkActionBar.classList.remove('visible');
+            }
+            DOMElements.selectAllCheckbox.checked = count > 0 && count === DOMElements.imageList.querySelectorAll('.admin-image-card').length;
+        };
+
+        const generateBulkActionButtons = () => {
+            DOMElements.bulkButtonsContainer.innerHTML = '';
+            const isRecycleBin = document.querySelector('#nav-item-recycle-bin').classList.contains('active');
+
+            const createButton = (id, text, classes) => {
+                const btn = document.createElement('button');
+                btn.id = id;
+                btn.textContent = text;
+                btn.className = `px-4 py-2 text-sm font-medium rounded-md shadow-sm transition-colors ${classes}`;
+                DOMElements.bulkButtonsContainer.appendChild(btn);
+            };
+
+            if (isRecycleBin) {
+                createButton('bulk-restore-btn', '批量恢复', 'bg-blue-600 hover:bg-blue-700 text-white');
+                createButton('bulk-purge-btn', '批量彻底删除', 'bg-red-700 hover:bg-red-800 text-white');
+            } else {
+                createButton('bulk-recategorize-btn', '修改分类', 'bg-yellow-500 hover:bg-yellow-600 text-white');
+                createButton('bulk-delete-btn', '移至回收站', 'bg-red-600 hover:bg-red-700 text-white');
+            }
+        };
+
+        const resetSelection = () => {
+            selectedImageIds.clear();
+            document.querySelectorAll('.bulk-checkbox').forEach(cb => cb.checked = false);
+            updateBulkActionBar();
+        };
+
+        const performBulkAction = async (action, payload = {}) => {
+            const ids = Array.from(selectedImageIds);
+            try {
+                await apiRequest('/api/admin/images/bulk-action', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action, ids, payload })
+                });
+                showToast(`批量操作成功！`);
+                
+                // Animate and remove cards from UI
+                ids.forEach(id => {
+                    const card = DOMElements.imageList.querySelector(`.admin-image-card[data-id="${id}"]`);
+                    if (card) {
+                        card.classList.add('fading-out');
+                        setTimeout(() => card.remove(), 400);
+                    }
+                });
+
+                resetSelection();
+                // Optional: reload data after animation to ensure consistency
+                setTimeout(() => changePage(currentAdminPage), 500);
+
+            } catch (error) {
+                showToast(`批量操作失败: ${error.message}`, 'error');
+            }
+        };
+        
         DOMElements.addCategoryBtn.addEventListener('click', () => {
             showGenericModal(
                 '添加新分类',
@@ -1122,8 +1294,8 @@ cat << 'EOF' > public/admin.html
         async function populateCategorySelects(selectedCategory = null) { try { const response = await apiRequest('/api/categories'); const categories = await response.json(); [DOMElements.categorySelect, DOMElements.editCategorySelect].forEach(select => { const currentVal = select.value; select.innerHTML = ''; categories.forEach(cat => select.add(new Option(cat, cat))); select.value = categories.includes(currentVal) ? currentVal : selectedCategory || categories[0] || ''; }); } catch (error) { if (error.message !== 'Unauthorized') console.error('加载分类失败:', error.message); } }
         async function refreshNavigation() { try { const response = await apiRequest('/api/categories'); const categories = await response.json(); DOMElements.categoryDynamicList.innerHTML = ''; categories.forEach(cat => { const isUncategorized = cat === UNCATEGORIZED; const item = document.createElement('div'); item.className = 'nav-item flex items-center justify-between p-2 rounded cursor-pointer hover:bg-gray-100'; item.dataset.view = 'category'; item.dataset.categoryName = cat; item.innerHTML = `<span class="category-name flex-grow">${cat}</span>` + (isUncategorized ? '' : `<div class="space-x-2 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"><button data-name="${cat}" class="rename-cat-btn text-blue-500 hover:text-blue-700 text-sm">重命名</button><button data-name="${cat}" class="delete-cat-btn text-red-500 hover:red-700 text-sm">删除</button></div>`); item.addEventListener('mouseenter', () => item.classList.add('group')); item.addEventListener('mouseleave', () => item.classList.remove('group')); DOMElements.categoryDynamicList.appendChild(item); }); await populateCategorySelects(); } catch (error) { if (error.message !== 'Unauthorized') console.error('加载导航列表失败:', error.message); } }
         
-        async function loadImages(category, name) { DOMElements.imageLoader.classList.remove('hidden'); DOMElements.imageList.innerHTML = ''; try { const url = `/api/images?category=${category}&search=${encodeURIComponent(currentSearchTerm)}&page=${currentAdminPage}&limit=12`; const response = await apiRequest(url); const data = await response.json(); allLoadedImages = data.images; DOMElements.imageListHeader.innerHTML = `${name} <span class="text-base text-gray-500 font-normal">(共 ${data.totalImages} 张)</span>`; if (allLoadedImages.length === 0) { DOMElements.imageList.innerHTML = '<p class="text-slate-500 col-span-full text-center py-10">没有找到图片。</p>'; } else { allLoadedImages.forEach((image) => renderAdminImage(image)); } renderPaginationControls(data.page, data.totalPages); } catch (error) { if(error.message !== 'Unauthorized') DOMElements.imageList.innerHTML = `<p class="text-red-500 col-span-full text-center py-10">加载图片失败: ${error.message}</p>`; } finally { DOMElements.imageLoader.classList.add('hidden'); } }
-        async function loadRecycleBin() { DOMElements.imageLoader.classList.remove('hidden'); DOMElements.imageList.innerHTML = ''; try { const url = `/api/admin/recycle-bin?search=${encodeURIComponent(currentSearchTerm)}&page=${currentAdminPage}&limit=12`; const response = await apiRequest(url); const data = await response.json(); allLoadedImages = data.images; DOMElements.imageListHeader.innerHTML = `回收站`; if (allLoadedImages.length === 0) { DOMElements.imageList.innerHTML = '<p class="text-slate-500 col-span-full text-center py-10">回收站是空的。</p>'; } else { allLoadedImages.forEach((image) => renderAdminImage(image, true)); } renderPaginationControls(data.page, data.totalPages); } catch (error) { if (error.message !== 'Unauthorized') DOMElements.imageList.innerHTML = `<p class="text-red-500 col-span-full text-center py-10">加载回收站失败: ${error.message}</p>`; } finally { DOMElements.imageLoader.classList.add('hidden'); } }
+        async function loadImages(category, name) { DOMElements.imageLoader.classList.remove('hidden'); DOMElements.imageList.innerHTML = ''; try { const url = `/api/images?category=${category}&search=${encodeURIComponent(currentSearchTerm)}&page=${currentAdminPage}&limit=12`; const response = await apiRequest(url); const data = await response.json(); allLoadedImages = data.images; DOMElements.imageListHeader.innerHTML = `${name} <span class="text-base text-gray-500 font-normal">(共 ${data.totalImages} 张)</span>`; if (allLoadedImages.length === 0) { DOMElements.imageList.innerHTML = '<p class="text-slate-500 col-span-full text-center py-10">没有找到图片。</p>'; DOMElements.selectAllContainer.classList.add('hidden'); } else { DOMElements.selectAllContainer.classList.remove('hidden'); allLoadedImages.forEach((image) => renderAdminImage(image)); } renderPaginationControls(data.page, data.totalPages); } catch (error) { if(error.message !== 'Unauthorized') DOMElements.imageList.innerHTML = `<p class="text-red-500 col-span-full text-center py-10">加载图片失败: ${error.message}</p>`; } finally { DOMElements.imageLoader.classList.add('hidden'); } }
+        async function loadRecycleBin() { DOMElements.imageLoader.classList.remove('hidden'); DOMElements.imageList.innerHTML = ''; try { const url = `/api/admin/recycle-bin?search=${encodeURIComponent(currentSearchTerm)}&page=${currentAdminPage}&limit=12`; const response = await apiRequest(url); const data = await response.json(); allLoadedImages = data.images; DOMElements.imageListHeader.innerHTML = `回收站`; if (allLoadedImages.length === 0) { DOMElements.imageList.innerHTML = '<p class="text-slate-500 col-span-full text-center py-10">回收站是空的。</p>'; DOMElements.selectAllContainer.classList.add('hidden'); } else { DOMElements.selectAllContainer.classList.remove('hidden'); allLoadedImages.forEach((image) => renderAdminImage(image, true)); } renderPaginationControls(data.page, data.totalPages); } catch (error) { if (error.message !== 'Unauthorized') DOMElements.imageList.innerHTML = `<p class="text-red-500 col-span-full text-center py-10">加载回收站失败: ${error.message}</p>`; } finally { DOMElements.imageLoader.classList.add('hidden'); } }
 
         function renderAdminImage(image, isRecycleBinView = false) {
             const buttonsHtml = isRecycleBinView 
@@ -1141,6 +1313,7 @@ cat << 'EOF' > public/admin.html
             
             const cardHtml = `
                 <div class="admin-image-card border rounded-lg shadow-sm bg-white overflow-hidden flex flex-col" data-id="${image.id}">
+                    <input type="checkbox" class="bulk-checkbox" data-id="${image.id}">
                     <a href="#" class="image-preview-container flex-shrink-0 preview-trigger" data-id="${image.id}">
                         <div class="card-spinner"></div>
                         <img src="/image-proxy/${image.filename}?w=400" alt="${image.description || image.originalFilename}" class="pointer-events-none" onload="this.classList.add('loaded'); this.previousElementSibling.style.display='none';">
@@ -1170,6 +1343,7 @@ cat << 'EOF' > public/admin.html
             const categoryName = activeNav.dataset.categoryName;
             const headerText = activeNav.querySelector('.category-name')?.textContent || '所有图片';
             
+            resetSelection();
             DOMElements.imageList.innerHTML = '';
             DOMElements.imageLoader.classList.remove('hidden');
 
@@ -1253,15 +1427,25 @@ cat << 'EOF' > public/admin.html
         });
         
         DOMElements.imageList.addEventListener('click', async (e) => {
-            const button = e.target.closest('button, a');
+            const target = e.target;
+            const button = target.closest('button, a');
+            
+            // Handle bulk checkbox clicks
+            if (target.matches('.bulk-checkbox')) {
+                const id = target.dataset.id;
+                if (target.checked) {
+                    selectedImageIds.add(id);
+                } else {
+                    selectedImageIds.delete(id);
+                }
+                updateBulkActionBar();
+                return; // Stop further processing
+            }
+
             if (!button) return;
 
             if (button.tagName === 'A' && button.hasAttribute('download')) {
                 return;
-            }
-
-            if (button.matches('.preview-trigger, .preview-btn')) {
-                return; // Let the dedicated lightbox listener handle this.
             }
             
             e.preventDefault();
@@ -1271,7 +1455,17 @@ cat << 'EOF' > public/admin.html
 
             const image = allLoadedImages.find(img => img.id === imageId);
             
-            if (button.matches('.edit-btn')) {
+            if (button.matches('.preview-trigger, .preview-btn')) {
+                const newIndex = allLoadedImages.findIndex(img => img.id === imageId);
+                if (newIndex === -1) { 
+                    showToast('无法在列表中找到此图片。', 'error'); 
+                    return; 
+                }
+                DOMElements.lightbox.classList.add('active');
+                document.body.classList.add('lightbox-open');
+                showImageAtIndex(newIndex);
+            }
+            else if (button.matches('.edit-btn')) {
                 if (!image) return;
                 await populateCategorySelects(image.category);
                 DOMElements.editImageModal.querySelector('#edit-id').value = image.id;
@@ -1326,146 +1520,151 @@ cat << 'EOF' > public/admin.html
                 }
             }
         });
+        
+        // 新增：全选复选框事件
+        DOMElements.selectAllCheckbox.addEventListener('change', (e) => {
+            const isChecked = e.target.checked;
+            const checkboxes = DOMElements.imageList.querySelectorAll('.bulk-checkbox');
+            checkboxes.forEach(cb => {
+                const id = cb.dataset.id;
+                cb.checked = isChecked;
+                if (isChecked) {
+                    selectedImageIds.add(id);
+                } else {
+                    selectedImageIds.delete(id);
+                }
+            });
+            updateBulkActionBar();
+        });
+        
+        // 新增：浮动操作栏按钮事件
+        DOMElements.bulkButtonsContainer.addEventListener('click', async (e) => {
+            const target = e.target.closest('button');
+            if (!target) return;
+            
+            switch(target.id) {
+                case 'bulk-delete-btn': {
+                    const confirmed = await showConfirmationModal('批量移至回收站', `<p>确定要将选中的 <strong>${selectedImageIds.size}</strong> 张图片移至回收站吗？</p>`, '确认移动');
+                    if (confirmed) performBulkAction('delete');
+                    break;
+                }
+                case 'bulk-restore-btn': {
+                    const confirmed = await showConfirmationModal('批量恢复', `<p>确定要恢复选中的 <strong>${selectedImageIds.size}</strong> 张图片吗？</p>`, '确认恢复');
+                    if (confirmed) performBulkAction('restore');
+                    break;
+                }
+                case 'bulk-purge-btn': {
+                     const confirmed = await showConfirmationModal('批量彻底删除', `<p>确定要永久删除选中的 <strong>${selectedImageIds.size}</strong> 张图片吗？<br><strong>此操作无法撤销！</strong></p>`, '确认删除');
+                    if (confirmed) performBulkAction('purge');
+                    break;
+                }
+                case 'bulk-recategorize-btn': {
+                    const response = await apiRequest('/api/categories');
+                    const categories = await response.json();
+                    let optionsHtml = categories.map(cat => `<option value="${cat}">${cat}</option>`).join('');
+                    showGenericModal(
+                        '批量修改分类',
+                        `<form id="recategorize-form">
+                            <p class="mb-2 text-sm">为选中的 ${selectedImageIds.size} 张图片选择一个新的分类：</p>
+                            <select id="bulk-category-select" class="w-full border rounded px-3 py-2">${optionsHtml}</select>
+                         </form>`,
+                        '<button type="button" class="modal-cancel-btn bg-gray-300 hover:bg-gray-400 text-black py-2 px-4 rounded">取消</button><button type="submit" form="recategorize-form" class="bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded">应用</button>'
+                    );
+                    document.getElementById('recategorize-form').onsubmit = (ev) => {
+                        ev.preventDefault();
+                        const newCategory = document.getElementById('bulk-category-select').value;
+                        hideModal(DOMElements.genericModal);
+                        performBulkAction('recategorize', { newCategory });
+                    };
+                    DOMElements.genericModal.querySelector('.modal-cancel-btn').onclick = () => hideModal(DOMElements.genericModal);
+                    break;
+                }
+            }
+        });
 
         DOMElements.editImageForm.addEventListener('submit', async (e) => { e.preventDefault(); const id = document.getElementById('edit-id').value; const body = JSON.stringify({ originalFilename: document.getElementById('edit-originalFilename').value, category: DOMElements.editCategorySelect.value, description: document.getElementById('edit-description').value }); try { await apiRequest(`/api/admin/images/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body }); hideModal(DOMElements.editImageModal); showToast('更新成功'); changePage(currentAdminPage); } catch (error) { showToast(`更新失败: ${error.message}`, 'error'); } });
         
         async function renderSecuritySection() { try { const response = await apiRequest('/api/admin/2fa/status'); const { enabled } = await response.json(); let content; if (enabled) { content = `<p class="text-sm text-slate-600 mb-3">两步验证 (2FA) 当前已<span class="font-bold text-green-600">启用</span>。</p><button id="disable-tfa-btn" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg">禁用 2FA</button>`; } else { content = `<p class="text-sm text-slate-600 mb-3">通过启用两步验证，为您的账户增加一层额外的安全保障。</p><button id="enable-tfa-btn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg">启用 2FA</button>`; } DOMElements.securitySection.innerHTML = content; } catch (error) { DOMElements.securitySection.innerHTML = `<p class="text-red-500">无法加载安全状态: ${error.message}</p>`; } }
         DOMElements.securitySection.addEventListener('click', async e => { if (e.target.id === 'enable-tfa-btn') { try { const response = await apiRequest('/api/admin/2fa/generate', {method: 'POST'}); const data = await response.json(); DOMElements.tfaModal.querySelector('#tfa-setup-content').innerHTML = `<p class="text-sm mb-4">1. 使用您的 Authenticator 应用 (如 Google Authenticator, Authy) 扫描下方的二维码。</p><img src="${data.qrCode}" alt="2FA QR Code" class="mx-auto border p-2 bg-white"><p class="text-sm mt-4 mb-2">或者手动输入密钥:</p><p class="font-mono bg-gray-100 p-2 rounded text-center text-sm break-all">${data.secret}</p><p class="text-sm mt-6 mb-2">2. 在下方输入应用生成的6位验证码以完成设置：</p><form id="tfa-verify-form" class="flex gap-2"><input type="text" id="tfa-token-input" required maxlength="6" class="w-full border rounded px-3 py-2" placeholder="6位数字码"><button type="submit" class="bg-green-600 hover:bg-green-700 text-white py-2 px-4 rounded">验证并启用</button></form><p id="tfa-error" class="text-red-500 text-sm mt-2 hidden"></p>`; DOMElements.tfaModal.classList.add('active'); document.getElementById('tfa-verify-form').addEventListener('submit', async ev => { ev.preventDefault(); const token = document.getElementById('tfa-token-input').value; try { const response = await apiRequest('/api/admin/2fa/enable', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ secret: data.secret, token })}); const result = await response.json(); showToast(result.message); hideModal(DOMElements.tfaModal); await renderSecuritySection(); } catch (err) { document.getElementById('tfa-error').textContent = err.message; document.getElementById('tfa-error').classList.remove('hidden'); } }); } catch (error) { showToast(error.message, 'error'); } } else if (e.target.id === 'disable-tfa-btn') { const confirmed = await showConfirmationModal('禁用 2FA', `<p>确定要禁用两步验证吗？您的账户安全性将会降低。</p>`, '确认禁用'); if (confirmed) { try { await apiRequest('/api/admin/2fa/disable', {method: 'POST'}); showToast('2FA已禁用'); await renderSecuritySection(); } catch(err) { showToast(err.message, 'error'); } } } });
         
-        // --- Lightbox Logic (v1.5.2 - Enhanced Delete Experience) ---
-        {
-            const lightbox = DOMElements.lightbox;
-            const lightboxImage = DOMElements.lightboxImage;
-            const lbCounter = DOMElements.lightboxCounter;
-            const lbDownloadLink = DOMElements.lightboxDownloadLink;
-            const lbDeleteBtn = DOMElements.lightboxDeleteBtn;
-            let isLightboxLoading = false;
+        // --- Lightbox Logic ---
+        const updateAdminLightbox = (item) => {
+            if (!item) return;
+            DOMElements.lightboxImage.src = `/image-proxy/${item.filename}`;
+            DOMElements.lightboxImage.alt = item.description || item.originalFilename;
+            DOMElements.lightboxCounter.textContent = `${currentImageIndex + 1} / ${allLoadedImages.length}`;
+            DOMElements.lightboxDownloadLink.href = item.src;
+            DOMElements.lightboxDownloadLink.download = item.originalFilename;
+            
+            const isRecycleBinView = document.querySelector('#nav-item-recycle-bin').classList.contains('active');
+            DOMElements.lightboxDeleteBtn.style.display = isRecycleBinView ? 'none' : 'inline-flex';
+        };
 
-            // 此函数仅更新计数器、下载链接和删除按钮等元数据
-            const updateLightboxMetadata = (item, index) => {
-                currentImageIndex = index;
-                lbCounter.textContent = `${index + 1} / ${allLoadedImages.length}`;
-                lbDownloadLink.href = item.src;
-                lbDownloadLink.download = item.originalFilename;
-                const isRecycleBinView = document.querySelector('#nav-item-recycle-bin').classList.contains('active');
-                lbDeleteBtn.style.display = isRecycleBinView ? 'none' : 'inline-flex';
+        const preloadImage = (index, callback) => {
+            if (isLightboxLoading) return;
+            const item = allLoadedImages[index];
+            if (!item) return;
+
+            isLightboxLoading = true;
+            DOMElements.lightbox.classList.add('is-loading');
+
+            const preloader = new Image();
+            preloader.src = `/image-proxy/${item.filename}`;
+            
+            preloader.onload = () => { 
+                isLightboxLoading = false;
+                DOMElements.lightbox.classList.remove('is-loading');
+                callback(item); 
             };
-
-            const showImageAtIndex = (index) => {
-                if (isLightboxLoading) return;
-                // 使图片索引可以在列表头尾之间循环
-                if (index < 0) { index = allLoadedImages.length - 1; }
-                else if (index >= allLoadedImages.length) { index = 0; }
-                
-                if (allLoadedImages.length === 0) { // 如果已经没有图片了，就直接关闭
-                    closeLightbox();
-                    return;
-                }
-
-                isLightboxLoading = true;
-                const item = allLoadedImages[index];
-                if (!item) { isLightboxLoading = false; return; }
-
-                // 立即显示加载动画并更新图片序号等文字信息
-                lightbox.classList.add('is-loading');
-                updateLightboxMetadata(item, index);
-
-                // 在后台预加载新图片
-                const preloader = new Image();
-                preloader.src = `/image-proxy/${item.filename}`;
-                preloader.alt = item.description || item.originalFilename;
-
-                preloader.onload = () => {
-                    // 当新图片加载完成后，才更新实际显示的<img>元素，并隐藏加载动画
-                    lightboxImage.src = preloader.src;
-                    lightboxImage.alt = preloader.alt;
-                    lightbox.classList.remove('is-loading');
-                    isLightboxLoading = false;
-                };
-                preloader.onerror = () => {
-                    showToast('无法加载预览图片', 'error');
-                    lightbox.classList.remove('is-loading');
-                    isLightboxLoading = false;
-                };
+            preloader.onerror = () => { 
+                isLightboxLoading = false;
+                DOMElements.lightbox.classList.remove('is-loading');
+                showToast('无法加载预览图片', 'error'); 
             };
+        };
 
-            const showNextImage = () => showImageAtIndex(currentImageIndex + 1);
-            const showPrevImage = () => showImageAtIndex(currentImageIndex - 1);
-            const closeLightbox = () => {
-                lightbox.classList.remove('active');
-                document.body.classList.remove('lightbox-open');
-                if (lastFocusedElement) lastFocusedElement.focus();
-            };
-
-            // 从图片卡片打开预览的事件监听
-            DOMElements.imageList.addEventListener('click', (e) => {
-                const target = e.target.closest('.preview-trigger, .preview-btn');
-                if (!target) return;
-
-                e.preventDefault();
-                lastFocusedElement = document.activeElement;
-                const imageId = target.dataset.id;
-                const newIndex = allLoadedImages.findIndex(img => img.id === imageId);
-
-                if (newIndex === -1) {
-                    showToast('无法在当前列表中找到此图片。', 'error');
-                    return;
-                }
-
-                lightbox.classList.add('active');
-                document.body.classList.add('lightbox-open');
-                showImageAtIndex(newIndex);
-            });
-
-            // Lightbox内部控件的事件监听（上一张、下一张、关闭、删除）
-            lightbox.addEventListener('click', async (e) => {
-                const target = e.target.closest('button, a') || e.target;
-                if (target.matches('.lb-next')) { showNextImage(); }
-                else if (target.matches('.lb-prev')) { showPrevImage(); }
-                else if (target.matches('.lb-close') || e.target === lightbox) { closeLightbox(); }
-                else if (target.id === 'lb-delete') {
-                    const imageToDelete = allLoadedImages[currentImageIndex];
-                    if (!imageToDelete || isLightboxLoading) return;
-                    
-                    const confirmed = await showConfirmationModal('移至回收站', `<p>确定要将图片 "<strong>${imageToDelete.originalFilename}</strong>" 移至回收站吗？</p>`, '确认移动', '取消');
-                    
-                    if (confirmed) {
-                        try {
-                            await apiRequest(`/api/admin/images/${imageToDelete.id}`, { method: 'DELETE' });
-                            showToast('图片已移至回收站');
-
-                            const cardToRemove = DOMElements.imageList.querySelector(`.admin-image-card[data-id='${imageToDelete.id}']`);
-                            if (cardToRemove) {
-                                cardToRemove.classList.add('fading-out');
-                                setTimeout(() => cardToRemove.remove(), 400);
-                            }
-                            
-                            allLoadedImages.splice(currentImageIndex, 1);
-
-                            // 检查是否还有剩余图片
-                            if (allLoadedImages.length === 0) {
-                                closeLightbox(); // 没有图片了，关闭预览
-                            } else {
-                                // 还有图片，自动显示下一张
-                                showImageAtIndex(currentImageIndex);
-                            }
-                        } catch (error) { 
-                            showToast(error.message, 'error'); 
-                        }
-                    }
-                }
-            });
-
-            // 键盘事件监听
-            document.addEventListener('keydown', e => {
-                if (lightbox.classList.contains('active')) {
-                    if (e.key === 'ArrowRight') showNextImage();
-                    else if (e.key === 'ArrowLeft') showPrevImage();
-                    else if (e.key === 'Escape') closeLightbox();
-                }
-            });
-        }
+        const showImageAtIndex = (index) => {
+            currentImageIndex = index;
+            preloadImage(index, updateAdminLightbox);
+        };
         
+        const showNextImage = () => showImageAtIndex((currentImageIndex + 1) % allLoadedImages.length);
+        const showPrevImage = () => showImageAtIndex((currentImageIndex - 1 + allLoadedImages.length) % allLoadedImages.length);
+        const closeLightbox = () => { DOMElements.lightbox.classList.remove('active'); document.body.classList.remove('lightbox-open'); };
+        
+        DOMElements.lightbox.addEventListener('click', async (e) => { 
+            const target = e.target.closest('button, a') || e.target;
+            if (target.matches('.lb-next')) { showNextImage(); }
+            else if (target.matches('.lb-prev')) { showPrevImage(); }
+            else if (target.matches('.lb-close') || e.target === DOMElements.lightbox) { closeLightbox(); }
+            else if (target.id === 'lb-delete') {
+                const imageToDelete = allLoadedImages[currentImageIndex];
+                if (!imageToDelete) return;
+                const confirmed = await showConfirmationModal('移至回收站', `<p>确定要将图片 "<strong>${imageToDelete.originalFilename}</strong>" 移至回收站吗？</p>`, '确认移动', '取消');
+                if (confirmed) {
+                    try {
+                        await apiRequest(`/api/admin/images/${imageToDelete.id}`, { method: 'DELETE' });
+                        showToast('图片已移至回收站');
+                        const cardToRemove = DOMElements.imageList.querySelector(`.admin-image-card[data-id='${imageToDelete.id}']`);
+                        if (cardToRemove) { cardToRemove.classList.add('fading-out'); setTimeout(() => cardToRemove.remove(), 400); }
+                        
+                        allLoadedImages.splice(currentImageIndex, 1);
+                        
+                        if (allLoadedImages.length === 0) {
+                            closeLightbox();
+                            changePage(currentAdminPage);
+                        } else {
+                            if (currentImageIndex >= allLoadedImages.length) {
+                                currentImageIndex = allLoadedImages.length - 1;
+                            }
+                            showImageAtIndex(currentImageIndex);
+                        }
+                    } catch (error) { showToast(error.message, 'error'); }
+                }
+            }
+        });
+
+        document.addEventListener('keydown', e => { if (DOMElements.lightbox.classList.contains('active')) { if (e.key === 'ArrowRight') showNextImage(); if (e.key === 'ArrowLeft') showPrevImage(); if (e.key === 'Escape') closeLightbox(); } });
         [DOMElements.genericModal, DOMElements.editImageModal, DOMElements.tfaModal].forEach(modal => { const cancelBtn = modal.querySelector('.modal-cancel-btn'); if(cancelBtn) { cancelBtn.addEventListener('click', () => hideModal(modal)); } modal.addEventListener('click', (e) => { if (e.target === modal) hideModal(modal); }); });
         
         async function init() { await Promise.all([refreshNavigation(), renderSecuritySection()]); DOMElements.navigationList.querySelector('#nav-item-all').click(); }
