@@ -1,9 +1,13 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v1.7.7)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v1.7.8)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
+#   v1.7.8 更新:
+#   - 修复(后台): 为后台预览大图时的加载动画(spinner)添加了缺失的CSS属性(border, border-radius)，
+#               解决了因元素不可见导致加载动画不显示的Bug。
+#
 #   v1.7.7 更新:
 #   - 修复(后台): 通过JS直接操作样式，绕过潜在的CSS冲突，彻底修复后台预览图片时加载动画不显示的顽固问题。
 #   - 修复(后台): 修正了后台CSS的z-index(图层)问题，解决了弹窗被预览图层遮挡的Bug。
@@ -18,7 +22,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 PROMPT_Y="(${GREEN}y${NC}/${RED}n${NC})"
 
-SCRIPT_VERSION="1.7.7"
+SCRIPT_VERSION="1.7.8"
 APP_NAME="image-gallery"
 
 # --- 路径设置 ---
@@ -45,7 +49,7 @@ overwrite_app_files() {
 cat << 'EOF' > package.json
 {
   "name": "image-gallery-pro",
-  "version": "1.7.7",
+  "version": "1.7.8",
   "description": "A high-performance, full-stack image gallery application with all features.",
   "main": "server.js",
   "scripts": {
@@ -1003,12 +1007,15 @@ cat << 'EOF' > public/admin.html
         .lightbox { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.9); display: none; justify-content: center; align-items: center; opacity: 0; visibility: hidden; transition: opacity 0.3s ease; }
         .lightbox.active { opacity: 1; visibility: visible; }
         .lightbox .spinner { 
-            display: none; /* Initially hidden, shown by JS */
+            display: none;
             position: absolute; 
             z-index: 1; 
             width: 3rem; 
             height: 3rem; 
-            border-color: rgba(255,255,255,0.2); 
+            /* === CSS BUG FIX START === */
+            border: 4px solid rgba(255,255,255,0.2); 
+            border-radius: 50%;
+            /* === CSS BUG FIX END === */
             border-top-color: rgba(255,255,255,0.8);
             animation: spin 1s linear infinite;
         }
