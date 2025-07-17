@@ -5,7 +5,10 @@
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
 #   v1.5.1 更新:
-#   - 优化(后台): 为后台图片预览(Lightbox)的切换增加了与前台一致的加载动画，提升体验。
+#   - 优化(前台): 同步后台的加载动画，统一前后端图片预览的加载效果。
+#   v1.5.0 更新:
+#   - 新增(后台): 为回收站中的图片增加预览功能。
+#   - 优化(后台): 为后台图片预览窗口添加加载动画，提升切换图片时的用户体验。
 # =================================================================
 
 # --- 配置 ---
@@ -545,7 +548,7 @@ cat << 'EOF' > public/index.html
         @keyframes spin { to { transform: rotate(360deg); } }
         .image-placeholder.item-loaded .spinner { opacity: 0; }
         .lightbox .spinner { border-color: rgba(255,255,255,0.2); border-top-color: rgba(255,255,255,0.8); display: none; }
-        .lightbox.is-loading .spinner { display: block; }
+        .lightbox.is-loading .spinner { display: block; animation: spin 1s linear infinite; }
 
 
         .image-placeholder img { display: block; width: 100%; height: auto; opacity: 0; transition: opacity 0.4s ease-in-out, transform 0.3s ease-in-out; }
@@ -1135,7 +1138,7 @@ cat << 'EOF' > public/admin.html
             `;
             
             const cardHtml = `
-                <div class="admin-image-card border rounded-lg shadow-sm bg-white overflow-hidden flex flex-col" data-id="${image.id}">
+                <div class="admin-image-card border rounded-lg shadow-sm bg-white overflow-hidden flex flex-col">
                     <a href="#" class="image-preview-container flex-shrink-0 preview-trigger" data-id="${image.id}">
                         <div class="card-spinner"></div>
                         <img src="/image-proxy/${image.filename}?w=400" alt="${image.description || image.originalFilename}" class="pointer-events-none" onload="this.classList.add('loaded'); this.previousElementSibling.style.display='none';">
