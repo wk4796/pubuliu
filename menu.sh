@@ -1,12 +1,12 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v1.7.5)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v1.7.6)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
-#   v1.7.5 更新:
-#   - 优化(前后台): 实现智能加载动画。现在只有在图片加载较慢(如未缓存)时才会显示加载动画。
-#   - 优化(前后台): 对于已缓存的图片，将实现无动画的即时切换，大幅提升流畅度。
+#   v1.7.6 更新:
+#   - 修复(后台): 修正了后台CSS的z-index(图层)问题，彻底解决了弹窗和加载动画被预览图层遮挡的Bug。
+#   - 优化(前后台): 实现智能加载动画。现在只有在图片加载较慢(如未缓存)时才会显示加载动画，已缓存图片则即时切换。
 # =================================================================
 
 # --- 配置 ---
@@ -17,7 +17,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 PROMPT_Y="(${GREEN}y${NC}/${RED}n${NC})"
 
-SCRIPT_VERSION="1.7.5"
+SCRIPT_VERSION="1.7.6"
 APP_NAME="image-gallery"
 
 # --- 路径设置 ---
@@ -44,7 +44,7 @@ overwrite_app_files() {
 cat << 'EOF' > package.json
 {
   "name": "image-gallery-pro",
-  "version": "1.7.5",
+  "version": "1.7.6",
   "description": "A high-performance, full-stack image gallery application with all features.",
   "main": "server.js",
   "scripts": {
@@ -995,7 +995,11 @@ cat << 'EOF' > public/admin.html
         .page-item:not(.active):hover { background-color: #f1f5f9; }
         .page-item.active { background-color: #15803d; color: white; border-color: #14532d; font-weight: 700; transform: scale(1.1); z-index: 10; }
 
-        .lightbox { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.9); display: none; justify-content: center; align-items: center; z-index: 1000; opacity: 0; visibility: hidden; transition: opacity 0.3s ease; }
+        /* Z-INDEX FIX: Establish a clear stacking order */
+        .lightbox { z-index: 8000; }
+        #generic-modal, #edit-image-modal, #tfa-modal { z-index: 9000; }
+        
+        .lightbox { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.9); display: none; justify-content: center; align-items: center; opacity: 0; visibility: hidden; transition: opacity 0.3s ease; }
         .lightbox.active { opacity: 1; visibility: visible; }
         .lightbox .spinner { border-color: rgba(255,255,255,0.2); border-top-color: rgba(255,255,255,0.8); display: none; position: absolute; z-index: 1; width: 3rem; height: 3rem; }
         .lightbox.is-loading .spinner { display: block; animation: spin 1s linear infinite; }
@@ -1018,7 +1022,6 @@ cat << 'EOF' > public/admin.html
         #image-list-wrapper { flex-grow: 1; overflow-y: auto; padding: 0.25rem; }
         #pagination-container { flex-shrink: 0; position: sticky; bottom: 0; background: rgba(255, 255, 255, 0.85); backdrop-filter: blur(4px); padding: 1rem 0; border-top: 1px solid #e2e8f0; }
         
-        /* Bulk Action Bar */
         #bulk-action-bar {
             position: fixed; bottom: 0; left: 0; right: 0; z-index: 25;
             background-color: rgba(17, 24, 39, 0.95); backdrop-filter: blur(8px); color: white;
@@ -1027,7 +1030,6 @@ cat << 'EOF' > public/admin.html
         }
         #bulk-action-bar.visible { transform: translateY(0); }
         
-        /* Select mode specific UI changes */
         #select-all-container, #bulk-cancel-btn { display: none; }
         .select-mode-active #select-all-container, .select-mode-active #bulk-cancel-btn { display: flex; }
         .select-mode-active #bulk-select-btn { display: none; }
@@ -1091,9 +1093,9 @@ cat << 'EOF' > public/admin.html
             </div>
         </section>
     </main>
-    <div id="generic-modal" class="modal fixed inset-0 bg-black bg-opacity-50 items-center justify-center z-30 p-4"><div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-sm"><h3 id="modal-title" class="text-lg font-bold mb-4"></h3><div id="modal-body" class="mb-4 text-slate-600"></div><div id="modal-footer" class="flex justify-end space-x-2"></div></div></div>
-    <div id="edit-image-modal" class="modal fixed inset-0 bg-black bg-opacity-50 items-center justify-center z-30 p-4"><div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-md"><h3 class="text-lg font-bold mb-4">编辑图片信息</h3><form id="edit-image-form"><input type="hidden" id="edit-id"><div class="mb-4"><label for="edit-originalFilename" class="block text-sm font-medium mb-1">原始文件名</label><input type="text" id="edit-originalFilename" class="w-full border rounded px-3 py-2"></div><div class="mb-4"><label for="edit-category-select" class="block text-sm font-medium mb-1">分类</label><select id="edit-category-select" class="w-full border rounded px-3 py-2"></select></div><div class="mb-4"><label for="edit-description" class="block text-sm font-medium mb-1">描述</label><textarea id="edit-description" rows="3" class="w-full border rounded px-3 py-2"></textarea></div><div class="flex justify-end space-x-2 mt-6"><button type="button" class="modal-cancel-btn bg-gray-300 hover:bg-gray-400 text-black py-2 px-4 rounded">取消</button><button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded">保存更改</button></div></form></div></div>
-    <div id="tfa-modal" class="modal fixed inset-0 bg-black bg-opacity-50 items-center justify-center z-30 p-4"><div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-md"><h3 class="text-lg font-bold mb-4">设置两步验证 (2FA)</h3><div id="tfa-setup-content"></div><div class="flex justify-end space-x-2 mt-6"><button type="button" class="modal-cancel-btn bg-gray-300 hover:bg-gray-400 text-black py-2 px-4 rounded">关闭</button></div></div></div>
+    <div id="generic-modal" class="modal fixed inset-0 bg-black bg-opacity-50 items-center justify-center p-4"><div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-sm"><h3 id="modal-title" class="text-lg font-bold mb-4"></h3><div id="modal-body" class="mb-4 text-slate-600"></div><div id="modal-footer" class="flex justify-end space-x-2"></div></div></div>
+    <div id="edit-image-modal" class="modal fixed inset-0 bg-black bg-opacity-50 items-center justify-center p-4"><div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-md"><h3 class="text-lg font-bold mb-4">编辑图片信息</h3><form id="edit-image-form"><input type="hidden" id="edit-id"><div class="mb-4"><label for="edit-originalFilename" class="block text-sm font-medium mb-1">原始文件名</label><input type="text" id="edit-originalFilename" class="w-full border rounded px-3 py-2"></div><div class="mb-4"><label for="edit-category-select" class="block text-sm font-medium mb-1">分类</label><select id="edit-category-select" class="w-full border rounded px-3 py-2"></select></div><div class="mb-4"><label for="edit-description" class="block text-sm font-medium mb-1">描述</label><textarea id="edit-description" rows="3" class="w-full border rounded px-3 py-2"></textarea></div><div class="flex justify-end space-x-2 mt-6"><button type="button" class="modal-cancel-btn bg-gray-300 hover:bg-gray-400 text-black py-2 px-4 rounded">取消</button><button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded">保存更改</button></div></form></div></div>
+    <div id="tfa-modal" class="modal fixed inset-0 bg-black bg-opacity-50 items-center justify-center p-4"><div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-md"><h3 class="text-lg font-bold mb-4">设置两步验证 (2FA)</h3><div id="tfa-setup-content"></div><div class="flex justify-end space-x-2 mt-6"><button type="button" class="modal-cancel-btn bg-gray-300 hover:bg-gray-400 text-black py-2 px-4 rounded">关闭</button></div></div></div>
     <div id="lightbox" class="lightbox">
         <div class="spinner"></div>
         <span id="lb-counter" class="lb-counter"></span>
@@ -1619,7 +1621,7 @@ cat << 'EOF' > public/admin.html
         DOMElements.sortSelect.addEventListener('change', () => changePage(1, true));
         DOMElements.searchInput.addEventListener('input', () => { clearTimeout(debounceTimer); debounceTimer = setTimeout(() => { currentSearchTerm = DOMElements.searchInput.value.trim(); changePage(1, true); }, 500); });
         document.addEventListener('keydown', e => { if (DOMElements.lightbox.classList.contains('active')) { if (e.key === 'ArrowRight') showNextImage(); if (e.key === 'ArrowLeft') showPrevImage(); if (e.key === 'Escape') closeLightbox(); } });
-        [DOMElements.genericModal, DOMElements.editImageModal, DOMElements.tfaModal].forEach(modal => { const cancelBtn = modal.querySelector('.modal-cancel-btn'); if(cancelBtn) { cancelBtn.addEventListener('click', () => hideModal(modal)); } modal.addEventListener('click', (e) => { if (e.target === modal) hideModal(modal); }); });
+        [DOMElements.genericModal, DOMElements.editImageModal, DOMElements.tfaModal].forEach(modal => { const cancelBtn = modal.querySelector('.modal-cancel-btn'); if(cancelBtn) { cancelBtn.addEventListener('click', () => hideModal(modal)); } modal.addEventListener('click', (e) => { if (e.target.matches('.modal')) hideModal(modal); }); });
         
         async function init() {
             DOMElements.itemsPerPageSelect.value = itemsPerPage;
