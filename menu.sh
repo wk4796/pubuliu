@@ -1,11 +1,12 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v1.0.9 终版)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v1.1.0)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
-#   v1.0.9 更新:
-#   - 修复 (后台): 最终修复方案！严格按照前端画廊的模式，重写了后台预览的全部JS逻辑，以解决持续存在的预览无响应问题。
+#   v1.1.0 更新:
+#   - 修复 (后台): 修复了后台预览无响应的问题，通过直接绑定事件确保预览稳定触发。
+#   - 增强 (后台): 预览组件中增加“删除”按钮，并实现删除后自动预览下一张的智能导航功能。
 # =================================================================
 
 # --- 配置 ---
@@ -16,7 +17,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 PROMPT_Y="(${GREEN}y${NC}/${RED}n${NC})"
 
-SCRIPT_VERSION="1.0.9"
+SCRIPT_VERSION="1.1.0"
 APP_NAME="image-gallery"
 
 # --- 路径设置 ---
@@ -43,7 +44,7 @@ overwrite_app_files() {
 cat << 'EOF' > package.json
 {
   "name": "image-gallery-pro",
-  "version": "1.0.9",
+  "version": "1.1.0",
   "description": "A high-performance, full-stack image gallery application with all features.",
   "main": "server.js",
   "scripts": {
@@ -955,8 +956,8 @@ cat << 'EOF' > public/admin.html
         <img class="lightbox-image" alt="">
         <button class="lightbox-btn lb-next">&rsaquo;</button>
         <div class="lb-actions">
-            <button id="lb-delete" title="移至回收站" class="lb-action-btn lb-delete">删除</button>
             <a href="#" id="lb-download" download class="lb-action-btn lb-download">下载</a>
+            <button id="lb-delete" title="移至回收站" class="lb-action-btn lb-delete">删除</button>
         </div>
     </div>
     <div id="toast" class="toast max-w-xs bg-gray-800 text-white text-sm rounded-lg shadow-lg p-3" role="alert"><div class="flex items-center"><div id="toast-icon" class="mr-2"></div><span id="toast-message"></span></div></div>
@@ -975,9 +976,9 @@ cat << 'EOF' > public/admin.html
             lightbox: document.getElementById('lightbox'),
             lightboxImage: document.querySelector('#lightbox .lightbox-image'),
             lightboxCounter: document.getElementById('lb-counter'),
-            lightboxDownloadLink: document.getElementById('lb-download')
+            lightboxDownloadLink: document.getElementById('lb-download'),
+            lightboxDeleteBtn: document.getElementById('lb-delete')
         };
-        // --- v1.0.9 修改: 统一变量命名 ---
         let filesToUpload = []; let allLoadedImages = []; let currentImageIndex = 0; let currentSearchTerm = ''; let debounceTimer; let currentAdminPage = 1; let isLightboxLoading = false;
         
         const apiRequest = async (url, options = {}) => {
@@ -1007,22 +1008,13 @@ cat << 'EOF' > public/admin.html
 
         const createButton = (options) => {
             const btn = document.createElement(options.tag || 'button');
-            if (options.tag !== 'a') {
-                btn.type = 'button';
-            }
+            if (options.tag !== 'a') { btn.type = 'button'; }
             btn.title = options.title || '';
             btn.className = options.classes || '';
             if (options.html) btn.innerHTML = options.html;
             if (options.href) btn.href = options.href;
             if (options.download) btn.download = options.download;
-            // --- v1.0.9 修改: onClick 逻辑被移除，以支持事件委托 ---
-            if (options.onClick) {
-                 btn.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    options.onClick(e);
-                });
-            }
+            if (options.onClick) { btn.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); options.onClick(e); }); }
             return btn;
         };
 
@@ -1138,17 +1130,17 @@ cat << 'EOF' > public/admin.html
         async function populateCategorySelects(selectedCategory = null) { try { const response = await apiRequest('/api/categories'); const categories = await response.json(); [DOMElements.categorySelect, DOMElements.editCategorySelect].forEach(select => { const currentVal = select.value; select.innerHTML = ''; categories.forEach(cat => select.add(new Option(cat, cat))); select.value = categories.includes(currentVal) ? currentVal : selectedCategory || categories[0] || ''; }); } catch (error) { if (error.message !== 'Unauthorized') console.error('加载分类失败:', error.message); } }
         async function refreshNavigation() { try { const response = await apiRequest('/api/categories'); const categories = await response.json(); DOMElements.categoryDynamicList.innerHTML = ''; categories.forEach(cat => { const isUncategorized = cat === UNCATEGORIZED; const item = document.createElement('div'); item.className = 'nav-item flex items-center justify-between p-2 rounded cursor-pointer hover:bg-gray-100'; item.dataset.view = 'category'; item.dataset.categoryName = cat; item.innerHTML = `<span class="category-name flex-grow">${cat}</span>` + (isUncategorized ? '' : `<div class="space-x-2 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"><button data-name="${cat}" class="rename-cat-btn text-blue-500 hover:text-blue-700 text-sm">重命名</button><button data-name="${cat}" class="delete-cat-btn text-red-500 hover:red-700 text-sm">删除</button></div>`); item.addEventListener('mouseenter', () => item.classList.add('group')); item.addEventListener('mouseleave', () => item.classList.remove('group')); DOMElements.categoryDynamicList.appendChild(item); }); await populateCategorySelects(); } catch (error) { if (error.message !== 'Unauthorized') console.error('加载导航列表失败:', error.message); } }
         
-        async function loadImages(category, name) { DOMElements.imageLoader.classList.remove('hidden'); DOMElements.imageList.innerHTML = ''; try { const url = `/api/images?category=${category}&search=${encodeURIComponent(currentSearchTerm)}&page=${currentAdminPage}&limit=12`; const response = await apiRequest(url); const data = await response.json(); allLoadedImages = data.images; DOMElements.imageListHeader.innerHTML = `${name} <span class="text-base text-gray-500 font-normal">(共 ${data.totalImages} 张)</span>`; if (allLoadedImages.length === 0) { DOMElements.imageList.innerHTML = '<p class="text-slate-500 col-span-full text-center py-10">没有找到图片。</p>'; } else { allLoadedImages.forEach((image, index) => renderAdminImage(image, index, false)); } renderPaginationControls(data.page, data.totalPages); } catch (error) { if(error.message !== 'Unauthorized') DOMElements.imageList.innerHTML = `<p class="text-red-500 col-span-full text-center py-10">加载图片失败: ${error.message}</p>`; } finally { DOMElements.imageLoader.classList.add('hidden'); } }
-        async function loadRecycleBin() { DOMElements.imageLoader.classList.remove('hidden'); DOMElements.imageList.innerHTML = ''; try { const url = `/api/admin/recycle-bin?search=${encodeURIComponent(currentSearchTerm)}&page=${currentAdminPage}&limit=12`; const response = await apiRequest(url); const data = await response.json(); allLoadedImages = data.images; DOMElements.imageListHeader.innerHTML = `回收站`; if (allLoadedImages.length === 0) { DOMElements.imageList.innerHTML = '<p class="text-slate-500 col-span-full text-center py-10">回收站是空的。</p>'; } else { allLoadedImages.forEach((image, index) => renderAdminImage(image, index, true)); } renderPaginationControls(data.page, data.totalPages); } catch (error) { if (error.message !== 'Unauthorized') DOMElements.imageList.innerHTML = `<p class="text-red-500 col-span-full text-center py-10">加载回收站失败: ${error.message}</p>`; } finally { DOMElements.imageLoader.classList.add('hidden'); } }
+        async function loadImages(category, name) { DOMElements.imageLoader.classList.remove('hidden'); DOMElements.imageList.innerHTML = ''; try { const url = `/api/images?category=${category}&search=${encodeURIComponent(currentSearchTerm)}&page=${currentAdminPage}&limit=12`; const response = await apiRequest(url); const data = await response.json(); allLoadedImages = data.images; DOMElements.imageListHeader.innerHTML = `${name} <span class="text-base text-gray-500 font-normal">(共 ${data.totalImages} 张)</span>`; if (allLoadedImages.length === 0) { DOMElements.imageList.innerHTML = '<p class="text-slate-500 col-span-full text-center py-10">没有找到图片。</p>'; } else { allLoadedImages.forEach((image) => renderAdminImage(image)); } renderPaginationControls(data.page, data.totalPages); } catch (error) { if(error.message !== 'Unauthorized') DOMElements.imageList.innerHTML = `<p class="text-red-500 col-span-full text-center py-10">加载图片失败: ${error.message}</p>`; } finally { DOMElements.imageLoader.classList.add('hidden'); } }
+        async function loadRecycleBin() { DOMElements.imageLoader.classList.remove('hidden'); DOMElements.imageList.innerHTML = ''; try { const url = `/api/admin/recycle-bin?search=${encodeURIComponent(currentSearchTerm)}&page=${currentAdminPage}&limit=12`; const response = await apiRequest(url); const data = await response.json(); allLoadedImages = data.images; DOMElements.imageListHeader.innerHTML = `回收站`; if (allLoadedImages.length === 0) { DOMElements.imageList.innerHTML = '<p class="text-slate-500 col-span-full text-center py-10">回收站是空的。</p>'; } else { allLoadedImages.forEach((image) => renderAdminImage(image, true)); } renderPaginationControls(data.page, data.totalPages); } catch (error) { if (error.message !== 'Unauthorized') DOMElements.imageList.innerHTML = `<p class="text-red-500 col-span-full text-center py-10">加载回收站失败: ${error.message}</p>`; } finally { DOMElements.imageLoader.classList.add('hidden'); } }
 
-        function renderAdminImage(image, index, isRecycleBinView) {
+        function renderAdminImage(image, isRecycleBinView = false) {
             const card = document.createElement('div');
             card.className = 'admin-image-card border rounded-lg shadow-sm bg-white overflow-hidden flex flex-col';
             card.dataset.id = image.id;
 
             const previewLink = document.createElement('a');
             previewLink.href = "#";
-            previewLink.className = 'image-preview-container flex-shrink-0 js-preview'; 
+            previewLink.className = 'image-preview-container flex-shrink-0'; 
 
             const spinner = document.createElement('div');
             spinner.className = 'card-spinner';
@@ -1161,39 +1153,45 @@ cat << 'EOF' > public/admin.html
             
             const infoDiv = document.createElement('div');
             infoDiv.className = 'p-3 flex-grow flex flex-col min-h-0';
-            const infoHtml = `
+            infoDiv.innerHTML = `
                 <p class="font-bold text-sm truncate" title="${image.originalFilename}">${image.originalFilename}</p>
                 <div class="flex justify-between items-center text-xs text-slate-500 my-2">
-                    <span class="flex items-center gap-1.5" title="文件大小">
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-3.5 h-3.5"><path d="M2 3.5A1.5 1.5 0 0 1 3.5 2h9A1.5 1.5 0 0 1 14 3.5v9a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 12.5v-9ZM3.5 3a.5.5 0 0 0-.5.5v9a.5.5 0 0 0 .5.5h9a.5.5 0 0 0 .5-.5v-9a.5.5 0 0 0-.5-.5h-9Z" /><path d="M5 5.5A.5.5 0 0 1 5.5 5h5a.5.5 0 0 1 0 1h-5A.5.5 0 0 1 5 5.5Zm0 2A.5.5 0 0 1 5.5 7h5a.5.5 0 0 1 0 1h-5A.5.5 0 0 1 5 7.5Zm0 2A.5.5 0 0 1 5.5 9h3a.5.5 0 0 1 0 1h-3A.5.5 0 0 1 5 9.5Z" /></svg>
-                        ${formatBytes(image.size)}
-                    </span>
-                    <span class="flex items-center gap-1.5 truncate" title="分类: ${image.category}">
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-3.5 h-3.5"><path d="M3.5 2A1.5 1.5 0 0 0 2 3.5v.986c.543-.294 1.25-.486 2-.486h7.5a.5.5 0 0 1 .5.5v2.875a.5.5 0 0 0 .5.5h.875a.5.5 0 0 0 .5-.5V5.125a.5.5 0 0 0-.146-.353l-1.5-1.5A.5.5 0 0 0 12.125 3H6.5a2.5 2.5 0 0 0-2.482 2H3.5A1.5 1.5 0 0 0 2 6.5v6A1.5 1.5 0 0 0 3.5 14h9a1.5 1.5 0 0 0 1.5-1.5v-5A1.5 1.5 0 0 0 12.5 6H4a1.5 1.5 0 0 1-1.5-1.5V3.5ZM3 6.5A.5.5 0 0 1 3.5 6H12a.5.5 0 0 1 .5.5v5a.5.5 0 0 1-.5.5h-9A.5.5 0 0 1 3 12.5v-6Z" /></svg>
-                        <span class="truncate">${image.category}</span>
-                    </span>
+                    <span class="flex items-center gap-1.5" title="文件大小"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-3.5 h-3.5"><path d="M2 3.5A1.5 1.5 0 0 1 3.5 2h9A1.5 1.5 0 0 1 14 3.5v9a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 12.5v-9ZM3.5 3a.5.5 0 0 0-.5.5v9a.5.5 0 0 0 .5.5h9a.5.5 0 0 0 .5-.5v-9a.5.5 0 0 0-.5-.5h-9Z" /><path d="M5 5.5A.5.5 0 0 1 5.5 5h5a.5.5 0 0 1 0 1h-5A.5.5 0 0 1 5 5.5Zm0 2A.5.5 0 0 1 5.5 7h5a.5.5 0 0 1 0 1h-5A.5.5 0 0 1 5 7.5Zm0 2A.5.5 0 0 1 5.5 9h3a.5.5 0 0 1 0 1h-3A.5.5 0 0 1 5 9.5Z" /></svg>${formatBytes(image.size)}</span>
+                    <span class="flex items-center gap-1.5 truncate" title="分类: ${image.category}"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-3.5 h-3.5"><path d="M3.5 2A1.5 1.5 0 0 0 2 3.5v.986c.543-.294 1.25-.486 2-.486h7.5a.5.5 0 0 1 .5.5v2.875a.5.5 0 0 0 .5.5h.875a.5.5 0 0 0 .5-.5V5.125a.5.5 0 0 0-.146-.353l-1.5-1.5A.5.5 0 0 0 12.125 3H6.5a2.5 2.5 0 0 0-2.482 2H3.5A1.5 1.5 0 0 0 2 6.5v6A1.5 1.5 0 0 0 3.5 14h9a1.5 1.5 0 0 0 1.5-1.5v-5A1.5 1.5 0 0 0 12.5 6H4a1.5 1.5 0 0 1-1.5-1.5V3.5ZM3 6.5A.5.5 0 0 1 3.5 6H12a.5.5 0 0 1 .5.5v5a.5.5 0 0 1-.5.5h-9A.5.5 0 0 1 3 12.5v-6Z" /></svg><span class="truncate">${image.category}</span></span>
                 </div>
-                <p class="text-xs text-slate-600 flex-grow pt-1" title="${image.description || ''}">
-                    <span class="description-clamp">${image.description || '无描述'}</span>
-                </p>
+                <p class="text-xs text-slate-600 flex-grow pt-1" title="${image.description || ''}"><span class="description-clamp">${image.description || '无描述'}</span></p>
                 ${isRecycleBinView ? `<p class="text-xs text-red-500 mt-auto pt-2"><strong>删除于:</strong> ${new Date(image.deletedAt).toLocaleString()}</p>` : ''}
             `;
-            infoDiv.innerHTML = infoHtml;
             
             const footerDiv = document.createElement('div');
             footerDiv.className = 'bg-slate-50 p-2 flex justify-end items-center gap-1 mt-auto flex-shrink-0';
             
-            const previewButton = createButton({ title: '预览', classes: 'js-preview p-2 rounded-full text-slate-600 hover:bg-slate-200 hover:text-slate-800 transition-colors', html: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>' });
+            const previewButton = createButton({ title: '预览', classes: 'p-2 rounded-full text-slate-600 hover:bg-slate-200 hover:text-slate-800 transition-colors', html: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>' });
+            
+            // *** 修复预览的核心逻辑 ***
+            const openPreview = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const imageId = card.dataset.id;
+                const newIndex = allLoadedImages.findIndex(img => img.id === imageId);
+                if (newIndex === -1) { showToast('无法在当前列表中找到该图片。', 'error'); return; }
+                DOMElements.lightbox.classList.add('active');
+                document.body.classList.add('lightbox-open');
+                showImageAtIndex(newIndex);
+            };
+            previewLink.addEventListener('click', openPreview);
+            previewButton.addEventListener('click', openPreview);
+
             footerDiv.appendChild(previewButton);
 
             if (isRecycleBinView) {
-                const restoreButton = createButton({ title: '恢复', classes: 'p-2 rounded-full text-green-600 hover:bg-green-100 transition-colors', html: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" /></svg>', onClick: async () => { try { await apiRequest(`/api/admin/recycle-bin/${image.id}/restore`, { method: 'POST' }); showToast('图片已恢复'); card.classList.add('fading-out'); setTimeout(() => card.remove(), 400); allLoadedImages.splice(index, 1); } catch (error) { showToast(error.message, 'error'); } } });
-                const purgeButton = createButton({ title: '彻底删除', classes: 'p-2 rounded-full text-red-500 hover:bg-red-100 hover:text-red-700 transition-colors', html: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.134-2.036-2.134H8.718c-1.126 0-2.037.955-2.037 2.134v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>', onClick: async () => { const confirmed = await showConfirmationModal('彻底删除', `<p>确定要永久删除这张图片吗？<br><strong>此操作无法撤销。</strong></p>`, '确认删除'); if (confirmed) { try { await apiRequest(`/api/admin/recycle-bin/${image.id}/purge`, { method: 'DELETE' }); showToast('图片已彻底删除'); card.classList.add('fading-out'); setTimeout(() => card.remove(), 400); allLoadedImages.splice(index, 1); } catch (error) { showToast(error.message, 'error'); } } } });
+                const restoreButton = createButton({ title: '恢复', classes: 'p-2 rounded-full text-green-600 hover:bg-green-100 transition-colors', html: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" /></svg>', onClick: async () => { const imageIndex = allLoadedImages.findIndex(i => i.id === image.id); try { await apiRequest(`/api/admin/recycle-bin/${image.id}/restore`, { method: 'POST' }); showToast('图片已恢复'); card.classList.add('fading-out'); setTimeout(() => card.remove(), 400); if (imageIndex > -1) allLoadedImages.splice(imageIndex, 1); } catch (error) { showToast(error.message, 'error'); } } });
+                const purgeButton = createButton({ title: '彻底删除', classes: 'p-2 rounded-full text-red-500 hover:bg-red-100 hover:text-red-700 transition-colors', html: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.134-2.036-2.134H8.718c-1.126 0-2.037.955-2.037 2.134v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>', onClick: async () => { const confirmed = await showConfirmationModal('彻底删除', `<p>确定要永久删除这张图片吗？<br><strong>此操作无法撤销。</strong></p>`, '确认删除'); if (confirmed) { const imageIndex = allLoadedImages.findIndex(i => i.id === image.id); try { await apiRequest(`/api/admin/recycle-bin/${image.id}/purge`, { method: 'DELETE' }); showToast('图片已彻底删除'); card.classList.add('fading-out'); setTimeout(() => card.remove(), 400); if (imageIndex > -1) allLoadedImages.splice(imageIndex, 1); } catch (error) { showToast(error.message, 'error'); } } } });
                 footerDiv.append(restoreButton, purgeButton);
             } else {
                 const downloadButton = createButton({ tag: 'a', title: '下载', classes: 'p-2 rounded-full text-slate-600 hover:bg-slate-200 hover:text-slate-800 transition-colors', href: image.src, download: image.originalFilename, html: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>'});
                 const editButton = createButton({ title: '编辑', classes: 'p-2 rounded-full text-slate-600 hover:bg-slate-200 hover:text-slate-800 transition-colors', html: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487zm0 0L19.5 7.125" /></svg>', onClick: async () => { await populateCategorySelects(image.category); DOMElements.editImageModal.querySelector('#edit-id').value = image.id; DOMElements.editImageModal.querySelector('#edit-originalFilename').value = image.originalFilename; DOMElements.editImageModal.querySelector('#edit-description').value = image.description; DOMElements.editImageModal.classList.add('active'); }});
-                const deleteButton = createButton({ title: '移至回收站', classes: 'p-2 rounded-full text-red-500 hover:bg-red-100 hover:text-red-700 transition-colors', html: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.134-2.036-2.134H8.718c-1.126 0-2.037.955-2.037 2.134v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>', onClick: async () => { const confirmed = await showConfirmationModal('移至回收站', `<p>确定要将这张图片移至回收站吗？</p>`, '确认移动'); if(confirmed) { try { await apiRequest(`/api/admin/images/${image.id}`, { method: 'DELETE' }); showToast('图片已移至回收站'); card.classList.add('fading-out'); setTimeout(() => card.remove(), 400); allLoadedImages.splice(index, 1); } catch (error) { showToast(error.message, 'error'); } } }});
+                const deleteButton = createButton({ title: '移至回收站', classes: 'p-2 rounded-full text-red-500 hover:bg-red-100 hover:text-red-700 transition-colors', html: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.134-2.036-2.134H8.718c-1.126 0-2.037.955-2.037 2.134v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>', onClick: async () => { const confirmed = await showConfirmationModal('移至回收站', `<p>确定要将这张图片移至回收站吗？</p>`, '确认移动'); if(confirmed) { const imageIndex = allLoadedImages.findIndex(i => i.id === image.id); try { await apiRequest(`/api/admin/images/${image.id}`, { method: 'DELETE' }); showToast('图片已移至回收站'); card.classList.add('fading-out'); setTimeout(() => card.remove(), 400); if (imageIndex > -1) allLoadedImages.splice(imageIndex, 1); } catch (error) { showToast(error.message, 'error'); } } }});
                 footerDiv.append(downloadButton, editButton, deleteButton);
             }
             
@@ -1244,12 +1242,9 @@ cat << 'EOF' > public/admin.html
             e.preventDefault(); 
             const target = e.target.closest('.page-item'); 
             if(!target || target.disabled || target.classList.contains('active')) return;
-            
             const newPage = parseInt(target.dataset.page);
-            
             DOMElements.paginationContainer.querySelector('.page-item.active')?.classList.remove('active');
             DOMElements.paginationContainer.querySelector(`.page-item[data-page="${newPage}"]`)?.classList.add('active');
-
             changePage(newPage);
         });
 
@@ -1269,8 +1264,7 @@ cat << 'EOF' > public/admin.html
         async function renderSecuritySection() { try { const response = await apiRequest('/api/admin/2fa/status'); const { enabled } = await response.json(); let content; if (enabled) { content = `<p class="text-sm text-slate-600 mb-3">两步验证 (2FA) 当前已<span class="font-bold text-green-600">启用</span>。</p><button id="disable-tfa-btn" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg">禁用 2FA</button>`; } else { content = `<p class="text-sm text-slate-600 mb-3">通过启用两步验证，为您的账户增加一层额外的安全保障。</p><button id="enable-tfa-btn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg">启用 2FA</button>`; } DOMElements.securitySection.innerHTML = content; } catch (error) { DOMElements.securitySection.innerHTML = `<p class="text-red-500">无法加载安全状态: ${error.message}</p>`; } }
         DOMElements.securitySection.addEventListener('click', async e => { if (e.target.id === 'enable-tfa-btn') { try { const response = await apiRequest('/api/admin/2fa/generate', {method: 'POST'}); const data = await response.json(); DOMElements.tfaModal.querySelector('#tfa-setup-content').innerHTML = `<p class="text-sm mb-4">1. 使用您的 Authenticator 应用 (如 Google Authenticator, Authy) 扫描下方的二维码。</p><img src="${data.qrCode}" alt="2FA QR Code" class="mx-auto border p-2 bg-white"><p class="text-sm mt-4 mb-2">或者手动输入密钥:</p><p class="font-mono bg-gray-100 p-2 rounded text-center text-sm break-all">${data.secret}</p><p class="text-sm mt-6 mb-2">2. 在下方输入应用生成的6位验证码以完成设置：</p><form id="tfa-verify-form" class="flex gap-2"><input type="text" id="tfa-token-input" required maxlength="6" class="w-full border rounded px-3 py-2" placeholder="6位数字码"><button type="submit" class="bg-green-600 hover:bg-green-700 text-white py-2 px-4 rounded">验证并启用</button></form><p id="tfa-error" class="text-red-500 text-sm mt-2 hidden"></p>`; DOMElements.tfaModal.classList.add('active'); document.getElementById('tfa-verify-form').addEventListener('submit', async ev => { ev.preventDefault(); const token = document.getElementById('tfa-token-input').value; try { const response = await apiRequest('/api/admin/2fa/enable', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ secret: data.secret, token })}); const result = await response.json(); showToast(result.message); hideModal(DOMElements.tfaModal); await renderSecuritySection(); } catch (err) { document.getElementById('tfa-error').textContent = err.message; document.getElementById('tfa-error').classList.remove('hidden'); } }); } catch (error) { showToast(error.message, 'error'); } } else if (e.target.id === 'disable-tfa-btn') { const confirmed = await showConfirmationModal('禁用 2FA', `<p>确定要禁用两步验证吗？您的账户安全性将会降低。</p>`, '确认禁用'); if (confirmed) { try { await apiRequest('/api/admin/2fa/disable', {method: 'POST'}); showToast('2FA已禁用'); await renderSecuritySection(); } catch(err) { showToast(err.message, 'error'); } } } });
         
-        // --- v1.0.9 修改: 完整复制并改造前端的 Lightbox 逻辑 ---
-        
+        // --- Lightbox Logic ---
         const updateAdminLightbox = (item) => {
             if (!item) return;
             DOMElements.lightboxImage.src = `/image-proxy/${item.filename}`;
@@ -1280,7 +1274,7 @@ cat << 'EOF' > public/admin.html
             DOMElements.lightboxDownloadLink.download = item.originalFilename;
             
             const isRecycleBinView = document.querySelector('#nav-item-recycle-bin').classList.contains('active');
-            document.getElementById('lb-delete').style.display = isRecycleBinView ? 'none' : 'inline-flex';
+            DOMElements.lightboxDeleteBtn.style.display = isRecycleBinView ? 'none' : 'inline-flex';
         };
 
         const preloadImage = (index, callback) => {
@@ -1294,16 +1288,8 @@ cat << 'EOF' > public/admin.html
             const preloader = new Image();
             preloader.src = `/image-proxy/${item.filename}`;
             
-            preloader.onload = () => {
-                isLightboxLoading = false;
-                DOMElements.lightbox.classList.remove('is-loading');
-                callback(item);
-            };
-            preloader.onerror = () => {
-                isLightboxLoading = false;
-                DOMElements.lightbox.classList.remove('is-loading');
-                showToast('无法加载预览图片', 'error');
-            };
+            preloader.onload = () => { isLightboxLoading = false; DOMElements.lightbox.classList.remove('is-loading'); callback(item); };
+            preloader.onerror = () => { isLightboxLoading = false; DOMElements.lightbox.classList.remove('is-loading'); showToast('无法加载预览图片', 'error'); };
         };
 
         const showImageAtIndex = (index) => {
@@ -1314,32 +1300,9 @@ cat << 'EOF' > public/admin.html
         const showNextImage = () => showImageAtIndex((currentImageIndex + 1) % allLoadedImages.length);
         const showPrevImage = () => showImageAtIndex((currentImageIndex - 1 + allLoadedImages.length) % allLoadedImages.length);
         const closeLightbox = () => { DOMElements.lightbox.classList.remove('active'); document.body.classList.remove('lightbox-open'); };
-
-        // 使用事件委托处理所有预览点击，逻辑模仿前端
-        DOMElements.imageList.addEventListener('click', (e) => {
-            const trigger = e.target.closest('.js-preview');
-            if (!trigger) return;
-
-            e.preventDefault();
-            e.stopPropagation();
-
-            const card = trigger.closest('.admin-image-card');
-            if (card && card.dataset.id) {
-                const imageId = card.dataset.id;
-                const newIndex = allLoadedImages.findIndex(img => img.id === imageId);
-                if (newIndex === -1) {
-                    showToast('在当前列表中找不到图片数据', 'error');
-                    return;
-                }
-                DOMElements.lightbox.classList.add('active');
-                document.body.classList.add('lightbox-open');
-                showImageAtIndex(newIndex);
-            }
-        });
-
-        // Lightbox 内部按钮的事件处理
+        
         DOMElements.lightbox.addEventListener('click', async (e) => { 
-            const target = e.target.closest('.lb-action-btn, .lightbox-btn') || e.target;
+            const target = e.target.closest('button, a') || e.target;
             if (target.matches('.lb-next')) { showNextImage(); }
             else if (target.matches('.lb-prev')) { showPrevImage(); }
             else if (target.matches('.lb-close') || e.target === DOMElements.lightbox) { closeLightbox(); }
@@ -1360,7 +1323,6 @@ cat << 'EOF' > public/admin.html
                             closeLightbox();
                             changePage(currentAdminPage);
                         } else {
-                            // 确保索引不会越界
                             if (currentImageIndex >= allLoadedImages.length) {
                                 currentImageIndex = allLoadedImages.length - 1;
                             }
