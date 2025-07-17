@@ -1,13 +1,13 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v1.7.2)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v1.7.3)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
-#   v1.7.2 更新:
-#   - 新增(后台): 批量操作中增加“修改描述”功能（覆盖模式）。
-#   - 优化(后台): 简化“修改描述”功能，使其更直接，并增加强警告。
-#   - 优化(后台): 更换了“回收站”和“空间清理”的图标，使其更直观。
+#   v1.7.3 更新:
+#   - 优化(前后台): 优化了图片预览(Lightbox)的加载体验。
+#   - 优化(前后台): 切换图片时，会立即隐藏旧图、显示加载动画并更新计数器，而不是等待新图加载完成。
+#   - 优化(后台): 更换了“空间清理”的图标为更直观的“扫把”图标。
 # =================================================================
 
 # --- 配置 ---
@@ -18,7 +18,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 PROMPT_Y="(${GREEN}y${NC}/${RED}n${NC})"
 
-SCRIPT_VERSION="1.7.2"
+SCRIPT_VERSION="1.7.3"
 APP_NAME="image-gallery"
 
 # --- 路径设置 ---
@@ -45,7 +45,7 @@ overwrite_app_files() {
 cat << 'EOF' > package.json
 {
   "name": "image-gallery-pro",
-  "version": "1.7.2",
+  "version": "1.7.3",
   "description": "A high-performance, full-stack image gallery application with all features.",
   "main": "server.js",
   "scripts": {
@@ -678,7 +678,10 @@ cat << 'EOF' > public/index.html
         
         .lightbox { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.9); display: flex; justify-content: center; align-items: center; z-index: 1000; opacity: 0; visibility: hidden; transition: opacity 0.3s ease; }
         .lightbox.active { opacity: 1; visibility: visible; }
-        .lightbox-image { max-width: 85%; max-height: 85%; display: block; object-fit: contain; }
+        .lightbox-image { max-width: 85%; max-height: 85%; display: block; object-fit: contain; opacity: 0; transition: opacity 0.3s ease; }
+        .lightbox.is-loading .lightbox-image { opacity: 0; }
+        .lightbox-image.loaded { opacity: 1; }
+
         .lightbox-btn { position: absolute; top: 50%; transform: translateY(-50%); background-color: rgba(255,255,255,0.1); color: white; border: none; font-size: 2.5rem; cursor: pointer; padding: 0.5rem 1rem; border-radius: 0.5rem; transition: background-color 0.2s; z-index: 10; }
         .lightbox-btn:hover { background-color: rgba(255,255,255,0.2); }
         .lb-prev { left: 1rem; } .lb-next { right: 1rem; } .lb-close { top: 1rem; right: 1rem; font-size: 2rem; }
@@ -840,45 +843,39 @@ cat << 'EOF' > public/index.html
         const lbCounter = lightbox.querySelector('.lb-counter'); 
         const lbDownloadLink = document.getElementById('lightbox-download-link'); 
         let currentImageIndex = 0;
-        let isLightboxLoading = false;
+        let imagePreloader = new Image();
 
-        const preloadImage = (index, callback) => {
-            if (isLightboxLoading) return;
-            const item = allLoadedImages[index];
-            if (!item) return;
-
-            isLightboxLoading = true;
-            lightbox.classList.add('is-loading');
-            
-            const preloader = new Image();
-            preloader.src = `/image-proxy/${item.filename}`;
-            
-            preloader.onload = () => {
-                isLightboxLoading = false;
-                lightbox.classList.remove('is-loading');
-                callback(item);
-            };
-            preloader.onerror = () => {
-                isLightboxLoading = false;
-                lightbox.classList.remove('is-loading');
-                console.error("Lightbox image failed to load:", preloader.src);
-            };
-        };
-
-        const updateLightbox = (item) => {
-            if (!item) return;
-            lightboxImage.src = `/image-proxy/${item.filename}`;
+        const updateLightboxContent = (item) => {
             lightboxImage.alt = item.description || item.originalFilename;
-            lbCounter.textContent = `${currentImageIndex + 1} / ${allLoadedImages.length}`;
             lbDownloadLink.href = item.src;
             lbDownloadLink.download = item.originalFilename;
         };
-
+        
         const showImageAtIndex = (index) => {
+            if (index < 0 || index >= allLoadedImages.length) return;
             currentImageIndex = index;
-            preloadImage(index, updateLightbox);
-        };
+            const item = allLoadedImages[index];
+            if (!item) return;
 
+            // Immediate UI updates
+            lightbox.classList.add('is-loading');
+            lightboxImage.classList.remove('loaded');
+            lbCounter.textContent = `${currentImageIndex + 1} / ${allLoadedImages.length}`;
+
+            // Preload the image
+            imagePreloader.src = `/image-proxy/${item.filename}`;
+            imagePreloader.onload = () => {
+                lightbox.classList.remove('is-loading');
+                lightboxImage.src = imagePreloader.src;
+                lightboxImage.classList.add('loaded');
+                updateLightboxContent(item);
+            };
+            imagePreloader.onerror = () => {
+                lightbox.classList.remove('is-loading');
+                console.error("Lightbox image failed to load:", imagePreloader.src);
+            };
+        };
+        
         const showNextImage = () => showImageAtIndex((currentImageIndex + 1) % allLoadedImages.length);
         const showPrevImage = () => showImageAtIndex((currentImageIndex - 1 + allLoadedImages.length) % allLoadedImages.length);
         const closeLightbox = () => { lightbox.classList.remove('active'); document.body.classList.remove('overflow-hidden'); if(lastFocusedElement) lastFocusedElement.focus(); };
@@ -890,6 +887,7 @@ cat << 'EOF' > public/index.html
                 lastFocusedElement = document.activeElement; 
                 const newIndex = allLoadedImages.findIndex(img => img.id === item.dataset.id); 
                 if (newIndex === -1) return;
+                
                 lightbox.classList.add('active'); 
                 document.body.classList.add('overflow-hidden');
                 showImageAtIndex(newIndex);
@@ -998,7 +996,11 @@ cat << 'EOF' > public/admin.html
         .lightbox.active { opacity: 1; visibility: visible; }
         .lightbox .spinner { border-color: rgba(255,255,255,0.2); border-top-color: rgba(255,255,255,0.8); display: none; position: absolute; z-index: 1; width: 3rem; height: 3rem; }
         .lightbox.is-loading .spinner { display: block; animation: spin 1s linear infinite; }
-        .lightbox-image { max-width: 85%; max-height: 85%; display: block; object-fit: contain; }
+        
+        .lightbox-image { max-width: 85%; max-height: 85%; display: block; object-fit: contain; opacity: 0; transition: opacity 0.3s ease; }
+        .lightbox.is-loading .lightbox-image { opacity: 0; }
+        .lightbox-image.loaded { opacity: 1; }
+
         .lightbox-btn { position: absolute; top: 50%; transform: translateY(-50%); background-color: rgba(255,255,255,0.1); color: white; border: none; font-size: 2.5rem; cursor: pointer; padding: 0.5rem 1rem; border-radius: 0.5rem; transition: background-color 0.2s; z-index: 10;}
         .lightbox-btn:hover { background-color: rgba(255,255,255,0.2); }
         .lb-prev { left: 1rem; } .lb-next { right: 1rem; } .lb-close { top: 1rem; right: 1rem; font-size: 2rem; }
@@ -1040,7 +1042,7 @@ cat << 'EOF' > public/admin.html
     <main class="container mx-auto p-4 md:p-6 grid grid-cols-1 xl:grid-cols-12 gap-8">
         <div class="xl:col-span-4 space-y-8">
             <section id="upload-section" class="bg-white p-6 rounded-lg shadow-md"><h2 class="text-xl font-semibold mb-4">上传新图片</h2><form id="upload-form" class="space-y-4"><div><label for="image-input" id="drop-zone" class="w-full flex flex-col items-center justify-center p-6 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors"><svg class="w-10 h-10 mb-3 text-gray-400" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 20 16"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 13h3a3 3 0 0 0 0-6h-.025A5.56 5.56 0 0 0 16 6.5 5.5 5.5 0 0 0 5.207 5.021C5.137 5.017 5.071 5 5 5a4 4 0 0 0 0 8h2.167M10 15V6m0 0L8 8m2-2 2 2"/></svg><p class="text-sm text-gray-500"><span class="font-semibold">点击选择</span> 或拖拽多个文件到此处</p><input id="image-input" type="file" class="hidden" multiple accept="image/*"/></label></div><div class="space-y-2"><label for="unified-description" class="block text-sm font-medium">统一描述 (可选)</label><textarea id="unified-description" rows="2" class="w-full text-sm border rounded px-2 py-1" placeholder="在此处填写可应用到所有未填写描述的图片"></textarea></div><div id="file-preview-container" class="hidden space-y-2"><div id="upload-summary" class="text-sm font-medium text-slate-600"></div><div id="file-preview-list" class="h-48 border rounded p-2 space-y-3" style="overflow: auto; resize: vertical;"></div></div><div><label for="category-select" class="block text-sm font-medium mb-1">设置分类</label><div class="flex items-center space-x-2"><select name="category" id="category-select" required class="w-full border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-500"></select><button type="button" id="add-category-btn" class="flex-shrink-0 bg-green-500 hover:bg-green-600 text-white font-bold w-9 h-9 rounded-full flex items-center justify-center text-xl" title="添加新分类">+</button></div></div><button type="submit" id="upload-btn" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg transition-colors disabled:bg-gray-400" disabled>上传文件</button></form></section>
-            <section class="bg-white p-6 rounded-lg shadow-md"><h2 class="text-xl font-semibold mb-4">图库</h2><div id="navigation-list" class="space-y-1"><div id="nav-item-all" data-view="all" class="nav-item flex items-center gap-3 p-2 rounded cursor-pointer hover:bg-gray-100 active"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 text-slate-500"><path fill-rule="evenodd" d="M1 5.25A2.25 2.25 0 013.25 3h13.5A2.25 2.25 0 0119 5.25v9.5A2.25 2.25 0 0116.75 17H3.25A2.25 2.25 0 011 14.75v-9.5zm1.5 5.81v3.69c0 .414.336.75.75.75h13.5a.75.75 0 00.75-.75v-3.69l-2.72-2.72a.75.75 0 00-1.06 0L11.5 10l-1.72-1.72a.75.75 0 00-1.06 0l-4 4zM12.5 7a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z" clip-rule="evenodd" /></svg><span class="category-name flex-grow">所有图片</span></div><div id="category-dynamic-list"></div><hr class="my-2"><div id="nav-item-recycle-bin" data-view="recycle_bin" class="nav-item flex items-center gap-3 p-2 rounded cursor-pointer hover:bg-gray-100"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 text-slate-500"><path fill-rule="evenodd" d="M8.75 1A2.75 2.75 0 006 3.75V4.5h8V3.75A2.75 2.75 0 0011.25 1h-2.5zM10 4.5a.75.75 0 00-1.5 0v.75h1.5v-.75zM4.75 6.25A.75.75 0 015.5 5.5h9a.75.75 0 01.75.75v9a.75.75 0 01-.75.75h-9a.75.75 0 01-.75-.75v-9zM5.5 6.25v9h9v-9h-9z" clip-rule="evenodd" /></svg><span class="category-name flex-grow">回收站</span></div><hr class="my-2"><div id="nav-item-maintenance" data-view="maintenance" class="nav-item flex items-center gap-3 p-2 rounded cursor-pointer hover:bg-gray-100"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 text-slate-500"><path fill-rule="evenodd" d="M5.5 2A.5.5 0 005 2.5v1.75a.75.75 0 01-1.5 0V2.5A2 2 0 015.5 0h9a2 2 0 012 2v.75a.75.75 0 01-1.5 0V2a.5.5 0 00-.5-.5h-9z" clip-rule="evenodd" /><path fill-rule="evenodd" d="M3.165 4.522A.75.75 0 014.25 5h11.5a.75.75 0 010 1.5H4.25a.75.75 0 01-1.085-.68l-.25-2.5a.75.75 0 01.25-.822l1-1a.75.75 0 011.06 0l.22.22a.75.75 0 01-1.06 1.06l-.22-.22-.25 2.5z" clip-rule="evenodd" /><path d="M4.146 11.47a.75.75 0 01.21-.53l4.25-4.25a.75.75 0 111.06 1.06l-4.25 4.25a.75.75 0 01-1.27-.53zM12.25 14a.75.75 0 00-1.5 0v.25a.75.75 0 001.5 0v-.25zM10.75 16a.75.75 0 01.75-.75h.01a.75.75 0 010 1.5h-.01a.75.75 0 01-.75-.75zM14.25 16a.75.75 0 00-1.5 0v.25a.75.75 0 001.5 0v-.25zM12.75 18a.75.75 0 01.75-.75h.01a.75.75 0 010 1.5h-.01a.75.75 0 01-.75-.75z" /></svg><span class="category-name flex-grow">空间清理</span></div></div></section>
+            <section class="bg-white p-6 rounded-lg shadow-md"><h2 class="text-xl font-semibold mb-4">图库</h2><div id="navigation-list" class="space-y-1"><div id="nav-item-all" data-view="all" class="nav-item flex items-center gap-3 p-2 rounded cursor-pointer hover:bg-gray-100 active"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 text-slate-500"><path fill-rule="evenodd" d="M1 5.25A2.25 2.25 0 013.25 3h13.5A2.25 2.25 0 0119 5.25v9.5A2.25 2.25 0 0116.75 17H3.25A2.25 2.25 0 011 14.75v-9.5zm1.5 5.81v3.69c0 .414.336.75.75.75h13.5a.75.75 0 00.75-.75v-3.69l-2.72-2.72a.75.75 0 00-1.06 0L11.5 10l-1.72-1.72a.75.75 0 00-1.06 0l-4 4zM12.5 7a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z" clip-rule="evenodd" /></svg><span class="category-name flex-grow">所有图片</span></div><div id="category-dynamic-list"></div><hr class="my-2"><div id="nav-item-recycle-bin" data-view="recycle_bin" class="nav-item flex items-center gap-3 p-2 rounded cursor-pointer hover:bg-gray-100"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 text-slate-500"><path fill-rule="evenodd" d="M8.75 1A2.75 2.75 0 006 3.75V4.5h8V3.75A2.75 2.75 0 0011.25 1h-2.5zM10 4.5a.75.75 0 00-1.5 0v.75h1.5v-.75zM4.75 6.25A.75.75 0 015.5 5.5h9a.75.75 0 01.75.75v9a.75.75 0 01-.75.75h-9a.75.75 0 01-.75-.75v-9zM5.5 6.25v9h9v-9h-9z" clip-rule="evenodd" /></svg><span class="category-name flex-grow">回收站</span></div><hr class="my-2"><div id="nav-item-maintenance" data-view="maintenance" class="nav-item flex items-center gap-3 p-2 rounded cursor-pointer hover:bg-gray-100"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 text-slate-500"><path d="M10.435 2.222a.75.75 0 0 0-1.026-.816l-6.5 3.25a.75.75 0 0 0 .816 1.026L8 3.91V15.5a.75.75 0 0 0 1.5 0V3.91l4.195 2.097a.75.75 0 0 0 .816-1.026l-4.125-2.065Z"></path><path d="M4.5 15.542a.75.75 0 0 0-1.5 0V17.5h-.5a.75.75 0 0 0 0 1.5h11a.75.75 0 0 0 0-1.5h-.5v-1.958a.75.75 0 0 0-1.5 0v1.208h-6v-1.208Z"></path></svg><span class="category-name flex-grow">空间清理</span></div></div></section>
             <section class="bg-white p-6 rounded-lg shadow-md"><h2 class="text-xl font-semibold mb-4">安全</h2><div id="security-section"></div></section>
         </div>
         <section id="image-list-section" class="bg-white p-6 rounded-lg shadow-md xl:col-span-8">
@@ -1140,7 +1142,7 @@ cat << 'EOF' > public/admin.html
             bulkSelectBtn: document.getElementById('bulk-select-btn'), bulkCancelBtn: document.getElementById('bulk-cancel-btn'),
             imageListSection: document.getElementById('image-list-section'),
         };
-        let filesToUpload = []; let allLoadedImages = []; let currentImageIndex = 0; let currentSearchTerm = ''; let debounceTimer; let currentAdminPage = 1; let isLightboxLoading = false;
+        let filesToUpload = []; let allLoadedImages = []; let currentImageIndex = 0; let currentSearchTerm = ''; let debounceTimer; let currentAdminPage = 1; let imagePreloader = new Image();
         let selectedImageIds = new Set();
         let isInSelectMode = false;
         let currentViewMode = localStorage.getItem('adminViewMode') || 'grid';
@@ -1533,9 +1535,36 @@ cat << 'EOF' > public/admin.html
         });
         
         // --- Lightbox Logic ---
-        const updateAdminLightbox = (item) => { if (!item) return; DOMElements.lightboxImage.src = `/image-proxy/${item.filename}`; DOMElements.lightboxImage.alt = item.description || item.originalFilename; DOMElements.lightboxCounter.textContent = `${currentImageIndex + 1} / ${allLoadedImages.length}`; DOMElements.lightboxDownloadLink.href = item.src; DOMElements.lightboxDownloadLink.download = item.originalFilename; const isRecycleBinView = document.querySelector('#nav-item-recycle-bin').classList.contains('active'); DOMElements.lightboxDeleteBtn.style.display = isRecycleBinView ? 'none' : 'inline-flex'; };
-        const preloadImage = (index, callback) => { if (isLightboxLoading) return; const item = allLoadedImages[index]; if (!item) return; isLightboxLoading = true; DOMElements.lightbox.classList.add('is-loading'); const preloader = new Image(); preloader.src = `/image-proxy/${item.filename}`; preloader.onload = () => { isLightboxLoading = false; DOMElements.lightbox.classList.remove('is-loading'); callback(item); }; preloader.onerror = () => { isLightboxLoading = false; DOMElements.lightbox.classList.remove('is-loading'); showToast('无法加载预览图片', 'error'); }; };
-        const showImageAtIndex = (index) => { currentImageIndex = index; preloadImage(index, updateAdminLightbox); };
+        const updateAdminLightboxContent = (item) => {
+            DOMElements.lightboxImage.alt = item.description || item.originalFilename;
+            DOMElements.lightboxDownloadLink.href = item.src;
+            DOMElements.lightboxDownloadLink.download = item.originalFilename;
+            const isRecycleBinView = document.querySelector('#nav-item-recycle-bin').classList.contains('active');
+            DOMElements.lightboxDeleteBtn.style.display = isRecycleBinView ? 'none' : 'inline-flex';
+        };
+
+        const showImageAtIndex = (index) => {
+            if (index < 0 || index >= allLoadedImages.length) return;
+            currentImageIndex = index;
+            const item = allLoadedImages[currentImageIndex];
+            if (!item) return;
+
+            DOMElements.lightbox.classList.add('is-loading');
+            DOMElements.lightboxImage.classList.remove('loaded');
+            DOMElements.lightboxCounter.textContent = `${currentImageIndex + 1} / ${allLoadedImages.length}`;
+
+            imagePreloader.src = `/image-proxy/${item.filename}`;
+            imagePreloader.onload = () => {
+                DOMElements.lightbox.classList.remove('is-loading');
+                DOMElements.lightboxImage.src = imagePreloader.src;
+                DOMElements.lightboxImage.classList.add('loaded');
+                updateAdminLightboxContent(item);
+            };
+            imagePreloader.onerror = () => {
+                DOMElements.lightbox.classList.remove('is-loading');
+                showToast('无法加载预览图片', 'error');
+            };
+        };
         const showNextImage = () => showImageAtIndex((currentImageIndex + 1) % allLoadedImages.length);
         const showPrevImage = () => showImageAtIndex((currentImageIndex - 1 + allLoadedImages.length) % allLoadedImages.length);
         const closeLightbox = () => { DOMElements.lightbox.classList.remove('active'); document.body.classList.remove('lightbox-open'); };
