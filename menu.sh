@@ -1,16 +1,13 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v1.7.0)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v1.7.1)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
-#   v1.7.0 更新:
-#   - 新增(后台): 增加排序功能，可按日期、文件名、大小排序。
-#   - 新增(后台): 增加视图切换功能 (网格/列表)。
-#   - 新增(后台): 增加“每页显示数量”控制，并记忆用户选项。
-#   - 新增(后台): 增加“清理冗余文件”的系统维护工具。
-#   - 优化(后台): 引入“选择模式”，默认隐藏复选框，界面更整洁。
-#   - 优化(后台): 卡片和列表视图增加图片尺寸显示。
+#   v1.7.1 更新:
+#   - 优化(后台): 更换了更直观的“批量选择”图标。
+#   - 优化(后台): 将“系统维护”更名为“空间清理”，使其功能更明确。
+#   - 修复(后台): 修复了分页按钮在鼠标悬浮时样式不正确的问题。
 # =================================================================
 
 # --- 配置 ---
@@ -21,7 +18,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 PROMPT_Y="(${GREEN}y${NC}/${RED}n${NC})"
 
-SCRIPT_VERSION="1.7.0"
+SCRIPT_VERSION="1.7.1"
 APP_NAME="image-gallery"
 
 # --- 路径设置 ---
@@ -48,7 +45,7 @@ overwrite_app_files() {
 cat << 'EOF' > package.json
 {
   "name": "image-gallery-pro",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "description": "A high-performance, full-stack image gallery application with all features.",
   "main": "server.js",
   "scripts": {
@@ -496,7 +493,6 @@ apiAdminRouter.delete('/recycle-bin/:id/purge', handleApiError(async (req, res) 
     res.json({ message: '图片已永久删除' });
 }));
 
-// =========== 新增：系统维护API ===========
 apiAdminRouter.get('/maintenance/find-orphans', handleApiError(async (req, res) => {
     const allFiles = await fs.readdir(uploadsDir);
     const imagesDb = await readDB(dbPath);
@@ -527,7 +523,6 @@ apiAdminRouter.post('/maintenance/delete-orphans', handleApiError(async (req, re
     let deletedCount = 0;
     let errors = [];
     for (const filename of filenames) {
-        // 安全检查: 确保文件名不包含路径遍历字符
         if (filename.includes('..') || filename.includes('/')) {
             errors.push(`文件名无效: ${filename}`);
             continue;
@@ -541,7 +536,6 @@ apiAdminRouter.post('/maintenance/delete-orphans', handleApiError(async (req, re
     }
     res.json({ message: `操作完成。成功删除 ${deletedCount} 个文件。`, errors: errors });
 }));
-// ===================================
 
 apiAdminRouter.get('/2fa/status', handleApiError(async(req, res) => {
     appConfig = await readDB(configPath, {});
@@ -992,6 +986,7 @@ cat << 'EOF' > public/admin.html
         .image-preview-container img.loaded { opacity: 1; }
 
         .page-item { transition: all 0.2s ease-in-out; }
+        .page-item:not(.active):hover { background-color: #f1f5f9; }
         .page-item.active { background-color: #15803d; color: white; border-color: #14532d; font-weight: 700; transform: scale(1.1); z-index: 10; }
 
         .lightbox { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.9); display: none; justify-content: center; align-items: center; z-index: 1000; opacity: 0; visibility: hidden; transition: opacity 0.3s ease; }
@@ -1040,7 +1035,7 @@ cat << 'EOF' > public/admin.html
     <main class="container mx-auto p-4 md:p-6 grid grid-cols-1 xl:grid-cols-12 gap-8">
         <div class="xl:col-span-4 space-y-8">
             <section id="upload-section" class="bg-white p-6 rounded-lg shadow-md"><h2 class="text-xl font-semibold mb-4">上传新图片</h2><form id="upload-form" class="space-y-4"><div><label for="image-input" id="drop-zone" class="w-full flex flex-col items-center justify-center p-6 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors"><svg class="w-10 h-10 mb-3 text-gray-400" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 20 16"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 13h3a3 3 0 0 0 0-6h-.025A5.56 5.56 0 0 0 16 6.5 5.5 5.5 0 0 0 5.207 5.021C5.137 5.017 5.071 5 5 5a4 4 0 0 0 0 8h2.167M10 15V6m0 0L8 8m2-2 2 2"/></svg><p class="text-sm text-gray-500"><span class="font-semibold">点击选择</span> 或拖拽多个文件到此处</p><input id="image-input" type="file" class="hidden" multiple accept="image/*"/></label></div><div class="space-y-2"><label for="unified-description" class="block text-sm font-medium">统一描述 (可选)</label><textarea id="unified-description" rows="2" class="w-full text-sm border rounded px-2 py-1" placeholder="在此处填写可应用到所有未填写描述的图片"></textarea></div><div id="file-preview-container" class="hidden space-y-2"><div id="upload-summary" class="text-sm font-medium text-slate-600"></div><div id="file-preview-list" class="h-48 border rounded p-2 space-y-3" style="overflow: auto; resize: vertical;"></div></div><div><label for="category-select" class="block text-sm font-medium mb-1">设置分类</label><div class="flex items-center space-x-2"><select name="category" id="category-select" required class="w-full border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-500"></select><button type="button" id="add-category-btn" class="flex-shrink-0 bg-green-500 hover:bg-green-600 text-white font-bold w-9 h-9 rounded-full flex items-center justify-center text-xl" title="添加新分类">+</button></div></div><button type="submit" id="upload-btn" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg transition-colors disabled:bg-gray-400" disabled>上传文件</button></form></section>
-            <section class="bg-white p-6 rounded-lg shadow-md"><h2 class="text-xl font-semibold mb-4">图库</h2><div id="navigation-list" class="space-y-1"><div id="nav-item-all" data-view="all" class="nav-item flex items-center gap-3 p-2 rounded cursor-pointer hover:bg-gray-100 active"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 text-slate-500"><path fill-rule="evenodd" d="M1 5.25A2.25 2.25 0 013.25 3h13.5A2.25 2.25 0 0119 5.25v9.5A2.25 2.25 0 0116.75 17H3.25A2.25 2.25 0 011 14.75v-9.5zm1.5 5.81v3.69c0 .414.336.75.75.75h13.5a.75.75 0 00.75-.75v-3.69l-2.72-2.72a.75.75 0 00-1.06 0L11.5 10l-1.72-1.72a.75.75 0 00-1.06 0l-4 4zM12.5 7a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z" clip-rule="evenodd" /></svg><span class="category-name flex-grow">所有图片</span></div><div id="category-dynamic-list"></div><hr class="my-2"><div id="nav-item-recycle-bin" data-view="recycle_bin" class="nav-item flex items-center gap-3 p-2 rounded cursor-pointer hover:bg-gray-100"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 text-slate-500"><path fill-rule="evenodd" d="M8.75 1A2.75 2.75 0 006 3.75V4.5h8V3.75A2.75 2.75 0 0011.25 1h-2.5zM10 4.5a.75.75 0 00-1.5 0v.75h1.5v-.75zM15.25 6H4.75a.75.75 0 000 1.5h10.5a.75.75 0 000-1.5zM4.75 9.75a.75.75 0 01.75-.75h8.5a.75.75 0 010 1.5h-8.5a.75.75 0 01-.75-.75zM5.5 12a.75.75 0 00-1.5 0v2.75A2.75 2.75 0 006.75 17h6.5A2.75 2.75 0 0016 14.75V12a.75.75 0 00-1.5 0v2.75a1.25 1.25 0 01-1.25 1.25h-6.5a1.25 1.25 0 01-1.25-1.25V12z" clip-rule="evenodd" /></svg><span class="category-name flex-grow">回收站</span></div><hr class="my-2"><div id="nav-item-maintenance" data-view="maintenance" class="nav-item flex items-center gap-3 p-2 rounded cursor-pointer hover:bg-gray-100"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 text-slate-500"><path fill-rule="evenodd" d="M11.612 2.32a1 1 0 011.05.21l3.588 3.588a1 1 0 01.21 1.05l-1.488 4.465 4.02 4.02a1.5 1.5 0 01-2.122 2.121l-4.02-4.02L8.384 15.25a1 1 0 01-1.05-.21L3.746 11.45a1 1 0 01-.21-1.05l1.488-4.465-1.741-1.742a1.5 1.5 0 112.121-2.12L9.15 4.793l4.466-1.488a1 1 0 012-.985zM6.559 8.25l-1.23 3.701 3.29 3.29 3.7-1.229-5.76-5.762zM10.5 10.5a2.5 2.5 0 115 0 2.5 2.5 0 01-5 0z" clip-rule="evenodd" /></svg><span class="category-name flex-grow">系统维护</span></div></div></section>
+            <section class="bg-white p-6 rounded-lg shadow-md"><h2 class="text-xl font-semibold mb-4">图库</h2><div id="navigation-list" class="space-y-1"><div id="nav-item-all" data-view="all" class="nav-item flex items-center gap-3 p-2 rounded cursor-pointer hover:bg-gray-100 active"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 text-slate-500"><path fill-rule="evenodd" d="M1 5.25A2.25 2.25 0 013.25 3h13.5A2.25 2.25 0 0119 5.25v9.5A2.25 2.25 0 0116.75 17H3.25A2.25 2.25 0 011 14.75v-9.5zm1.5 5.81v3.69c0 .414.336.75.75.75h13.5a.75.75 0 00.75-.75v-3.69l-2.72-2.72a.75.75 0 00-1.06 0L11.5 10l-1.72-1.72a.75.75 0 00-1.06 0l-4 4zM12.5 7a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z" clip-rule="evenodd" /></svg><span class="category-name flex-grow">所有图片</span></div><div id="category-dynamic-list"></div><hr class="my-2"><div id="nav-item-recycle-bin" data-view="recycle_bin" class="nav-item flex items-center gap-3 p-2 rounded cursor-pointer hover:bg-gray-100"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 text-slate-500"><path fill-rule="evenodd" d="M8.75 1A2.75 2.75 0 006 3.75V4.5h8V3.75A2.75 2.75 0 0011.25 1h-2.5zM10 4.5a.75.75 0 00-1.5 0v.75h1.5v-.75zM15.25 6H4.75a.75.75 0 000 1.5h10.5a.75.75 0 000-1.5zM4.75 9.75a.75.75 0 01.75-.75h8.5a.75.75 0 010 1.5h-8.5a.75.75 0 01-.75-.75zM5.5 12a.75.75 0 00-1.5 0v2.75A2.75 2.75 0 006.75 17h6.5A2.75 2.75 0 0016 14.75V12a.75.75 0 00-1.5 0v2.75a1.25 1.25 0 01-1.25 1.25h-6.5a1.25 1.25 0 01-1.25-1.25V12z" clip-rule="evenodd" /></svg><span class="category-name flex-grow">回收站</span></div><hr class="my-2"><div id="nav-item-maintenance" data-view="maintenance" class="nav-item flex items-center gap-3 p-2 rounded cursor-pointer hover:bg-gray-100"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 text-slate-500"><path d="M10.75 3.562l-3.34-1.928A1.25 1.25 0 005.75 2.75v3.5a1.25 1.25 0 001.66 1.118l3.34-1.928a1.25 1.25 0 000-2.236z"></path><path d="M10.75 9.562l-3.34-1.928A1.25 1.25 0 005.75 8.75v3.5a1.25 1.25 0 001.66 1.118l3.34-1.928a1.25 1.25 0 000-2.236z"></path><path d="M10.75 15.562l-3.34-1.928A1.25 1.25 0 005.75 14.75v3.5a1.25 1.25 0 001.66 1.118l3.34-1.928a1.25 1.25 0 000-2.236z"></path><path d="M14.25 5.25a.75.75 0 000 1.5h.01a.75.75 0 000-1.5h-.01zM12.75 7.5a.75.75 0 01.75-.75h.01a.75.75 0 010 1.5h-.01a.75.75 0 01-.75-.75zM14.25 11.25a.75.75 0 000 1.5h.01a.75.75 0 000-1.5h-.01zM12.75 13.5a.75.75 0 01.75-.75h.01a.75.75 0 010 1.5h-.01a.75.75 0 01-.75-.75zM14.25 17.25a.75.75 0 000 1.5h.01a.75.75 0 000-1.5h-.01zM12.75 19.5a.75.75 0 01.75-.75h.01a.75.75 0 010 1.5h-.01a.75.75 0 01-.75-.75z"></path></svg><span class="category-name flex-grow">空间清理</span></div></div></section>
             <section class="bg-white p-6 rounded-lg shadow-md"><h2 class="text-xl font-semibold mb-4">安全</h2><div id="security-section"></div></section>
         </div>
         <section id="image-list-section" class="bg-white p-6 rounded-lg shadow-md xl:col-span-8">
@@ -1048,7 +1043,7 @@ cat << 'EOF' > public/admin.html
                 <h2 id="image-list-header" class="text-xl font-semibold text-slate-900 flex-shrink-0"></h2>
                 <div class="flex-grow flex flex-col sm:flex-row items-center gap-4 w-full">
                     <div id="view-controls" class="flex items-center gap-2">
-                        <button id="bulk-select-btn" class="flex items-center gap-1.5 px-3 py-1.5 border rounded-md text-sm hover:bg-slate-100"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5"><path d="M5.75 3a.75.75 0 00-.75.75v12.5c0 .414.336.75.75.75h8.5a.75.75 0 00.75-.75V3.75a.75.75 0 00-.75-.75h-8.5zM4.25 3.75A2.25 2.25 0 016.5 1.5h7A2.25 2.25 0 0115.75 3.75v12.5A2.25 2.25 0 0113.5 18.5h-7A2.25 2.25 0 014.25 16.25V3.75z"></path><path d="M7.563 8.125a.75.75 0 01.043 1.06l-1.25 1.5a.75.75 0 01-1.106-1.018l1.25-1.5a.75.75 0 011.063-.042zM12 8.25a.75.75 0 01.75.75v5a.75.75 0 01-1.5 0v-5a.75.75 0 01.75-.75z"></path></svg>批量选择</button>
+                        <button id="bulk-select-btn" class="flex items-center gap-1.5 px-3 py-1.5 border rounded-md text-sm hover:bg-slate-100"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5"><path fill-rule="evenodd" d="M10 2a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 0110 2zM8.06 4.94a.75.75 0 010-1.06l1.5-1.5a.75.75 0 011.06 0l1.5 1.5a.75.75 0 01-1.06 1.06L10 3.94 8.06 4.94zM5.75 6.75a.75.75 0 01.75-.75h7.5a.75.75 0 010 1.5h-7.5a.75.75 0 01-.75-.75zM5 10a.75.75 0 01.75-.75h4.5a.75.75 0 010 1.5h-4.5A.75.75 0 015 10zm0 3.75a.75.75 0 01.75-.75h4.5a.75.75 0 010 1.5h-4.5a.75.75 0 01-.75-.75zM14.25 9.25a.75.75 0 000 1.5h.01a.75.75 0 000-1.5h-.01zM14.25 13a.75.75 0 000 1.5h.01a.75.75 0 000-1.5h-.01z" /><path fill-rule="evenodd" d="M3.5 1.75C2.672 1.75 2 2.422 2 3.25v13.5C2 17.578 2.672 18.25 3.5 18.25h13c.828 0 1.5-.672 1.5-1.5V3.25c0-.828-.672-1.5-1.5-1.5h-13zM3.5 3.25a.01.01 0 000 .01v13.5c0 .005.004.01.01.01h12.98a.01.01 0 00.01-.01V3.26a.01.01 0 000-.01H3.5z" clip-rule="evenodd" /></svg>批量选择</button>
                         <button id="bulk-cancel-btn" class="flex items-center gap-1.5 px-3 py-1.5 border rounded-md text-sm bg-red-100 text-red-700 hover:bg-red-200"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5"><path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"></path></svg>取消</button>
                         <div id="select-all-container" class="items-center gap-2 pl-2">
                             <input type="checkbox" id="select-all-checkbox" class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
@@ -1363,7 +1358,7 @@ cat << 'EOF' > public/admin.html
             DOMElements.pageLinksContainer.innerHTML = '';
             if (totalPages <= 1) { return; }
             let html = '<div class="flex items-center space-x-1">';
-            const createBtnHTML = (text, page, disabled = false, active = false) => `<button data-page="${page}" class="page-item px-3 py-1 text-sm font-medium border border-gray-300 rounded-md hover:bg-gray-100 ${disabled ? 'opacity-50 cursor-not-allowed' : ''} ${active ? 'active' : 'bg-white'}">${text}</button>`;
+            const createBtnHTML = (text, page, disabled = false, active = false) => `<button data-page="${page}" class="page-item px-3 py-1 text-sm font-medium border border-gray-300 rounded-md ${disabled ? 'opacity-50 cursor-not-allowed' : ''} ${active ? 'active' : ''}">${text}</button>`;
             html += createBtnHTML('上一页', currentPage - 1, currentPage === 1);
             
             let pages = [];
@@ -1451,7 +1446,7 @@ cat << 'EOF' > public/admin.html
         
         async function loadMaintenanceView() {
             switchMainView('maintenance');
-            DOMElements.imageListHeader.textContent = '系统维护';
+            DOMElements.imageListHeader.textContent = '空间清理';
             DOMElements.maintenanceView.innerHTML = `
                 <div class="bg-slate-50 p-6 rounded-lg">
                     <h3 class="text-lg font-semibold mb-2">清理冗余文件</h3>
@@ -1509,8 +1504,10 @@ cat << 'EOF' > public/admin.html
                 document.querySelectorAll('.orphan-checkbox').forEach(cb => cb.checked = e.target.checked);
             }
             // Enable delete button if any checkbox is checked
-            if (document.getElementById('delete-orphans-btn')) {
-                document.getElementById('delete-orphans-btn').disabled = !Array.from(document.querySelectorAll('.orphan-checkbox')).some(cb => cb.checked);
+            const deleteBtn = document.getElementById('delete-orphans-btn');
+            if (deleteBtn) {
+                const anyChecked = Array.from(document.querySelectorAll('.orphan-checkbox')).some(cb => cb.checked);
+                deleteBtn.disabled = !anyChecked;
             }
         });
         
@@ -1527,6 +1524,7 @@ cat << 'EOF' > public/admin.html
         const applyViewMode = (mode) => {
             DOMElements.imageList.className = `view-${mode}`;
             DOMElements.viewToggle.querySelectorAll('button').forEach(b => b.classList.toggle('bg-slate-200', b.dataset.view === mode));
+            DOMElements.imageList.innerHTML = ''; // Clear and re-render
             allLoadedImages.forEach(img => renderAdminImage(img, document.querySelector('#nav-item-recycle-bin').classList.contains('active')));
         };
         DOMElements.viewToggle.addEventListener('click', (e) => {
@@ -1534,7 +1532,6 @@ cat << 'EOF' > public/admin.html
             if (button && button.dataset.view !== currentViewMode) {
                 currentViewMode = button.dataset.view;
                 localStorage.setItem('adminViewMode', currentViewMode);
-                DOMElements.imageList.innerHTML = '';
                 applyViewMode(currentViewMode);
             }
         });
