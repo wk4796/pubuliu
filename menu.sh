@@ -1,11 +1,12 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v1.4.0)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v1.5.0)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
-#   v1.4.0 更新:
-#   - 修复 (后台): 最终修复！根据调试日志，定位到问题为CSS样式缺失，已补全.lightbox.active的透明度和可见性规则，彻底解决预览功能无响应的问题。
+#   v1.5.0 更新:
+#   - 新增(后台): 为回收站中的图片增加预览功能。
+#   - 优化(后台): 为后台图片预览窗口添加加载动画，提升切换图片时的用户体验。
 # =================================================================
 
 # --- 配置 ---
@@ -16,7 +17,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 PROMPT_Y="(${GREEN}y${NC}/${RED}n${NC})"
 
-SCRIPT_VERSION="1.4.0"
+SCRIPT_VERSION="1.5.0"
 APP_NAME="image-gallery"
 
 # --- 路径设置 ---
@@ -43,7 +44,7 @@ overwrite_app_files() {
 cat << 'EOF' > package.json
 {
   "name": "image-gallery-pro",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "A high-performance, full-stack image gallery application with all features.",
   "main": "server.js",
   "scripts": {
@@ -885,9 +886,7 @@ cat << 'EOF' > public/admin.html
         }
 
         .lightbox { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.9); display: none; justify-content: center; align-items: center; z-index: 1000; opacity: 0; visibility: hidden; transition: opacity 0.3s ease; }
-        /* ================== 核心CSS修复 ================== */
         .lightbox.active { opacity: 1; visibility: visible; }
-        /* ================================================ */
         .lightbox .spinner { border-color: rgba(255,255,255,0.2); border-top-color: rgba(255,255,255,0.8); display: none; position: absolute; z-index: 1; width: 3rem; height: 3rem; }
         .lightbox.is-loading .spinner { display: block; animation: spin 1s linear infinite; }
         .lightbox-image { max-width: 85%; max-height: 85%; display: block; object-fit: contain; }
@@ -1125,6 +1124,7 @@ cat << 'EOF' > public/admin.html
         function renderAdminImage(image, isRecycleBinView = false) {
             const buttonsHtml = isRecycleBinView 
             ? `
+                <button title="预览" class="preview-btn p-2 rounded-full text-slate-600 hover:bg-slate-200 hover:text-slate-800 transition-colors" data-id="${image.id}"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 pointer-events-none"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg></button>
                 <button title="恢复" class="restore-btn p-2 rounded-full text-green-600 hover:bg-green-100 transition-colors" data-id="${image.id}"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 pointer-events-none"><path stroke-linecap="round" stroke-linejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" /></svg></button>
                 <button title="彻底删除" class="purge-btn p-2 rounded-full text-red-500 hover:bg-red-100 hover:text-red-700 transition-colors" data-id="${image.id}"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 pointer-events-none"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.134-2.036-2.134H8.718c-1.126 0-2.037.955-2.037 2.134v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg></button>
             `
@@ -1358,8 +1358,16 @@ cat << 'EOF' > public/admin.html
             const preloader = new Image();
             preloader.src = `/image-proxy/${item.filename}`;
             
-            preloader.onload = () => { isLightboxLoading = false; DOMElements.lightbox.classList.remove('is-loading'); callback(item); };
-            preloader.onerror = () => { isLightboxLoading = false; DOMElements.lightbox.classList.remove('is-loading'); showToast('无法加载预览图片', 'error'); };
+            preloader.onload = () => { 
+                isLightboxLoading = false;
+                DOMElements.lightbox.classList.remove('is-loading');
+                callback(item); 
+            };
+            preloader.onerror = () => { 
+                isLightboxLoading = false;
+                DOMElements.lightbox.classList.remove('is-loading');
+                showToast('无法加载预览图片', 'error'); 
+            };
         };
 
         const showImageAtIndex = (index) => {
