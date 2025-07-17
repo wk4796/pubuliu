@@ -1,11 +1,11 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v1.2.1)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v1.3.0)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
-#   v1.2.1 更新:
-#   - 修复 (后台): 修复了事件委托监听器中 preventDefault 方法的错误使用，该错误导致下载和预览按钮均无响应。
+#   v1.3.0 更新:
+#   - 修复 (后台): 彻底修复后台预览、下载等功能无响应的问题。完全遵循参考脚本的模式，重构了ID传递和事件监听机制，确保功能稳定可靠。
 # =================================================================
 
 # --- 配置 ---
@@ -16,7 +16,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 PROMPT_Y="(${GREEN}y${NC}/${RED}n${NC})"
 
-SCRIPT_VERSION="1.2.1"
+SCRIPT_VERSION="1.3.0"
 APP_NAME="image-gallery"
 
 # --- 路径设置 ---
@@ -43,7 +43,7 @@ overwrite_app_files() {
 cat << 'EOF' > package.json
 {
   "name": "image-gallery-pro",
-  "version": "1.2.1",
+  "version": "1.3.0",
   "description": "A high-performance, full-stack image gallery application with all features.",
   "main": "server.js",
   "scripts": {
@@ -1119,25 +1119,27 @@ cat << 'EOF' > public/admin.html
         async function loadImages(category, name) { DOMElements.imageLoader.classList.remove('hidden'); DOMElements.imageList.innerHTML = ''; try { const url = `/api/images?category=${category}&search=${encodeURIComponent(currentSearchTerm)}&page=${currentAdminPage}&limit=12`; const response = await apiRequest(url); const data = await response.json(); allLoadedImages = data.images; DOMElements.imageListHeader.innerHTML = `${name} <span class="text-base text-gray-500 font-normal">(共 ${data.totalImages} 张)</span>`; if (allLoadedImages.length === 0) { DOMElements.imageList.innerHTML = '<p class="text-slate-500 col-span-full text-center py-10">没有找到图片。</p>'; } else { allLoadedImages.forEach((image) => renderAdminImage(image)); } renderPaginationControls(data.page, data.totalPages); } catch (error) { if(error.message !== 'Unauthorized') DOMElements.imageList.innerHTML = `<p class="text-red-500 col-span-full text-center py-10">加载图片失败: ${error.message}</p>`; } finally { DOMElements.imageLoader.classList.add('hidden'); } }
         async function loadRecycleBin() { DOMElements.imageLoader.classList.remove('hidden'); DOMElements.imageList.innerHTML = ''; try { const url = `/api/admin/recycle-bin?search=${encodeURIComponent(currentSearchTerm)}&page=${currentAdminPage}&limit=12`; const response = await apiRequest(url); const data = await response.json(); allLoadedImages = data.images; DOMElements.imageListHeader.innerHTML = `回收站`; if (allLoadedImages.length === 0) { DOMElements.imageList.innerHTML = '<p class="text-slate-500 col-span-full text-center py-10">回收站是空的。</p>'; } else { allLoadedImages.forEach((image) => renderAdminImage(image, true)); } renderPaginationControls(data.page, data.totalPages); } catch (error) { if (error.message !== 'Unauthorized') DOMElements.imageList.innerHTML = `<p class="text-red-500 col-span-full text-center py-10">加载回收站失败: ${error.message}</p>`; } finally { DOMElements.imageLoader.classList.add('hidden'); } }
 
+        // =================================================================
+        // =========== 核心修复：重构 renderAdminImage，确保 data-id 正确添加 ===========
+        // =================================================================
         function renderAdminImage(image, isRecycleBinView = false) {
             const card = document.createElement('div');
             card.className = 'admin-image-card border rounded-lg shadow-sm bg-white overflow-hidden flex flex-col';
-            card.dataset.id = image.id;
-
+            
             const buttonsHtml = isRecycleBinView 
             ? `
-                <button title="恢复" class="restore-btn p-2 rounded-full text-green-600 hover:bg-green-100 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 pointer-events-none"><path stroke-linecap="round" stroke-linejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" /></svg></button>
-                <button title="彻底删除" class="purge-btn p-2 rounded-full text-red-500 hover:bg-red-100 hover:text-red-700 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 pointer-events-none"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.134-2.036-2.134H8.718c-1.126 0-2.037.955-2.037 2.134v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg></button>
+                <button title="恢复" class="restore-btn p-2 rounded-full text-green-600 hover:bg-green-100 transition-colors" data-id="${image.id}"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 pointer-events-none"><path stroke-linecap="round" stroke-linejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" /></svg></button>
+                <button title="彻底删除" class="purge-btn p-2 rounded-full text-red-500 hover:bg-red-100 hover:text-red-700 transition-colors" data-id="${image.id}"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 pointer-events-none"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.134-2.036-2.134H8.718c-1.126 0-2.037.955-2.037 2.134v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg></button>
             `
             : `
-                <button title="预览" class="preview-btn p-2 rounded-full text-slate-600 hover:bg-slate-200 hover:text-slate-800 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 pointer-events-none"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg></button>
+                <button title="预览" class="preview-btn p-2 rounded-full text-slate-600 hover:bg-slate-200 hover:text-slate-800 transition-colors" data-id="${image.id}"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 pointer-events-none"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg></button>
                 <a href="${image.src}" download="${image.originalFilename}" title="下载" class="p-2 rounded-full text-slate-600 hover:bg-slate-200 hover:text-slate-800 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg></a>
-                <button title="编辑" class="edit-btn p-2 rounded-full text-slate-600 hover:bg-slate-200 hover:text-slate-800 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 pointer-events-none"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487zm0 0L19.5 7.125" /></svg></button>
-                <button title="移至回收站" class="delete-btn p-2 rounded-full text-red-500 hover:bg-red-100 hover:text-red-700 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 pointer-events-none"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.134-2.036-2.134H8.718c-1.126 0-2.037.955-2.037 2.134v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg></button>
+                <button title="编辑" class="edit-btn p-2 rounded-full text-slate-600 hover:bg-slate-200 hover:text-slate-800 transition-colors" data-id="${image.id}"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 pointer-events-none"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487zm0 0L19.5 7.125" /></svg></button>
+                <button title="移至回收站" class="delete-btn p-2 rounded-full text-red-500 hover:bg-red-100 hover:text-red-700 transition-colors" data-id="${image.id}"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 pointer-events-none"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.134-2.036-2.134H8.718c-1.126 0-2.037.955-2.037 2.134v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg></button>
             `;
             
             card.innerHTML = `
-                <a href="#" class="image-preview-container flex-shrink-0 preview-trigger">
+                <a href="#" class="image-preview-container flex-shrink-0 preview-trigger" data-id="${image.id}">
                     <div class="card-spinner"></div>
                     <img src="/image-proxy/${image.filename}?w=400" alt="${image.description || image.originalFilename}" class="pointer-events-none" onload="this.classList.add('loaded'); this.previousElementSibling.style.display='none';">
                 </a>
@@ -1209,7 +1211,6 @@ cat << 'EOF' > public/admin.html
         DOMElements.navigationList.addEventListener('click', async (e) => {
             const navItem = e.target.closest('.nav-item');
             if (!navItem) return;
-            // Handle category management clicks (rename/delete)
             if (e.target.matches('.rename-cat-btn, .delete-cat-btn')) { 
                 e.preventDefault(); 
                 e.stopPropagation(); 
@@ -1241,7 +1242,6 @@ cat << 'EOF' > public/admin.html
                 } 
                 return; 
             }
-            // Handle navigation clicks
             e.preventDefault();
             document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
             navItem.classList.add('active');
@@ -1250,28 +1250,23 @@ cat << 'EOF' > public/admin.html
         });
         
         // =================================================================
-        // =========== 核心修复：精确化事件处理，解决下载和预览问题 ===========
+        // =========== 核心修复：重构事件委托，精确处理并直接从按钮获取ID ===========
         // =================================================================
         DOMElements.imageList.addEventListener('click', async (e) => {
             const button = e.target.closest('button, a');
             if (!button) return;
 
-            // 如果是下载链接，则不阻止默认行为，直接返回让浏览器处理
             if (button.tagName === 'A' && button.hasAttribute('download')) {
                 return;
             }
             
-            // 对于其他所有按钮（预览、编辑、删除等），阻止默认行为
             e.preventDefault();
-            e.stopPropagation();
 
-            const card = e.target.closest('.admin-image-card');
-            if (!card) return;
+            const imageId = button.dataset.id;
+            if (!imageId) return;
 
-            const imageId = card.dataset.id;
             const image = allLoadedImages.find(img => img.id === imageId);
             
-            // 预览按钮或图片本身
             if (button.matches('.preview-trigger, .preview-btn')) {
                 const newIndex = allLoadedImages.findIndex(img => img.id === imageId);
                 if (newIndex === -1) { showToast('无法在列表中找到此图片。', 'error'); return; }
@@ -1279,7 +1274,6 @@ cat << 'EOF' > public/admin.html
                 document.body.classList.add('lightbox-open');
                 showImageAtIndex(newIndex);
             }
-            // 编辑按钮
             else if (button.matches('.edit-btn')) {
                 if (!image) return;
                 await populateCategorySelects(image.category);
@@ -1288,41 +1282,47 @@ cat << 'EOF' > public/admin.html
                 DOMElements.editImageModal.querySelector('#edit-description').value = image.description;
                 DOMElements.editImageModal.classList.add('active');
             }
-            // 删除按钮 (移至回收站)
             else if (button.matches('.delete-btn')) {
-                 if (!image) return;
+                if (!image) return;
                 const confirmed = await showConfirmationModal('移至回收站', `<p>确定要将图片 "<strong>${image.originalFilename}</strong>" 移至回收站吗？</p>`, '确认移动');
                 if (confirmed) {
                     try {
                         await apiRequest(`/api/admin/images/${imageId}`, { method: 'DELETE' });
                         showToast('图片已移至回收站');
-                        card.classList.add('fading-out');
-                        setTimeout(() => card.remove(), 400);
+                        const cardToRemove = button.closest('.admin-image-card');
+                        if (cardToRemove) {
+                           cardToRemove.classList.add('fading-out');
+                           setTimeout(() => cardToRemove.remove(), 400);
+                        }
                         const imageIndex = allLoadedImages.findIndex(i => i.id === imageId);
                         if (imageIndex > -1) allLoadedImages.splice(imageIndex, 1);
                     } catch (error) { showToast(error.message, 'error'); }
                 }
             }
-            // 恢复按钮
             else if (button.matches('.restore-btn')) {
                 try {
                     await apiRequest(`/api/admin/recycle-bin/${imageId}/restore`, { method: 'POST' });
                     showToast('图片已恢复');
-                    card.classList.add('fading-out');
-                    setTimeout(() => card.remove(), 400);
+                    const cardToRemove = button.closest('.admin-image-card');
+                    if(cardToRemove) {
+                        cardToRemove.classList.add('fading-out');
+                        setTimeout(() => cardToRemove.remove(), 400);
+                    }
                     const imageIndex = allLoadedImages.findIndex(i => i.id === imageId);
                     if (imageIndex > -1) allLoadedImages.splice(imageIndex, 1);
                 } catch (error) { showToast(error.message, 'error'); }
             }
-            // 彻底删除按钮
             else if (button.matches('.purge-btn')) {
                 const confirmed = await showConfirmationModal('彻底删除', `<p>确定要永久删除这张图片吗？<br><strong>此操作无法撤销。</strong></p>`, '确认删除');
                 if (confirmed) {
                     try {
                         await apiRequest(`/api/admin/recycle-bin/${imageId}/purge`, { method: 'DELETE' });
                         showToast('图片已彻底删除');
-                        card.classList.add('fading-out');
-                        setTimeout(() => card.remove(), 400);
+                        const cardToRemove = button.closest('.admin-image-card');
+                        if(cardToRemove) {
+                            cardToRemove.classList.add('fading-out');
+                            setTimeout(() => cardToRemove.remove(), 400);
+                        }
                         const imageIndex = allLoadedImages.findIndex(i => i.id === imageId);
                         if (imageIndex > -1) allLoadedImages.splice(imageIndex, 1);
                     } catch (error) { showToast(error.message, 'error'); }
