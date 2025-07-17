@@ -1,12 +1,11 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v1.2.0)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v1.2.1)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
-#   v1.2.0 更新:
-#   - 修复 (后台): 重构了后台图片列表的事件处理机制，采用事件委托模式，彻底解决了预览功能无响应的问题。
-#   - 优化 (后台): 优化了预览窗口内的删除逻辑，确保删除后能稳定地自动切换到下一张图片。
+#   v1.2.1 更新:
+#   - 修复 (后台): 修复了事件委托监听器中 preventDefault 方法的错误使用，该错误导致下载和预览按钮均无响应。
 # =================================================================
 
 # --- 配置 ---
@@ -17,7 +16,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 PROMPT_Y="(${GREEN}y${NC}/${RED}n${NC})"
 
-SCRIPT_VERSION="1.2.0"
+SCRIPT_VERSION="1.2.1"
 APP_NAME="image-gallery"
 
 # --- 路径设置 ---
@@ -44,7 +43,7 @@ overwrite_app_files() {
 cat << 'EOF' > package.json
 {
   "name": "image-gallery-pro",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "A high-performance, full-stack image gallery application with all features.",
   "main": "server.js",
   "scripts": {
@@ -1198,9 +1197,9 @@ cat << 'EOF' > public/admin.html
         }
 
         DOMElements.paginationContainer.addEventListener('click', e => { 
-            e.preventDefault(); 
             const target = e.target.closest('.page-item'); 
             if(!target || target.disabled || target.classList.contains('active')) return;
+            e.preventDefault();
             const newPage = parseInt(target.dataset.page);
             DOMElements.paginationContainer.querySelector('.page-item.active')?.classList.remove('active');
             DOMElements.paginationContainer.querySelector(`.page-item[data-page="${newPage}"]`)?.classList.add('active');
@@ -1208,10 +1207,42 @@ cat << 'EOF' > public/admin.html
         });
 
         DOMElements.navigationList.addEventListener('click', async (e) => {
-            e.preventDefault();
             const navItem = e.target.closest('.nav-item');
             if (!navItem) return;
-            if (e.target.matches('.rename-cat-btn, .delete-cat-btn')) { e.stopPropagation(); const catName = e.target.dataset.name; if (e.target.classList.contains('rename-cat-btn')) { showGenericModal(`重命名分类 "${catName}"`, '<form id="modal-form"><input type="text" id="modal-input" required class="w-full border rounded px-3 py-2"></form>', '<button type="button" class="modal-cancel-btn bg-gray-300 hover:bg-gray-400 text-black py-2 px-4 rounded">取消</button><button type="submit" form="modal-form" class="bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded">保存</button>'); const input = document.getElementById('modal-input'); input.value = catName; DOMElements.genericModal.querySelector('.modal-cancel-btn').onclick=() => hideModal(DOMElements.genericModal); document.getElementById('modal-form').onsubmit = async (ev) => { ev.preventDefault(); const newName = input.value.trim(); if (!newName || newName === catName) { hideModal(DOMElements.genericModal); return; } try { await apiRequest('/api/admin/categories', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ oldName: catName, newName }) }); hideModal(DOMElements.genericModal); showToast('重命名成功'); await refreshAllData(); } catch (error) { showToast(`重命名失败: ${error.message}`, 'error'); } }; } else if (e.target.classList.contains('delete-cat-btn')) { const confirmed = await showConfirmationModal('确认删除', `<p>确定要删除分类 "<strong>${catName}</strong>" 吗？<br>此分类下的图片将归入 "未分类"。</p>`, '确认删除'); if(confirmed) { try { await apiRequest('/api/admin/categories', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: catName }) }); showToast('删除成功'); await refreshAllData(); } catch (error) { showToast(`删除失败: ${error.message}`, 'error'); } } } return; }
+            // Handle category management clicks (rename/delete)
+            if (e.target.matches('.rename-cat-btn, .delete-cat-btn')) { 
+                e.preventDefault(); 
+                e.stopPropagation(); 
+                const catName = e.target.dataset.name; 
+                if (e.target.classList.contains('rename-cat-btn')) { 
+                    showGenericModal(`重命名分类 "${catName}"`, '<form id="modal-form"><input type="text" id="modal-input" required class="w-full border rounded px-3 py-2"></form>', '<button type="button" class="modal-cancel-btn bg-gray-300 hover:bg-gray-400 text-black py-2 px-4 rounded">取消</button><button type="submit" form="modal-form" class="bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded">保存</button>'); 
+                    const input = document.getElementById('modal-input'); 
+                    input.value = catName; 
+                    DOMElements.genericModal.querySelector('.modal-cancel-btn').onclick=() => hideModal(DOMElements.genericModal); 
+                    document.getElementById('modal-form').onsubmit = async (ev) => { 
+                        ev.preventDefault(); 
+                        const newName = input.value.trim(); 
+                        if (!newName || newName === catName) { hideModal(DOMElements.genericModal); return; } 
+                        try { 
+                            await apiRequest('/api/admin/categories', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ oldName: catName, newName }) }); 
+                            hideModal(DOMElements.genericModal); showToast('重命名成功'); 
+                            await refreshAllData(); 
+                        } catch (error) { showToast(`重命名失败: ${error.message}`, 'error'); } 
+                    }; 
+                } else if (e.target.classList.contains('delete-cat-btn')) { 
+                    const confirmed = await showConfirmationModal('确认删除', `<p>确定要删除分类 "<strong>${catName}</strong>" 吗？<br>此分类下的图片将归入 "未分类"。</p>`, '确认删除'); 
+                    if(confirmed) { 
+                        try { 
+                            await apiRequest('/api/admin/categories', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: catName }) }); 
+                            showToast('删除成功'); 
+                            await refreshAllData(); 
+                        } catch (error) { showToast(`删除失败: ${error.message}`, 'error'); } 
+                    } 
+                } 
+                return; 
+            }
+            // Handle navigation clicks
+            e.preventDefault();
             document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
             navItem.classList.add('active');
             DOMElements.searchInput.value = ''; currentSearchTerm = '';
@@ -1219,21 +1250,27 @@ cat << 'EOF' > public/admin.html
         });
         
         // =================================================================
-        // =========== 核心修改：采用事件委托模式处理所有卡片点击事件 ===========
+        // =========== 核心修复：精确化事件处理，解决下载和预览问题 ===========
         // =================================================================
         DOMElements.imageList.addEventListener('click', async (e) => {
             const button = e.target.closest('button, a');
             if (!button) return;
 
-            const card = e.target.closest('.admin-image-card');
-            if (!card) return;
+            // 如果是下载链接，则不阻止默认行为，直接返回让浏览器处理
+            if (button.tagName === 'A' && button.hasAttribute('download')) {
+                return;
+            }
             
+            // 对于其他所有按钮（预览、编辑、删除等），阻止默认行为
             e.preventDefault();
             e.stopPropagation();
 
+            const card = e.target.closest('.admin-image-card');
+            if (!card) return;
+
             const imageId = card.dataset.id;
             const image = allLoadedImages.find(img => img.id === imageId);
-
+            
             // 预览按钮或图片本身
             if (button.matches('.preview-trigger, .preview-btn')) {
                 const newIndex = allLoadedImages.findIndex(img => img.id === imageId);
