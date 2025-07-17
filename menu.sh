@@ -1,12 +1,12 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v1.7.4)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v1.7.5)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
-#   v1.7.4 更新:
-#   - 优化(后台): 修复了后台图片预览(Lightbox)中切换图片时没有加载动画的问题。
-#   - 优化(后台): 现在切换图片会立即隐藏旧图、显示加载动画并更新计数器，而不是等待新图加载完成，提升了操作的流畅度和响应性。
+#   v1.7.5 更新:
+#   - 优化(前后台): 实现智能加载动画。现在只有在图片加载较慢(如未缓存)时才会显示加载动画。
+#   - 优化(前后台): 对于已缓存的图片，将实现无动画的即时切换，大幅提升流畅度。
 # =================================================================
 
 # --- 配置 ---
@@ -17,7 +17,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 PROMPT_Y="(${GREEN}y${NC}/${RED}n${NC})"
 
-SCRIPT_VERSION="1.7.4"
+SCRIPT_VERSION="1.7.5"
 APP_NAME="image-gallery"
 
 # --- 路径设置 ---
@@ -44,7 +44,7 @@ overwrite_app_files() {
 cat << 'EOF' > package.json
 {
   "name": "image-gallery-pro",
-  "version": "1.7.4",
+  "version": "1.7.5",
   "description": "A high-performance, full-stack image gallery application with all features.",
   "main": "server.js",
   "scripts": {
@@ -842,7 +842,18 @@ cat << 'EOF' > public/index.html
         const lbCounter = lightbox.querySelector('.lb-counter'); 
         const lbDownloadLink = document.getElementById('lightbox-download-link'); 
         let currentImageIndex = 0;
-        let imagePreloader = new Image();
+        let loadingSpinnerTimeout;
+
+        lightboxImage.onload = () => {
+            clearTimeout(loadingSpinnerTimeout);
+            lightbox.classList.remove('is-loading');
+            lightboxImage.classList.add('loaded');
+        };
+        lightboxImage.onerror = () => {
+            clearTimeout(loadingSpinnerTimeout);
+            lightbox.classList.remove('is-loading');
+            console.error("Lightbox image failed to load:", lightboxImage.src);
+        };
 
         const updateLightboxContent = (item) => {
             lightboxImage.alt = item.description || item.originalFilename;
@@ -856,23 +867,16 @@ cat << 'EOF' > public/index.html
             const item = allLoadedImages[index];
             if (!item) return;
 
-            // Immediate UI updates
-            lightbox.classList.add('is-loading');
             lightboxImage.classList.remove('loaded');
             lbCounter.textContent = `${currentImageIndex + 1} / ${allLoadedImages.length}`;
+            updateLightboxContent(item);
 
-            // Preload the image
-            imagePreloader.src = `/image-proxy/${item.filename}`;
-            imagePreloader.onload = () => {
-                lightbox.classList.remove('is-loading');
-                lightboxImage.src = imagePreloader.src;
-                lightboxImage.classList.add('loaded');
-                updateLightboxContent(item);
-            };
-            imagePreloader.onerror = () => {
-                lightbox.classList.remove('is-loading');
-                console.error("Lightbox image failed to load:", imagePreloader.src);
-            };
+            clearTimeout(loadingSpinnerTimeout);
+            loadingSpinnerTimeout = setTimeout(() => {
+                lightbox.classList.add('is-loading');
+            }, 200);
+
+            lightboxImage.src = `/image-proxy/${item.filename}`;
         };
         
         const showNextImage = () => showImageAtIndex((currentImageIndex + 1) % allLoadedImages.length);
@@ -1141,7 +1145,7 @@ cat << 'EOF' > public/admin.html
             bulkSelectBtn: document.getElementById('bulk-select-btn'), bulkCancelBtn: document.getElementById('bulk-cancel-btn'),
             imageListSection: document.getElementById('image-list-section'),
         };
-        let filesToUpload = []; let allLoadedImages = []; let currentImageIndex = 0; let currentSearchTerm = ''; let debounceTimer; let currentAdminPage = 1;
+        let filesToUpload = []; let allLoadedImages = []; let currentImageIndex = 0; let currentSearchTerm = ''; let debounceTimer; let currentAdminPage = 1; let loadingSpinnerTimeout;
         let selectedImageIds = new Set();
         let isInSelectMode = false;
         let currentViewMode = localStorage.getItem('adminViewMode') || 'grid';
@@ -1548,22 +1552,49 @@ cat << 'EOF' > public/admin.html
             const item = allLoadedImages[currentImageIndex];
             if (!item) return;
 
-            // Immediately hide old image, show spinner, and update text
-            DOMElements.lightbox.classList.add('is-loading');
             DOMElements.lightboxImage.classList.remove('loaded');
             DOMElements.lightboxCounter.textContent = `${currentImageIndex + 1} / ${allLoadedImages.length}`;
-            
-            // Update metadata like alt text and download links *before* setting the src
             updateAdminLightboxContent(item);
+            
+            clearTimeout(loadingSpinnerTimeout);
+            loadingSpinnerTimeout = setTimeout(() => {
+                DOMElements.lightbox.classList.add('is-loading');
+            }, 200);
 
-            // Set src to trigger the load, which will be handled by event listeners attached in the init() function
             DOMElements.lightboxImage.src = `/image-proxy/${item.filename}`;
         };
 
         const showNextImage = () => showImageAtIndex((currentImageIndex + 1) % allLoadedImages.length);
         const showPrevImage = () => showImageAtIndex((currentImageIndex - 1 + allLoadedImages.length) % allLoadedImages.length);
         const closeLightbox = () => { DOMElements.lightbox.classList.remove('active'); document.body.classList.remove('lightbox-open'); };
-        DOMElements.lightbox.addEventListener('click', async (e) => { const target = e.target.closest('button, a') || e.target; if (target.matches('.lb-next')) { showNextImage(); } else if (target.matches('.lb-prev')) { showPrevImage(); } else if (target.matches('.lb-close') || e.target === DOMElements.lightbox) { closeLightbox(); } else if (target.id === 'lb-delete') { const imageToDelete = allLoadedImages[currentImageIndex]; if (!imageToDelete) return; const confirmed = await showConfirmationModal('移至回收站', `<p>确定要将图片 "<strong>${imageToDelete.originalFilename}</strong>" 移至回收站吗？</p>`, '确认移动', '取消'); if (confirmed) { try { await apiRequest(`/api/admin/images/${imageToDelete.id}`, { method: 'DELETE' }); showToast('图片已移至回收站'); const cardToRemove = DOMElements.imageList.querySelector(`.admin-image-item[data-id='${imageToDelete.id}']`); if (cardToRemove) { cardToRemove.classList.add('fading-out'); setTimeout(() => cardToRemove.remove(), 400); } allLoadedImages.splice(currentImageIndex, 1); if (allLoadedImages.length === 0) { closeLightbox(); changePage(currentAdminPage, false); } else { if (currentImageIndex >= allLoadedImages.length) { currentImageIndex = allLoadedImages.length - 1; } showImageAtIndex(currentImageIndex); } } catch (error) { showToast(error.message, 'error'); } } } });
+        
+        DOMElements.lightbox.addEventListener('click', async (e) => { 
+            const target = e.target.closest('button, a') || e.target; 
+            if (target.matches('.lb-next')) { showNextImage(); } 
+            else if (target.matches('.lb-prev')) { showPrevImage(); } 
+            else if (target.matches('.lb-close') || e.target === DOMElements.lightbox) { closeLightbox(); } 
+            else if (target.id === 'lb-delete') { 
+                const imageToDelete = allLoadedImages[currentImageIndex]; 
+                if (!imageToDelete) return; 
+                const confirmed = await showConfirmationModal('移至回收站', `<p>确定要将图片 "<strong>${imageToDelete.originalFilename}</strong>" 移至回收站吗？</p>`, '确认移动', '取消'); 
+                if (confirmed) { 
+                    try { 
+                        await apiRequest(`/api/admin/images/${imageToDelete.id}`, { method: 'DELETE' }); 
+                        showToast('图片已移至回收站'); 
+                        const cardToRemove = DOMElements.imageList.querySelector(`.admin-image-item[data-id='${imageToDelete.id}']`); 
+                        if (cardToRemove) { cardToRemove.classList.add('fading-out'); setTimeout(() => cardToRemove.remove(), 400); } 
+                        allLoadedImages.splice(currentImageIndex, 1); 
+                        if (allLoadedImages.length === 0) { 
+                            closeLightbox(); 
+                            changePage(currentAdminPage, false); 
+                        } else { 
+                            if (currentImageIndex >= allLoadedImages.length) { currentImageIndex = allLoadedImages.length - 1; } 
+                            showImageAtIndex(currentImageIndex); 
+                        } 
+                    } catch (error) { showToast(error.message, 'error'); } 
+                } 
+            } 
+        });
 
         // --- Event Listeners and Init ---
         const applyViewMode = (mode) => {
@@ -1597,10 +1628,12 @@ cat << 'EOF' > public/admin.html
             
             // Attach lightbox image event handlers
             DOMElements.lightboxImage.onload = () => {
+                clearTimeout(loadingSpinnerTimeout);
                 DOMElements.lightbox.classList.remove('is-loading');
                 DOMElements.lightboxImage.classList.add('loaded');
             };
             DOMElements.lightboxImage.onerror = () => {
+                clearTimeout(loadingSpinnerTimeout);
                 DOMElements.lightbox.classList.remove('is-loading');
                 showToast('无法加载预览图片', 'error');
             };
