@@ -1,13 +1,13 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v1.7.1)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v1.7.2)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
-#   v1.7.1 更新:
-#   - 优化(后台): 更换了更直观的“批量选择”图标。
-#   - 优化(后台): 将“系统维护”更名为“空间清理”，使其功能更明确。
-#   - 修复(后台): 修复了分页按钮在鼠标悬浮时样式不正确的问题。
+#   v1.7.2 更新:
+#   - 新增(后台): 批量操作中增加“修改描述”功能（覆盖模式）。
+#   - 优化(后台): 简化“修改描述”功能，使其更直接，并增加强警告。
+#   - 优化(后台): 更换了“回收站”和“空间清理”的图标，使其更直观。
 # =================================================================
 
 # --- 配置 ---
@@ -18,7 +18,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 PROMPT_Y="(${GREEN}y${NC}/${RED}n${NC})"
 
-SCRIPT_VERSION="1.7.1"
+SCRIPT_VERSION="1.7.2"
 APP_NAME="image-gallery"
 
 # --- 路径设置 ---
@@ -45,7 +45,7 @@ overwrite_app_files() {
 cat << 'EOF' > package.json
 {
   "name": "image-gallery-pro",
-  "version": "1.7.1",
+  "version": "1.7.2",
   "description": "A high-performance, full-stack image gallery application with all features.",
   "main": "server.js",
   "scripts": {
@@ -396,6 +396,11 @@ apiAdminRouter.post('/images/bulk-action', handleApiError(async (req, res) => {
                     case 'recategorize':
                         if (payload && payload.newCategory) {
                             img.category = payload.newCategory;
+                        }
+                        break;
+                    case 'edit_description':
+                        if (payload && typeof payload.newDescription !== 'undefined') {
+                            img.description = payload.newDescription;
                         }
                         break;
                 }
@@ -1035,7 +1040,7 @@ cat << 'EOF' > public/admin.html
     <main class="container mx-auto p-4 md:p-6 grid grid-cols-1 xl:grid-cols-12 gap-8">
         <div class="xl:col-span-4 space-y-8">
             <section id="upload-section" class="bg-white p-6 rounded-lg shadow-md"><h2 class="text-xl font-semibold mb-4">上传新图片</h2><form id="upload-form" class="space-y-4"><div><label for="image-input" id="drop-zone" class="w-full flex flex-col items-center justify-center p-6 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors"><svg class="w-10 h-10 mb-3 text-gray-400" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 20 16"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 13h3a3 3 0 0 0 0-6h-.025A5.56 5.56 0 0 0 16 6.5 5.5 5.5 0 0 0 5.207 5.021C5.137 5.017 5.071 5 5 5a4 4 0 0 0 0 8h2.167M10 15V6m0 0L8 8m2-2 2 2"/></svg><p class="text-sm text-gray-500"><span class="font-semibold">点击选择</span> 或拖拽多个文件到此处</p><input id="image-input" type="file" class="hidden" multiple accept="image/*"/></label></div><div class="space-y-2"><label for="unified-description" class="block text-sm font-medium">统一描述 (可选)</label><textarea id="unified-description" rows="2" class="w-full text-sm border rounded px-2 py-1" placeholder="在此处填写可应用到所有未填写描述的图片"></textarea></div><div id="file-preview-container" class="hidden space-y-2"><div id="upload-summary" class="text-sm font-medium text-slate-600"></div><div id="file-preview-list" class="h-48 border rounded p-2 space-y-3" style="overflow: auto; resize: vertical;"></div></div><div><label for="category-select" class="block text-sm font-medium mb-1">设置分类</label><div class="flex items-center space-x-2"><select name="category" id="category-select" required class="w-full border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-500"></select><button type="button" id="add-category-btn" class="flex-shrink-0 bg-green-500 hover:bg-green-600 text-white font-bold w-9 h-9 rounded-full flex items-center justify-center text-xl" title="添加新分类">+</button></div></div><button type="submit" id="upload-btn" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg transition-colors disabled:bg-gray-400" disabled>上传文件</button></form></section>
-            <section class="bg-white p-6 rounded-lg shadow-md"><h2 class="text-xl font-semibold mb-4">图库</h2><div id="navigation-list" class="space-y-1"><div id="nav-item-all" data-view="all" class="nav-item flex items-center gap-3 p-2 rounded cursor-pointer hover:bg-gray-100 active"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 text-slate-500"><path fill-rule="evenodd" d="M1 5.25A2.25 2.25 0 013.25 3h13.5A2.25 2.25 0 0119 5.25v9.5A2.25 2.25 0 0116.75 17H3.25A2.25 2.25 0 011 14.75v-9.5zm1.5 5.81v3.69c0 .414.336.75.75.75h13.5a.75.75 0 00.75-.75v-3.69l-2.72-2.72a.75.75 0 00-1.06 0L11.5 10l-1.72-1.72a.75.75 0 00-1.06 0l-4 4zM12.5 7a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z" clip-rule="evenodd" /></svg><span class="category-name flex-grow">所有图片</span></div><div id="category-dynamic-list"></div><hr class="my-2"><div id="nav-item-recycle-bin" data-view="recycle_bin" class="nav-item flex items-center gap-3 p-2 rounded cursor-pointer hover:bg-gray-100"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 text-slate-500"><path fill-rule="evenodd" d="M8.75 1A2.75 2.75 0 006 3.75V4.5h8V3.75A2.75 2.75 0 0011.25 1h-2.5zM10 4.5a.75.75 0 00-1.5 0v.75h1.5v-.75zM15.25 6H4.75a.75.75 0 000 1.5h10.5a.75.75 0 000-1.5zM4.75 9.75a.75.75 0 01.75-.75h8.5a.75.75 0 010 1.5h-8.5a.75.75 0 01-.75-.75zM5.5 12a.75.75 0 00-1.5 0v2.75A2.75 2.75 0 006.75 17h6.5A2.75 2.75 0 0016 14.75V12a.75.75 0 00-1.5 0v2.75a1.25 1.25 0 01-1.25 1.25h-6.5a1.25 1.25 0 01-1.25-1.25V12z" clip-rule="evenodd" /></svg><span class="category-name flex-grow">回收站</span></div><hr class="my-2"><div id="nav-item-maintenance" data-view="maintenance" class="nav-item flex items-center gap-3 p-2 rounded cursor-pointer hover:bg-gray-100"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 text-slate-500"><path d="M10.75 3.562l-3.34-1.928A1.25 1.25 0 005.75 2.75v3.5a1.25 1.25 0 001.66 1.118l3.34-1.928a1.25 1.25 0 000-2.236z"></path><path d="M10.75 9.562l-3.34-1.928A1.25 1.25 0 005.75 8.75v3.5a1.25 1.25 0 001.66 1.118l3.34-1.928a1.25 1.25 0 000-2.236z"></path><path d="M10.75 15.562l-3.34-1.928A1.25 1.25 0 005.75 14.75v3.5a1.25 1.25 0 001.66 1.118l3.34-1.928a1.25 1.25 0 000-2.236z"></path><path d="M14.25 5.25a.75.75 0 000 1.5h.01a.75.75 0 000-1.5h-.01zM12.75 7.5a.75.75 0 01.75-.75h.01a.75.75 0 010 1.5h-.01a.75.75 0 01-.75-.75zM14.25 11.25a.75.75 0 000 1.5h.01a.75.75 0 000-1.5h-.01zM12.75 13.5a.75.75 0 01.75-.75h.01a.75.75 0 010 1.5h-.01a.75.75 0 01-.75-.75zM14.25 17.25a.75.75 0 000 1.5h.01a.75.75 0 000-1.5h-.01zM12.75 19.5a.75.75 0 01.75-.75h.01a.75.75 0 010 1.5h-.01a.75.75 0 01-.75-.75z"></path></svg><span class="category-name flex-grow">空间清理</span></div></div></section>
+            <section class="bg-white p-6 rounded-lg shadow-md"><h2 class="text-xl font-semibold mb-4">图库</h2><div id="navigation-list" class="space-y-1"><div id="nav-item-all" data-view="all" class="nav-item flex items-center gap-3 p-2 rounded cursor-pointer hover:bg-gray-100 active"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 text-slate-500"><path fill-rule="evenodd" d="M1 5.25A2.25 2.25 0 013.25 3h13.5A2.25 2.25 0 0119 5.25v9.5A2.25 2.25 0 0116.75 17H3.25A2.25 2.25 0 011 14.75v-9.5zm1.5 5.81v3.69c0 .414.336.75.75.75h13.5a.75.75 0 00.75-.75v-3.69l-2.72-2.72a.75.75 0 00-1.06 0L11.5 10l-1.72-1.72a.75.75 0 00-1.06 0l-4 4zM12.5 7a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z" clip-rule="evenodd" /></svg><span class="category-name flex-grow">所有图片</span></div><div id="category-dynamic-list"></div><hr class="my-2"><div id="nav-item-recycle-bin" data-view="recycle_bin" class="nav-item flex items-center gap-3 p-2 rounded cursor-pointer hover:bg-gray-100"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 text-slate-500"><path fill-rule="evenodd" d="M8.75 1A2.75 2.75 0 006 3.75V4.5h8V3.75A2.75 2.75 0 0011.25 1h-2.5zM10 4.5a.75.75 0 00-1.5 0v.75h1.5v-.75zM4.75 6.25A.75.75 0 015.5 5.5h9a.75.75 0 01.75.75v9a.75.75 0 01-.75.75h-9a.75.75 0 01-.75-.75v-9zM5.5 6.25v9h9v-9h-9z" clip-rule="evenodd" /></svg><span class="category-name flex-grow">回收站</span></div><hr class="my-2"><div id="nav-item-maintenance" data-view="maintenance" class="nav-item flex items-center gap-3 p-2 rounded cursor-pointer hover:bg-gray-100"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 text-slate-500"><path fill-rule="evenodd" d="M5.5 2A.5.5 0 005 2.5v1.75a.75.75 0 01-1.5 0V2.5A2 2 0 015.5 0h9a2 2 0 012 2v.75a.75.75 0 01-1.5 0V2a.5.5 0 00-.5-.5h-9z" clip-rule="evenodd" /><path fill-rule="evenodd" d="M3.165 4.522A.75.75 0 014.25 5h11.5a.75.75 0 010 1.5H4.25a.75.75 0 01-1.085-.68l-.25-2.5a.75.75 0 01.25-.822l1-1a.75.75 0 011.06 0l.22.22a.75.75 0 01-1.06 1.06l-.22-.22-.25 2.5z" clip-rule="evenodd" /><path d="M4.146 11.47a.75.75 0 01.21-.53l4.25-4.25a.75.75 0 111.06 1.06l-4.25 4.25a.75.75 0 01-1.27-.53zM12.25 14a.75.75 0 00-1.5 0v.25a.75.75 0 001.5 0v-.25zM10.75 16a.75.75 0 01.75-.75h.01a.75.75 0 010 1.5h-.01a.75.75 0 01-.75-.75zM14.25 16a.75.75 0 00-1.5 0v.25a.75.75 0 001.5 0v-.25zM12.75 18a.75.75 0 01.75-.75h.01a.75.75 0 010 1.5h-.01a.75.75 0 01-.75-.75z" /></svg><span class="category-name flex-grow">空间清理</span></div></div></section>
             <section class="bg-white p-6 rounded-lg shadow-md"><h2 class="text-xl font-semibold mb-4">安全</h2><div id="security-section"></div></section>
         </div>
         <section id="image-list-section" class="bg-white p-6 rounded-lg shadow-md xl:col-span-8">
@@ -1043,7 +1048,7 @@ cat << 'EOF' > public/admin.html
                 <h2 id="image-list-header" class="text-xl font-semibold text-slate-900 flex-shrink-0"></h2>
                 <div class="flex-grow flex flex-col sm:flex-row items-center gap-4 w-full">
                     <div id="view-controls" class="flex items-center gap-2">
-                        <button id="bulk-select-btn" class="flex items-center gap-1.5 px-3 py-1.5 border rounded-md text-sm hover:bg-slate-100"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5"><path fill-rule="evenodd" d="M10 2a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 0110 2zM8.06 4.94a.75.75 0 010-1.06l1.5-1.5a.75.75 0 011.06 0l1.5 1.5a.75.75 0 01-1.06 1.06L10 3.94 8.06 4.94zM5.75 6.75a.75.75 0 01.75-.75h7.5a.75.75 0 010 1.5h-7.5a.75.75 0 01-.75-.75zM5 10a.75.75 0 01.75-.75h4.5a.75.75 0 010 1.5h-4.5A.75.75 0 015 10zm0 3.75a.75.75 0 01.75-.75h4.5a.75.75 0 010 1.5h-4.5a.75.75 0 01-.75-.75zM14.25 9.25a.75.75 0 000 1.5h.01a.75.75 0 000-1.5h-.01zM14.25 13a.75.75 0 000 1.5h.01a.75.75 0 000-1.5h-.01z" /><path fill-rule="evenodd" d="M3.5 1.75C2.672 1.75 2 2.422 2 3.25v13.5C2 17.578 2.672 18.25 3.5 18.25h13c.828 0 1.5-.672 1.5-1.5V3.25c0-.828-.672-1.5-1.5-1.5h-13zM3.5 3.25a.01.01 0 000 .01v13.5c0 .005.004.01.01.01h12.98a.01.01 0 00.01-.01V3.26a.01.01 0 000-.01H3.5z" clip-rule="evenodd" /></svg>批量选择</button>
+                        <button id="bulk-select-btn" title="批量选择" class="flex items-center gap-1.5 px-3 py-1.5 border rounded-md text-sm hover:bg-slate-100"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5"><path fill-rule="evenodd" d="M10 2a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 0110 2zM8.06 4.94a.75.75 0 010-1.06l1.5-1.5a.75.75 0 011.06 0l1.5 1.5a.75.75 0 01-1.06 1.06L10 3.94 8.06 4.94zM5.75 6.75a.75.75 0 01.75-.75h7.5a.75.75 0 010 1.5h-7.5a.75.75 0 01-.75-.75zM5 10a.75.75 0 01.75-.75h4.5a.75.75 0 010 1.5h-4.5A.75.75 0 015 10zm0 3.75a.75.75 0 01.75-.75h4.5a.75.75 0 010 1.5h-4.5a.75.75 0 01-.75-.75zm8.5-4.5a.75.75 0 000 1.5h.01a.75.75 0 000-1.5h-.01zM13.5 13a.75.75 0 000 1.5h.01a.75.75 0 000-1.5h-.01z" clip-rule="evenodd" /><path fill-rule="evenodd" d="M3.5 1.75C2.672 1.75 2 2.422 2 3.25v13.5C2 17.578 2.672 18.25 3.5 18.25h13c.828 0 1.5-.672 1.5-1.5V3.25c0-.828-.672-1.5-1.5-1.5h-13zM3.5 3.25a.01.01 0 000 .01v13.5c0 .005.004.01.01.01h12.98a.01.01 0 00.01-.01V3.26a.01.01 0 000-.01H3.5z" clip-rule="evenodd" /></svg><span class="hidden sm:inline">批量选择</span></button>
                         <button id="bulk-cancel-btn" class="flex items-center gap-1.5 px-3 py-1.5 border rounded-md text-sm bg-red-100 text-red-700 hover:bg-red-200"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5"><path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"></path></svg>取消</button>
                         <div id="select-all-container" class="items-center gap-2 pl-2">
                             <input type="checkbox" id="select-all-checkbox" class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
@@ -1184,6 +1189,7 @@ cat << 'EOF' > public/admin.html
                 createButton('bulk-restore-btn', '批量恢复', 'bg-blue-600 hover:bg-blue-700 text-white');
                 createButton('bulk-purge-btn', '批量彻底删除', 'bg-red-700 hover:bg-red-800 text-white');
             } else {
+                createButton('bulk-description-btn', '修改描述', 'bg-sky-500 hover:bg-sky-600 text-white');
                 createButton('bulk-recategorize-btn', '修改分类', 'bg-yellow-500 hover:bg-yellow-600 text-white');
                 createButton('bulk-delete-btn', '移至回收站', 'bg-red-600 hover:bg-red-700 text-white');
             }
@@ -1198,9 +1204,10 @@ cat << 'EOF' > public/admin.html
             try {
                 await apiRequest('/api/admin/images/bulk-action', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, ids, payload }) });
                 showToast(`批量操作成功！`);
-                ids.forEach(id => { const card = DOMElements.imageList.querySelector(`.admin-image-item[data-id="${id}"]`); if (card) { card.classList.add('fading-out'); setTimeout(() => card.remove(), 400); } });
+                // No automatic fade out; just reload the data to show changes
                 resetSelection();
-                setTimeout(() => changePage(currentAdminPage, false), 500); // Don't reset page number
+                toggleSelectMode(true); // Exit select mode after action
+                changePage(currentAdminPage, false); // Reload current page
             } catch (error) { showToast(`批量操作失败: ${error.message}`, 'error'); }
         };
         
@@ -1435,6 +1442,20 @@ cat << 'EOF' > public/admin.html
                 case 'bulk-restore-btn': { const c = await showConfirmationModal('批量恢复', `<p>确定要恢复选中的 <strong>${selectedImageIds.size}</strong> 张图片吗？</p>`, '确认恢复'); if (c) performBulkAction('restore'); break; }
                 case 'bulk-purge-btn': { const c = await showConfirmationModal('批量彻底删除', `<p>确定要永久删除选中的 <strong>${selectedImageIds.size}</strong> 张图片吗？<br><strong>此操作无法撤销！</strong></p>`, '确认删除'); if (c) performBulkAction('purge'); break; }
                 case 'bulk-recategorize-btn': { const r = await apiRequest('/api/categories'); const c = await r.json(); let o = c.map(cat => `<option value="${cat}">${cat}</option>`).join(''); showGenericModal('批量修改分类', `<form id="recategorize-form"><p class="mb-2 text-sm">为选中的 ${selectedImageIds.size} 张图片选择一个新的分类：</p><select id="bulk-category-select" class="w-full border rounded px-3 py-2">${o}</select></form>`, '<button type="button" class="modal-cancel-btn bg-gray-300 hover:bg-gray-400 text-black py-2 px-4 rounded">取消</button><button type="submit" form="recategorize-form" class="bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded">应用</button>'); document.getElementById('recategorize-form').onsubmit = (ev) => { ev.preventDefault(); const newCategory = document.getElementById('bulk-category-select').value; hideModal(DOMElements.genericModal); performBulkAction('recategorize', { newCategory }); }; DOMElements.genericModal.querySelector('.modal-cancel-btn').onclick = () => hideModal(DOMElements.genericModal); break; }
+                case 'bulk-description-btn': {
+                    showGenericModal('批量修改描述', '<form id="desc-form"><p class="text-sm mb-2">输入新描述，它将【完全覆盖】所有选中图片的现有描述。</p><textarea id="bulk-new-description" class="w-full border rounded p-2" rows="4"></textarea></form>', '<button type="button" class="modal-cancel-btn bg-gray-300 hover:bg-gray-400 text-black py-2 px-4 rounded">取消</button><button type="submit" form="desc-form" class="bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded">应用</button>');
+                    document.getElementById('desc-form').onsubmit = async (ev) => {
+                        ev.preventDefault();
+                        const newDescription = document.getElementById('bulk-new-description').value;
+                        hideModal(DOMElements.genericModal);
+                        const confirmed = await showConfirmationModal('确认覆盖描述', `<p class="text-red-600 font-bold">警告！</p><p>此操作将用新描述【完全覆盖】所有 <strong>${selectedImageIds.size}</strong> 张选中图片的现有描述，旧描述将会丢失。确定要继续吗？</p>`, '确认覆盖', '取消');
+                        if (confirmed) {
+                            performBulkAction('edit_description', { newDescription });
+                        }
+                    };
+                    DOMElements.genericModal.querySelector('.modal-cancel-btn').onclick = () => hideModal(DOMElements.genericModal);
+                    break;
+                }
             }
         });
 
