@@ -1,13 +1,12 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v1.7.3)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v1.7.4)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
-#   v1.7.3 更新:
-#   - 优化(前后台): 优化了图片预览(Lightbox)的加载体验。
-#   - 优化(前后台): 切换图片时，会立即隐藏旧图、显示加载动画并更新计数器，而不是等待新图加载完成。
-#   - 优化(后台): 更换了“空间清理”的图标为更直观的“扫把”图标。
+#   v1.7.4 更新:
+#   - 优化(后台): 修复了后台图片预览(Lightbox)中切换图片时没有加载动画的问题。
+#   - 优化(后台): 现在切换图片会立即隐藏旧图、显示加载动画并更新计数器，而不是等待新图加载完成，提升了操作的流畅度和响应性。
 # =================================================================
 
 # --- 配置 ---
@@ -18,7 +17,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 PROMPT_Y="(${GREEN}y${NC}/${RED}n${NC})"
 
-SCRIPT_VERSION="1.7.3"
+SCRIPT_VERSION="1.7.4"
 APP_NAME="image-gallery"
 
 # --- 路径设置 ---
@@ -45,7 +44,7 @@ overwrite_app_files() {
 cat << 'EOF' > package.json
 {
   "name": "image-gallery-pro",
-  "version": "1.7.3",
+  "version": "1.7.4",
   "description": "A high-performance, full-stack image gallery application with all features.",
   "main": "server.js",
   "scripts": {
@@ -464,7 +463,7 @@ apiAdminRouter.get('/recycle-bin', handleApiError(async (req, res) => {
         case 'name_asc': deletedImages.sort((a, b) => a.originalFilename.localeCompare(b.originalFilename, 'zh-CN')); break;
         case 'name_desc': deletedImages.sort((a, b) => b.originalFilename.localeCompare(a.originalFilename, 'zh-CN')); break;
         case 'size_asc': deletedImages.sort((a, b) => a.size - b.size); break;
-        case 'size_desc': deletedImages.sort((a, b) => b.size - a.size); break;
+        case 'size_desc': deletedImages.sort((a, b) => b.size - b.size); break;
         case 'date_desc': default: deletedImages.sort((a, b) => new Date(b.deletedAt) - new Date(a.deletedAt)); break;
     }
 
@@ -1142,7 +1141,7 @@ cat << 'EOF' > public/admin.html
             bulkSelectBtn: document.getElementById('bulk-select-btn'), bulkCancelBtn: document.getElementById('bulk-cancel-btn'),
             imageListSection: document.getElementById('image-list-section'),
         };
-        let filesToUpload = []; let allLoadedImages = []; let currentImageIndex = 0; let currentSearchTerm = ''; let debounceTimer; let currentAdminPage = 1; let imagePreloader = new Image();
+        let filesToUpload = []; let allLoadedImages = []; let currentImageIndex = 0; let currentSearchTerm = ''; let debounceTimer; let currentAdminPage = 1;
         let selectedImageIds = new Set();
         let isInSelectMode = false;
         let currentViewMode = localStorage.getItem('adminViewMode') || 'grid';
@@ -1549,22 +1548,18 @@ cat << 'EOF' > public/admin.html
             const item = allLoadedImages[currentImageIndex];
             if (!item) return;
 
+            // Immediately hide old image, show spinner, and update text
             DOMElements.lightbox.classList.add('is-loading');
             DOMElements.lightboxImage.classList.remove('loaded');
             DOMElements.lightboxCounter.textContent = `${currentImageIndex + 1} / ${allLoadedImages.length}`;
+            
+            // Update metadata like alt text and download links *before* setting the src
+            updateAdminLightboxContent(item);
 
-            imagePreloader.src = `/image-proxy/${item.filename}`;
-            imagePreloader.onload = () => {
-                DOMElements.lightbox.classList.remove('is-loading');
-                DOMElements.lightboxImage.src = imagePreloader.src;
-                DOMElements.lightboxImage.classList.add('loaded');
-                updateAdminLightboxContent(item);
-            };
-            imagePreloader.onerror = () => {
-                DOMElements.lightbox.classList.remove('is-loading');
-                showToast('无法加载预览图片', 'error');
-            };
+            // Set src to trigger the load, which will be handled by event listeners attached in the init() function
+            DOMElements.lightboxImage.src = `/image-proxy/${item.filename}`;
         };
+
         const showNextImage = () => showImageAtIndex((currentImageIndex + 1) % allLoadedImages.length);
         const showPrevImage = () => showImageAtIndex((currentImageIndex - 1 + allLoadedImages.length) % allLoadedImages.length);
         const closeLightbox = () => { DOMElements.lightbox.classList.remove('active'); document.body.classList.remove('lightbox-open'); };
@@ -1599,6 +1594,17 @@ cat << 'EOF' > public/admin.html
             DOMElements.itemsPerPageSelect.value = itemsPerPage;
             DOMElements.viewToggle.querySelector(`button[data-view="${currentViewMode}"]`).classList.add('bg-slate-200');
             DOMElements.imageList.className = `view-${currentViewMode}`;
+            
+            // Attach lightbox image event handlers
+            DOMElements.lightboxImage.onload = () => {
+                DOMElements.lightbox.classList.remove('is-loading');
+                DOMElements.lightboxImage.classList.add('loaded');
+            };
+            DOMElements.lightboxImage.onerror = () => {
+                DOMElements.lightbox.classList.remove('is-loading');
+                showToast('无法加载预览图片', 'error');
+            };
+
             await Promise.all([refreshNavigation(), renderSecuritySection()]);
             DOMElements.navigationList.querySelector('#nav-item-all').click();
         }
