@@ -1,12 +1,16 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v1.6.0)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v1.7.0)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
-#   v1.6.0 更新:
-#   - 新增(后台): 增加后台图片批量操作功能，包括批量删除、批量修改分类、批量恢复、批量彻底删除。
-#   - 优化(后台): 增加“全选”功能和上下文感知的浮动操作栏，大幅提升管理效率和交互体验。
+#   v1.7.0 更新:
+#   - 新增(后台): 增加排序功能，可按日期、文件名、大小排序。
+#   - 新增(后台): 增加视图切换功能 (网格/列表)。
+#   - 新增(后台): 增加“每页显示数量”控制，并记忆用户选项。
+#   - 新增(后台): 增加“清理冗余文件”的系统维护工具。
+#   - 优化(后台): 引入“选择模式”，默认隐藏复选框，界面更整洁。
+#   - 优化(后台): 卡片和列表视图增加图片尺寸显示。
 # =================================================================
 
 # --- 配置 ---
@@ -17,7 +21,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 PROMPT_Y="(${GREEN}y${NC}/${RED}n${NC})"
 
-SCRIPT_VERSION="1.6.0"
+SCRIPT_VERSION="1.7.0"
 APP_NAME="image-gallery"
 
 # --- 路径设置 ---
@@ -44,7 +48,7 @@ overwrite_app_files() {
 cat << 'EOF' > package.json
 {
   "name": "image-gallery-pro",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": "A high-performance, full-stack image gallery application with all features.",
   "main": "server.js",
   "scripts": {
@@ -176,7 +180,7 @@ app.get('/api/images', handleApiError(async (req, res) => {
     let images = await readDB(dbPath);
     images = images.filter(img => img.status !== 'deleted');
     
-    const { category, search, page = 1, limit = 20 } = req.query;
+    const { category, search, page = 1, limit = 20, sort_by = 'date_desc', sort_order } = req.query; // sort_order is for legacy, use sort_by
 
     if (search) {
         const searchTerm = search.toLowerCase();
@@ -185,10 +189,37 @@ app.get('/api/images', handleApiError(async (req, res) => {
     
     if (category && category !== 'all' && category !== 'random') {
         images = images.filter(img => img.category === category);
-    } else if (category === 'random') {
-        images.sort(() => 0.5 - Math.random());
-    } else {
-        images.sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt));
+    }
+    
+    // Sorting logic
+    switch (sort_by) {
+        case 'date_asc':
+            images.sort((a, b) => new Date(a.uploadedAt) - new Date(b.uploadedAt));
+            break;
+        case 'name_asc':
+            images.sort((a, b) => a.originalFilename.localeCompare(b.originalFilename, 'zh-CN'));
+            break;
+        case 'name_desc':
+            images.sort((a, b) => b.originalFilename.localeCompare(a.originalFilename, 'zh-CN'));
+            break;
+        case 'size_asc':
+            images.sort((a, b) => a.size - b.size);
+            break;
+        case 'size_desc':
+            images.sort((a, b) => b.size - a.size);
+            break;
+        case 'random':
+             images.sort(() => 0.5 - Math.random());
+            break;
+        case 'date_desc':
+        default:
+            images.sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt));
+            break;
+    }
+
+    // Front-end gallery special random case
+    if (category === 'random') {
+         images.sort(() => 0.5 - Math.random());
     }
     
     const pageNum = parseInt(page);
@@ -298,7 +329,8 @@ apiAdminRouter.post('/upload', upload.single('image'), handleApiError(async (req
         originalFilename: originalFilename,
         filename: req.file.filename, 
         size: req.file.size, uploadedAt: new Date().toISOString(),
-        width: metadata.width, height: metadata.height
+        width: metadata.width, height: metadata.height,
+        status: 'active'
     };
     images.unshift(newImage);
     await writeDB(dbPath, images);
@@ -333,15 +365,11 @@ apiAdminRouter.put('/images/:id', handleApiError(async (req, res) => {
     res.json({ message: '更新成功', image: imageToUpdate });
 }));
 
-
-// =========== 新增：批量操作API ===========
 apiAdminRouter.post('/images/bulk-action', handleApiError(async (req, res) => {
     const { action, ids, payload } = req.body;
-
     if (!action || !Array.isArray(ids) || ids.length === 0) {
         return res.status(400).json({ message: '无效的请求：缺少 action 或 ids。' });
     }
-
     let allImages = await readDB(dbPath);
     const idsToProcess = new Set(ids);
     let modified = false;
@@ -350,11 +378,8 @@ apiAdminRouter.post('/images/bulk-action', handleApiError(async (req, res) => {
         const imagesToDelete = allImages.filter(img => idsToProcess.has(img.id));
         for (const image of imagesToDelete) {
             const filePath = path.join(uploadsDir, image.filename);
-            try {
-                await fs.unlink(filePath);
-            } catch (error) {
-                console.error(`永久删除文件失败: ${filePath}`, error);
-            }
+            try { await fs.unlink(filePath); } 
+            catch (error) { console.error(`永久删除文件失败: ${filePath}`, error); }
         }
         allImages = allImages.filter(img => !idsToProcess.has(img.id));
         modified = true;
@@ -368,7 +393,7 @@ apiAdminRouter.post('/images/bulk-action', handleApiError(async (req, res) => {
                         img.deletedAt = new Date().toISOString();
                         break;
                     case 'restore':
-                        delete img.status;
+                        img.status = 'active';
                         delete img.deletedAt;
                         break;
                     case 'recategorize':
@@ -381,14 +406,9 @@ apiAdminRouter.post('/images/bulk-action', handleApiError(async (req, res) => {
         });
     }
 
-    if (modified) {
-        await writeDB(dbPath, allImages);
-    }
-    
+    if (modified) { await writeDB(dbPath, allImages); }
     res.json({ message: `批量操作 '${action}' 已成功完成。` });
 }));
-// ===================================
-
 
 apiAdminRouter.post('/categories', handleApiError(async (req, res) => {
     const { name } = req.body;
@@ -428,7 +448,7 @@ apiAdminRouter.put('/categories', handleApiError(async (req, res) => {
 }));
 
 apiAdminRouter.get('/recycle-bin', handleApiError(async (req, res) => {
-    const { search, page = 1, limit = 12 } = req.query;
+    const { search, page = 1, limit = 12, sort_by = 'date_desc' } = req.query;
     let images = await readDB(dbPath);
     let deletedImages = images.filter(img => img.status === 'deleted');
 
@@ -437,28 +457,29 @@ apiAdminRouter.get('/recycle-bin', handleApiError(async (req, res) => {
         deletedImages = deletedImages.filter(img => (img.originalFilename && img.originalFilename.toLowerCase().includes(searchTerm)) || (img.description && img.description.toLowerCase().includes(searchTerm)));
     }
     
-    deletedImages.sort((a, b) => new Date(b.deletedAt) - new Date(a.deletedAt));
+    switch (sort_by) {
+        case 'date_asc': deletedImages.sort((a, b) => new Date(a.deletedAt) - new Date(b.deletedAt)); break;
+        case 'name_asc': deletedImages.sort((a, b) => a.originalFilename.localeCompare(b.originalFilename, 'zh-CN')); break;
+        case 'name_desc': deletedImages.sort((a, b) => b.originalFilename.localeCompare(a.originalFilename, 'zh-CN')); break;
+        case 'size_asc': deletedImages.sort((a, b) => a.size - b.size); break;
+        case 'size_desc': deletedImages.sort((a, b) => b.size - a.size); break;
+        case 'date_desc': default: deletedImages.sort((a, b) => new Date(b.deletedAt) - new Date(a.deletedAt)); break;
+    }
 
     const pageNum = parseInt(page);
     const limitNum = parseInt(limit);
     const startIndex = (pageNum - 1) * limitNum;
     const endIndex = pageNum * limitNum;
-    
     const paginatedImages = deletedImages.slice(startIndex, endIndex);
     const totalImages = deletedImages.length;
-
-    res.json({
-        images: paginatedImages,
-        page: pageNum,
-        totalPages: Math.ceil(totalImages / limitNum)
-    });
+    res.json({ images: paginatedImages, page: pageNum, totalPages: Math.ceil(totalImages / limitNum), totalImages: totalImages });
 }));
 
 apiAdminRouter.post('/recycle-bin/:id/restore', handleApiError(async (req, res) => {
     let images = await readDB(dbPath);
     const imageIndex = images.findIndex(img => img.id === req.params.id);
     if (imageIndex === -1) return res.status(404).json({ message: '图片未找到' });
-    delete images[imageIndex].status;
+    images[imageIndex].status = 'active';
     delete images[imageIndex].deletedAt;
     await writeDB(dbPath, images);
     res.json({ message: '图片已成功恢复' });
@@ -468,14 +489,59 @@ apiAdminRouter.delete('/recycle-bin/:id/purge', handleApiError(async (req, res) 
     let images = await readDB(dbPath);
     const imageToDelete = images.find(img => img.id === req.params.id);
     if (!imageToDelete) return res.status(404).json({ message: '图片未找到' });
-    
     const filePath = path.join(uploadsDir, imageToDelete.filename);
     try { await fs.unlink(filePath); } catch (error) { console.error(`删除文件失败: ${filePath}`, error); }
-    
     const updatedImages = images.filter(img => img.id !== req.params.id);
     await writeDB(dbPath, updatedImages);
     res.json({ message: '图片已永久删除' });
 }));
+
+// =========== 新增：系统维护API ===========
+apiAdminRouter.get('/maintenance/find-orphans', handleApiError(async (req, res) => {
+    const allFiles = await fs.readdir(uploadsDir);
+    const imagesDb = await readDB(dbPath);
+    const dbFilenames = new Set(imagesDb.map(img => img.filename));
+    const orphanFiles = allFiles.filter(file => !dbFilenames.has(file));
+    
+    const orphanDetails = [];
+    for (const file of orphanFiles) {
+        try {
+            const stats = await fs.stat(path.join(uploadsDir, file));
+            orphanDetails.push({
+                filename: file,
+                size: stats.size,
+                createdAt: stats.birthtime
+            });
+        } catch (e) {
+             console.error(`无法获取文件信息: ${file}`, e);
+        }
+    }
+    res.json(orphanDetails);
+}));
+
+apiAdminRouter.post('/maintenance/delete-orphans', handleApiError(async (req, res) => {
+    const { filenames } = req.body;
+    if (!Array.isArray(filenames) || filenames.length === 0) {
+        return res.status(400).json({ message: '未提供文件名。' });
+    }
+    let deletedCount = 0;
+    let errors = [];
+    for (const filename of filenames) {
+        // 安全检查: 确保文件名不包含路径遍历字符
+        if (filename.includes('..') || filename.includes('/')) {
+            errors.push(`文件名无效: ${filename}`);
+            continue;
+        }
+        try {
+            await fs.unlink(path.join(uploadsDir, filename));
+            deletedCount++;
+        } catch (error) {
+            errors.push(`无法删除 ${filename}: ${error.message}`);
+        }
+    }
+    res.json({ message: `操作完成。成功删除 ${deletedCount} 个文件。`, errors: errors });
+}));
+// ===================================
 
 apiAdminRouter.get('/2fa/status', handleApiError(async(req, res) => {
     appConfig = await readDB(configPath, {});
@@ -509,7 +575,6 @@ apiAdminRouter.post('/2fa/disable', handleApiError(async (req, res) => {
     await writeDB(configPath, appConfig);
     res.json({ message: '2FA 已禁用。' });
 }));
-
 
 app.use('/api/admin', apiAdminRouter);
 app.use(express.static(path.join(__dirname, 'public')));
@@ -605,7 +670,6 @@ cat << 'EOF' > public/index.html
         .lightbox .spinner { border-color: rgba(255,255,255,0.2); border-top-color: rgba(255,255,255,0.8); display: none; }
         .lightbox.is-loading .spinner { display: block; }
 
-
         .image-placeholder img { display: block; width: 100%; height: auto; opacity: 0; transition: opacity 0.4s ease-in-out, transform 0.3s ease-in-out; }
         .image-placeholder img.loaded { opacity: 1; }
 
@@ -693,7 +757,7 @@ cat << 'EOF' > public/index.html
             isLoading = true;
             loader.classList.remove('hidden');
             try {
-                const url = `/api/images?page=${currentPage}&limit=20&category=${currentFilter}&search=${encodeURIComponent(currentSearch)}`;
+                const url = `/api/images?page=${currentPage}&limit=20&category=${currentFilter}&search=${encodeURIComponent(currentSearch)}&sort_by=date_desc`;
                 const data = await fetchJSON(url);
                 if (data.images && data.images.length > 0) {
                     const itemsFragment = renderItems(data.images);
@@ -888,68 +952,47 @@ cat << 'EOF' > public/admin.html
         .toast { position: fixed; top: 1.5rem; right: 1.5rem; z-index: 9999; transform: translateX(120%); transition: transform 0.3s ease-in-out; } 
         .toast.show { transform: translateX(0); } 
         .file-preview-item.upload-success { background-color: #f0fdf4; } 
-        .file-preview-item.upload-error { background-color: #fef2f2; } 
-        .admin-image-card { position: relative; transition: opacity 0.4s ease, transform 0.4s ease; height: 20rem; /* 320px */ }
-        .admin-image-card.fading-out { opacity: 0; transform: scale(0.95); }
-        .admin-image-card .bulk-checkbox {
-            position: absolute;
-            top: 0.75rem;
-            left: 0.75rem;
-            z-index: 10;
-            width: 1.25rem;
-            height: 1.25rem;
-            border-radius: 0.25rem;
-            cursor: pointer;
-        }
-        
-        .description-clamp {
-            display: -webkit-box;
-            -webkit-box-orient: vertical;
-            -webkit-line-clamp: 3;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
+        .file-preview-item.upload-error { background-color: #fef2f2; }
 
-        .image-preview-container {
-            height: 9rem; /* 144px */
-            background-color: #f1f5f9;
-            border-radius: 0.25rem;
-            overflow: hidden;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            position: relative;
+        /* General Item Styles */
+        .admin-image-item { position: relative; transition: opacity 0.4s ease, transform 0.4s ease; background-color: white; border-radius: 0.5rem; box-shadow: 0 1px 3px 0 rgba(0,0,0,.1), 0 1px 2px -1px rgba(0,0,0,.1); overflow: hidden; }
+        .admin-image-item.fading-out { opacity: 0; transform: scale(0.95); }
+        .admin-image-item .bulk-checkbox {
+            display: none; /* Hidden by default, shown in select-mode */
+            position: absolute; top: 0.75rem; left: 0.75rem; z-index: 10;
+            width: 1.25rem; height: 1.25rem; border-radius: 0.25rem; cursor: pointer;
         }
-        .image-preview-container img {
-            width: 100%;
-            height: 100%;
-            object-fit: contain;
-            opacity: 0;
-            transition: opacity 0.4s ease-in-out;
-        }
-        .image-preview-container img.loaded { opacity: 1; }
-        .card-spinner {
-            position: absolute;
-            width: 1.5rem; height: 1.5rem;
-            border: 3px solid rgba(0,0,0,0.1);
-            border-top-color: #16a34a;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-        }
+        .select-mode-active .bulk-checkbox { display: block; }
+        
+        .description-clamp { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; text-overflow: ellipsis; }
+
+        .card-spinner { position: absolute; width: 1.5rem; height: 1.5rem; border: 3px solid rgba(0,0,0,0.1); border-top-color: #16a34a; border-radius: 50%; animation: spin 1s linear infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
 
-        .page-item {
-            transition: all 0.2s ease-in-out;
-        }
-        .page-item.active {
-            background-color: #15803d;
-            color: white;
-            border-color: #14532d;
-            font-weight: 700;
-            transform: scale(1.1);
-            z-index: 10;
-        }
+        /* View-specific styles */
+        #image-list.view-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 1rem; }
+        #image-list.view-list { display: flex; flex-direction: column; gap: 0.5rem; }
+
+        /* Grid View Item */
+        .admin-image-item.is-grid { display: flex; flex-direction: column; }
+        .admin-image-item.is-grid .image-preview-container { height: 9rem; /* 144px */ }
+        .admin-image-item.is-grid .image-info-wrapper { padding: 0.75rem; flex-grow: 1; display: flex; flex-direction: column; min-h-0; }
+        
+        /* List View Item */
+        .admin-image-item.is-list { display: flex; align-items: center; padding: 0.5rem; gap: 1rem; }
+        .admin-image-item.is-list .image-preview-container { height: 4rem; width: 4rem; flex-shrink: 0; }
+        .admin-image-item.is-list .image-info-wrapper { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 1rem; flex-grow: 1; align-items: center; }
+        .admin-image-item.is-list .info-col-1 { overflow: hidden; }
+        .admin-image-item.is-list .info-col-2, .admin-image-item.is-list .info-col-3 { font-size: 0.875rem; color: #475569; }
+        .admin-image-item.is-list .action-buttons { margin-left: auto; flex-shrink: 0; }
+        .admin-image-item.is-list .bulk-checkbox { top: 50%; transform: translateY(-50%); }
+
+        .image-preview-container { background-color: #f1f5f9; border-radius: 0.25rem; overflow: hidden; display: flex; align-items: center; justify-content: center; cursor: pointer; position: relative; }
+        .image-preview-container img { width: 100%; height: 100%; object-fit: contain; opacity: 0; transition: opacity 0.4s ease-in-out; }
+        .image-preview-container img.loaded { opacity: 1; }
+
+        .page-item { transition: all 0.2s ease-in-out; }
+        .page-item.active { background-color: #15803d; color: white; border-color: #14532d; font-weight: 700; transform: scale(1.1); z-index: 10; }
 
         .lightbox { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.9); display: none; justify-content: center; align-items: center; z-index: 1000; opacity: 0; visibility: hidden; transition: opacity 0.3s ease; }
         .lightbox.active { opacity: 1; visibility: visible; }
@@ -966,42 +1009,24 @@ cat << 'EOF' > public/admin.html
         .lb-download { background-color: #22c55e; } .lb-download:hover { background-color: #16a34a; }
         .lb-delete { background-color: #ef4444; } .lb-delete:hover { background-color: #dc2626; }
 
-        #image-list-section {
-            display: flex;
-            flex-direction: column;
-            max-height: calc(100vh - 12rem); /* Adjust based on header/footer height */
-        }
-        #image-list {
-            flex-grow: 1;
-            overflow-y: auto;
-        }
-        #pagination-container {
-            flex-shrink: 0;
-            position: sticky;
-            bottom: 0;
-            background: rgba(255, 255, 255, 0.85);
-            backdrop-filter: blur(4px);
-            padding: 1rem 0;
-            border-top: 1px solid #e2e8f0;
-        }
+        #image-list-section { display: flex; flex-direction: column; height: calc(100vh - 12rem); }
+        #image-list-wrapper { flex-grow: 1; overflow-y: auto; padding: 0.25rem; }
+        #pagination-container { flex-shrink: 0; position: sticky; bottom: 0; background: rgba(255, 255, 255, 0.85); backdrop-filter: blur(4px); padding: 1rem 0; border-top: 1px solid #e2e8f0; }
         
-        /* 新增：批量操作浮动栏样式 */
+        /* Bulk Action Bar */
         #bulk-action-bar {
-            position: fixed;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            z-index: 25;
-            background-color: rgba(17, 24, 39, 0.95);
-            backdrop-filter: blur(8px);
-            color: white;
-            transform: translateY(100%);
-            transition: transform 0.3s ease-in-out;
+            position: fixed; bottom: 0; left: 0; right: 0; z-index: 25;
+            background-color: rgba(17, 24, 39, 0.95); backdrop-filter: blur(8px); color: white;
+            transform: translateY(100%); transition: transform 0.3s ease-in-out;
             box-shadow: 0 -4px 6px -1px rgb(0 0 0 / 0.1), 0 -2px 4px -2px rgb(0 0 0 / 0.1);
         }
-        #bulk-action-bar.visible {
-            transform: translateY(0);
-        }
+        #bulk-action-bar.visible { transform: translateY(0); }
+        
+        /* Select mode specific UI changes */
+        #select-all-container, #bulk-cancel-btn { display: none; }
+        .select-mode-active #select-all-container, .select-mode-active #bulk-cancel-btn { display: flex; }
+        .select-mode-active #bulk-select-btn { display: none; }
+
     </style>
 </head>
 <body class="antialiased text-slate-800">
@@ -1015,25 +1040,50 @@ cat << 'EOF' > public/admin.html
     <main class="container mx-auto p-4 md:p-6 grid grid-cols-1 xl:grid-cols-12 gap-8">
         <div class="xl:col-span-4 space-y-8">
             <section id="upload-section" class="bg-white p-6 rounded-lg shadow-md"><h2 class="text-xl font-semibold mb-4">上传新图片</h2><form id="upload-form" class="space-y-4"><div><label for="image-input" id="drop-zone" class="w-full flex flex-col items-center justify-center p-6 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors"><svg class="w-10 h-10 mb-3 text-gray-400" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 20 16"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 13h3a3 3 0 0 0 0-6h-.025A5.56 5.56 0 0 0 16 6.5 5.5 5.5 0 0 0 5.207 5.021C5.137 5.017 5.071 5 5 5a4 4 0 0 0 0 8h2.167M10 15V6m0 0L8 8m2-2 2 2"/></svg><p class="text-sm text-gray-500"><span class="font-semibold">点击选择</span> 或拖拽多个文件到此处</p><input id="image-input" type="file" class="hidden" multiple accept="image/*"/></label></div><div class="space-y-2"><label for="unified-description" class="block text-sm font-medium">统一描述 (可选)</label><textarea id="unified-description" rows="2" class="w-full text-sm border rounded px-2 py-1" placeholder="在此处填写可应用到所有未填写描述的图片"></textarea></div><div id="file-preview-container" class="hidden space-y-2"><div id="upload-summary" class="text-sm font-medium text-slate-600"></div><div id="file-preview-list" class="h-48 border rounded p-2 space-y-3" style="overflow: auto; resize: vertical;"></div></div><div><label for="category-select" class="block text-sm font-medium mb-1">设置分类</label><div class="flex items-center space-x-2"><select name="category" id="category-select" required class="w-full border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-500"></select><button type="button" id="add-category-btn" class="flex-shrink-0 bg-green-500 hover:bg-green-600 text-white font-bold w-9 h-9 rounded-full flex items-center justify-center text-xl" title="添加新分类">+</button></div></div><button type="submit" id="upload-btn" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg transition-colors disabled:bg-gray-400" disabled>上传文件</button></form></section>
-            <section class="bg-white p-6 rounded-lg shadow-md"><h2 class="text-xl font-semibold mb-4">图库</h2><div id="navigation-list" class="space-y-1"><div id="nav-item-all" data-view="all" class="nav-item flex items-center gap-3 p-2 rounded cursor-pointer hover:bg-gray-100 active"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 text-slate-500"><path fill-rule="evenodd" d="M1 5.25A2.25 2.25 0 013.25 3h13.5A2.25 2.25 0 0119 5.25v9.5A2.25 2.25 0 0116.75 17H3.25A2.25 2.25 0 011 14.75v-9.5zm1.5 5.81v3.69c0 .414.336.75.75.75h13.5a.75.75 0 00.75-.75v-3.69l-2.72-2.72a.75.75 0 00-1.06 0L11.5 10l-1.72-1.72a.75.75 0 00-1.06 0l-4 4zM12.5 7a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z" clip-rule="evenodd" /></svg><span class="category-name flex-grow">所有图片</span></div><div id="category-dynamic-list"></div><hr class="my-2"><div id="nav-item-recycle-bin" data-view="recycle_bin" class="nav-item flex items-center gap-3 p-2 rounded cursor-pointer hover:bg-gray-100"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 text-slate-500"><path fill-rule="evenodd" d="M8.75 1A2.75 2.75 0 006 3.75V4.5h8V3.75A2.75 2.75 0 0011.25 1h-2.5zM10 4.5a.75.75 0 00-1.5 0v.75h1.5v-.75zM15.25 6H4.75a.75.75 0 000 1.5h10.5a.75.75 0 000-1.5zM4.75 9.75a.75.75 0 01.75-.75h8.5a.75.75 0 010 1.5h-8.5a.75.75 0 01-.75-.75zM5.5 12a.75.75 0 00-1.5 0v2.75A2.75 2.75 0 006.75 17h6.5A2.75 2.75 0 0016 14.75V12a.75.75 0 00-1.5 0v2.75a1.25 1.25 0 01-1.25 1.25h-6.5a1.25 1.25 0 01-1.25-1.25V12z" clip-rule="evenodd" /></svg><span class="category-name flex-grow">回收站</span></div></div></section>
+            <section class="bg-white p-6 rounded-lg shadow-md"><h2 class="text-xl font-semibold mb-4">图库</h2><div id="navigation-list" class="space-y-1"><div id="nav-item-all" data-view="all" class="nav-item flex items-center gap-3 p-2 rounded cursor-pointer hover:bg-gray-100 active"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 text-slate-500"><path fill-rule="evenodd" d="M1 5.25A2.25 2.25 0 013.25 3h13.5A2.25 2.25 0 0119 5.25v9.5A2.25 2.25 0 0116.75 17H3.25A2.25 2.25 0 011 14.75v-9.5zm1.5 5.81v3.69c0 .414.336.75.75.75h13.5a.75.75 0 00.75-.75v-3.69l-2.72-2.72a.75.75 0 00-1.06 0L11.5 10l-1.72-1.72a.75.75 0 00-1.06 0l-4 4zM12.5 7a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z" clip-rule="evenodd" /></svg><span class="category-name flex-grow">所有图片</span></div><div id="category-dynamic-list"></div><hr class="my-2"><div id="nav-item-recycle-bin" data-view="recycle_bin" class="nav-item flex items-center gap-3 p-2 rounded cursor-pointer hover:bg-gray-100"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 text-slate-500"><path fill-rule="evenodd" d="M8.75 1A2.75 2.75 0 006 3.75V4.5h8V3.75A2.75 2.75 0 0011.25 1h-2.5zM10 4.5a.75.75 0 00-1.5 0v.75h1.5v-.75zM15.25 6H4.75a.75.75 0 000 1.5h10.5a.75.75 0 000-1.5zM4.75 9.75a.75.75 0 01.75-.75h8.5a.75.75 0 010 1.5h-8.5a.75.75 0 01-.75-.75zM5.5 12a.75.75 0 00-1.5 0v2.75A2.75 2.75 0 006.75 17h6.5A2.75 2.75 0 0016 14.75V12a.75.75 0 00-1.5 0v2.75a1.25 1.25 0 01-1.25 1.25h-6.5a1.25 1.25 0 01-1.25-1.25V12z" clip-rule="evenodd" /></svg><span class="category-name flex-grow">回收站</span></div><hr class="my-2"><div id="nav-item-maintenance" data-view="maintenance" class="nav-item flex items-center gap-3 p-2 rounded cursor-pointer hover:bg-gray-100"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 text-slate-500"><path fill-rule="evenodd" d="M11.612 2.32a1 1 0 011.05.21l3.588 3.588a1 1 0 01.21 1.05l-1.488 4.465 4.02 4.02a1.5 1.5 0 01-2.122 2.121l-4.02-4.02L8.384 15.25a1 1 0 01-1.05-.21L3.746 11.45a1 1 0 01-.21-1.05l1.488-4.465-1.741-1.742a1.5 1.5 0 112.121-2.12L9.15 4.793l4.466-1.488a1 1 0 012-.985zM6.559 8.25l-1.23 3.701 3.29 3.29 3.7-1.229-5.76-5.762zM10.5 10.5a2.5 2.5 0 115 0 2.5 2.5 0 01-5 0z" clip-rule="evenodd" /></svg><span class="category-name flex-grow">系统维护</span></div></div></section>
             <section class="bg-white p-6 rounded-lg shadow-md"><h2 class="text-xl font-semibold mb-4">安全</h2><div id="security-section"></div></section>
         </div>
         <section id="image-list-section" class="bg-white p-6 rounded-lg shadow-md xl:col-span-8">
             <div class="flex flex-col md:flex-row justify-between items-center mb-4 gap-4 flex-shrink-0">
-                <div class="flex items-center gap-4 flex-grow">
-                    <h2 id="image-list-header" class="text-xl font-semibold text-slate-900"></h2>
-                    <div id="select-all-container" class="hidden items-center gap-2">
-                        <input type="checkbox" id="select-all-checkbox" class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
-                        <label for="select-all-checkbox" class="text-sm text-slate-600">全选当前页</label>
+                <h2 id="image-list-header" class="text-xl font-semibold text-slate-900 flex-shrink-0"></h2>
+                <div class="flex-grow flex flex-col sm:flex-row items-center gap-4 w-full">
+                    <div id="view-controls" class="flex items-center gap-2">
+                        <button id="bulk-select-btn" class="flex items-center gap-1.5 px-3 py-1.5 border rounded-md text-sm hover:bg-slate-100"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5"><path d="M5.75 3a.75.75 0 00-.75.75v12.5c0 .414.336.75.75.75h8.5a.75.75 0 00.75-.75V3.75a.75.75 0 00-.75-.75h-8.5zM4.25 3.75A2.25 2.25 0 016.5 1.5h7A2.25 2.25 0 0115.75 3.75v12.5A2.25 2.25 0 0113.5 18.5h-7A2.25 2.25 0 014.25 16.25V3.75z"></path><path d="M7.563 8.125a.75.75 0 01.043 1.06l-1.25 1.5a.75.75 0 01-1.106-1.018l1.25-1.5a.75.75 0 011.063-.042zM12 8.25a.75.75 0 01.75.75v5a.75.75 0 01-1.5 0v-5a.75.75 0 01.75-.75z"></path></svg>批量选择</button>
+                        <button id="bulk-cancel-btn" class="flex items-center gap-1.5 px-3 py-1.5 border rounded-md text-sm bg-red-100 text-red-700 hover:bg-red-200"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5"><path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"></path></svg>取消</button>
+                        <div id="select-all-container" class="items-center gap-2 pl-2">
+                            <input type="checkbox" id="select-all-checkbox" class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
+                            <label for="select-all-checkbox" class="text-sm text-slate-600">全选</label>
+                        </div>
+                    </div>
+                    <div class="w-full md:w-64 ml-auto">
+                        <input type="search" id="search-input" placeholder="在当前视图下搜索..." class="w-full border rounded-full px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
                     </div>
                 </div>
-                <div class="w-full md:w-64">
-                    <input type="search" id="search-input" placeholder="在当前视图下搜索..." class="w-full border rounded-full px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
+                <div class="flex items-center gap-4 flex-shrink-0">
+                    <select id="sort-select" class="border rounded-md px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
+                        <option value="date_desc">日期最新</option><option value="date_asc">日期最老</option>
+                        <option value="name_asc">名称 A-Z</option><option value="name_desc">名称 Z-A</option>
+                        <option value="size_desc">最大</option><option value="size_asc">最小</option>
+                    </select>
+                    <div id="view-toggle" class="flex items-center border rounded-md">
+                        <button data-view="grid" class="p-1.5" title="网格视图"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5"><path fill-rule="evenodd" d="M4.25 2A2.25 2.25 0 002 4.25v2.5A2.25 2.25 0 004.25 9h2.5A2.25 2.25 0 009 6.75v-2.5A2.25 2.25 0 006.75 2h-2.5zm0 9A2.25 2.25 0 002 13.25v2.5A2.25 2.25 0 004.25 18h2.5A2.25 2.25 0 009 15.75v-2.5A2.25 2.25 0 006.75 11h-2.5zm9-9A2.25 2.25 0 0011 4.25v2.5A2.25 2.25 0 0013.25 9h2.5A2.25 2.25 0 0018 6.75v-2.5A2.25 2.25 0 0015.75 2h-2.5zM13.25 11a2.25 2.25 0 00-2.25 2.25v2.5a2.25 2.25 0 002.25 2.25h2.5a2.25 2.25 0 002.25-2.25v-2.5a2.25 2.25 0 00-2.25-2.25h-2.5z" clip-rule="evenodd"></path></svg></button>
+                        <button data-view="list" class="p-1.5" title="列表视图"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5"><path d="M3 4.75A.75.75 0 013.75 4h12.5a.75.75 0 010 1.5H3.75A.75.75 0 013 4.75zM3 9.75A.75.75 0 013.75 9h12.5a.75.75 0 010 1.5H3.75A.75.75 0 013 9.75zM3 14.75A.75.75 0 013.75 14h12.5a.75.75 0 010 1.5H3.75A.75.75 0 013 14.75z"></path></svg></button>
+                    </div>
                 </div>
             </div>
-            <div id="image-list" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4"></div>
-            <div id="image-loader" class="text-center py-8 text-slate-500 hidden">正在加载...</div>
-            <div id="pagination-container" class="mt-auto flex justify-center"></div>
+            <div id="image-list-wrapper">
+                <div id="image-list"></div>
+                <div id="image-loader" class="text-center py-8 text-slate-500 hidden">正在加载...</div>
+                 <div id="maintenance-view" class="hidden p-4"></div>
+            </div>
+            <div id="pagination-container" class="mt-auto flex justify-center items-center gap-4">
+                <div id="items-per-page-container">
+                    <select id="items-per-page-select" class="border rounded-md px-2 py-1 text-sm focus:outline-none">
+                        <option value="12">12 / 页</option><option value="24">24 / 页</option><option value="48">48 / 页</option><option value="96">96 / 页</option>
+                    </select>
+                </div>
+                <div id="page-links-container"></div>
+            </div>
         </section>
     </main>
     <div id="generic-modal" class="modal fixed inset-0 bg-black bg-opacity-50 items-center justify-center z-30 p-4"><div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-sm"><h3 id="modal-title" class="text-lg font-bold mb-4"></h3><div id="modal-body" class="mb-4 text-slate-600"></div><div id="modal-footer" class="flex justify-end space-x-2"></div></div></div>
@@ -1074,45 +1124,35 @@ cat << 'EOF' > public/admin.html
             categoryDynamicList: document.getElementById('category-dynamic-list'), imageList: document.getElementById('image-list'), imageListHeader: document.getElementById('image-list-header'),
             imageLoader: document.getElementById('image-loader'), searchInput: document.getElementById('search-input'), genericModal: document.getElementById('generic-modal'),
             editImageModal: document.getElementById('edit-image-modal'), editImageForm: document.getElementById('edit-image-form'), securitySection: document.getElementById('security-section'), tfaModal: document.getElementById('tfa-modal'),
-            paginationContainer: document.getElementById('pagination-container'),
+            paginationContainer: document.getElementById('pagination-container'), pageLinksContainer: document.getElementById('page-links-container'),
+            itemsPerPageSelect: document.getElementById('items-per-page-select'),
+            sortSelect: document.getElementById('sort-select'), viewToggle: document.getElementById('view-toggle'), viewControls: document.getElementById('view-controls'),
+            maintenanceView: document.getElementById('maintenance-view'), imageListWrapper: document.getElementById('image-list-wrapper'),
             lightbox: document.getElementById('lightbox'),
             lightboxImage: document.querySelector('#lightbox .lightbox-image'),
             lightboxCounter: document.getElementById('lb-counter'),
             lightboxDownloadLink: document.getElementById('lb-download'),
             lightboxDeleteBtn: document.getElementById('lb-delete'),
-            // 新增批量操作元素
-            bulkActionBar: document.getElementById('bulk-action-bar'),
-            bulkCounter: document.getElementById('bulk-counter'),
-            bulkButtonsContainer: document.getElementById('bulk-buttons-container'),
-            selectAllContainer: document.getElementById('select-all-container'),
+            // Bulk action elements
+            bulkActionBar: document.getElementById('bulk-action-bar'), bulkCounter: document.getElementById('bulk-counter'),
+            bulkButtonsContainer: document.getElementById('bulk-buttons-container'), selectAllContainer: document.getElementById('select-all-container'),
             selectAllCheckbox: document.getElementById('select-all-checkbox'),
+            bulkSelectBtn: document.getElementById('bulk-select-btn'), bulkCancelBtn: document.getElementById('bulk-cancel-btn'),
+            imageListSection: document.getElementById('image-list-section'),
         };
         let filesToUpload = []; let allLoadedImages = []; let currentImageIndex = 0; let currentSearchTerm = ''; let debounceTimer; let currentAdminPage = 1; let isLightboxLoading = false;
         let selectedImageIds = new Set();
+        let isInSelectMode = false;
+        let currentViewMode = localStorage.getItem('adminViewMode') || 'grid';
+        let itemsPerPage = parseInt(localStorage.getItem('adminItemsPerPage') || '12', 10);
         
         const apiRequest = async (url, options = {}) => {
             try {
                 const response = await fetch(url, options);
-                if (response.status === 401) { 
-                    showToast('登录状态已过期', 'error'); 
-                    setTimeout(() => window.location.href = '/login.html', 2000); 
-                    throw new Error('Unauthorized'); 
-                }
-                if (!response.ok) {
-                    let errorMsg = `HTTP Error: ${response.status} ${response.statusText}`;
-                    try {
-                        const errorJson = await response.json();
-                        errorMsg = errorJson.message || errorMsg;
-                    } catch (e) { /* Ignore if body is not JSON */ }
-                    throw new Error(errorMsg);
-                }
+                if (response.status === 401) { showToast('登录状态已过期', 'error'); setTimeout(() => window.location.href = '/login.html', 2000); throw new Error('Unauthorized'); }
+                if (!response.ok) { let errorMsg = `HTTP Error: ${response.status} ${response.statusText}`; try { const errorJson = await response.json(); errorMsg = errorJson.message || errorMsg; } catch (e) {} throw new Error(errorMsg); }
                 return response;
-            } catch (error) {
-                if (error instanceof TypeError) {
-                    throw new Error('网络错误，请检查您的连接。');
-                }
-                throw error;
-            }
+            } catch (error) { if (error instanceof TypeError) { throw new Error('网络错误，请检查您的连接。'); } throw error; }
         };
         const formatBytes = (bytes, decimals = 2) => { if (!+bytes) return '0 Bytes'; const k = 1024; const dm = decimals < 0 ? 0 : decimals; const sizes = ["Bytes", "KB", "MB", "GB", "TB"]; const i = Math.floor(Math.log(bytes) / Math.log(k)); return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`; };
         const showToast = (message, type = 'success') => { const toast = document.getElementById('toast'); toast.className = `toast max-w-xs text-white text-sm rounded-lg shadow-lg p-3 ${type === 'success' ? 'bg-green-600' : 'bg-red-600'}`; toast.querySelector('#toast-message').textContent = message; toast.querySelector('#toast-icon').innerHTML = type === 'success' ? `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>` : `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>`; toast.style.display = 'block'; setTimeout(() => toast.classList.add('show'), 10); setTimeout(() => { toast.classList.remove('show'); setTimeout(() => toast.style.display = 'none', 300); }, 3000); };
@@ -1120,7 +1160,16 @@ cat << 'EOF' > public/admin.html
         const showConfirmationModal = (title, bodyHtml, confirmText = '确认', cancelText = '取消') => { return new Promise(resolve => { const footerHtml = `<button type="button" class="modal-cancel-btn bg-gray-300 hover:bg-gray-400 text-black py-2 px-4 rounded">${cancelText}</button><button type="button" id="modal-confirm-btn" class="bg-red-600 hover:bg-red-700 text-white py-2 px-4 rounded">${confirmText}</button>`; showGenericModal(title, bodyHtml, footerHtml); DOMElements.genericModal.querySelector('#modal-confirm-btn').onclick = () => { hideModal(DOMElements.genericModal); resolve(true); }; const cancelBtn = DOMElements.genericModal.querySelector('.modal-cancel-btn'); cancelBtn.onclick = () => { hideModal(DOMElements.genericModal); resolve(false); }; DOMElements.genericModal.onclick = (e) => { if (e.target === DOMElements.genericModal) { cancelBtn.click(); } }; }); };
         const hideModal = (modal) => modal.classList.remove('active');
 
-        // 新增：批量操作相关逻辑
+        // --- Selection Mode Logic ---
+        const toggleSelectMode = (forceOff = false) => {
+            isInSelectMode = forceOff ? false : !isInSelectMode;
+            DOMElements.imageListSection.classList.toggle('select-mode-active', isInSelectMode);
+            if (!isInSelectMode) { resetSelection(); }
+        };
+        DOMElements.bulkSelectBtn.addEventListener('click', () => toggleSelectMode());
+        DOMElements.bulkCancelBtn.addEventListener('click', () => toggleSelectMode(true));
+
+        // --- Bulk Action Logic ---
         const updateBulkActionBar = () => {
             const count = selectedImageIds.size;
             DOMElements.bulkCounter.textContent = `已选择 ${count} 张图片`;
@@ -1130,21 +1179,12 @@ cat << 'EOF' > public/admin.html
             } else {
                 DOMElements.bulkActionBar.classList.remove('visible');
             }
-            DOMElements.selectAllCheckbox.checked = count > 0 && count === DOMElements.imageList.querySelectorAll('.admin-image-card').length;
+            DOMElements.selectAllCheckbox.checked = count > 0 && allLoadedImages.length > 0 && count === allLoadedImages.length;
         };
-
         const generateBulkActionButtons = () => {
             DOMElements.bulkButtonsContainer.innerHTML = '';
             const isRecycleBin = document.querySelector('#nav-item-recycle-bin').classList.contains('active');
-
-            const createButton = (id, text, classes) => {
-                const btn = document.createElement('button');
-                btn.id = id;
-                btn.textContent = text;
-                btn.className = `px-4 py-2 text-sm font-medium rounded-md shadow-sm transition-colors ${classes}`;
-                DOMElements.bulkButtonsContainer.appendChild(btn);
-            };
-
+            const createButton = (id, text, classes) => { const btn = document.createElement('button'); btn.id = id; btn.textContent = text; btn.className = `px-4 py-2 text-sm font-medium rounded-md shadow-sm transition-colors ${classes}`; DOMElements.bulkButtonsContainer.appendChild(btn); };
             if (isRecycleBin) {
                 createButton('bulk-restore-btn', '批量恢复', 'bg-blue-600 hover:bg-blue-700 text-white');
                 createButton('bulk-purge-btn', '批量彻底删除', 'bg-red-700 hover:bg-red-800 text-white');
@@ -1153,66 +1193,24 @@ cat << 'EOF' > public/admin.html
                 createButton('bulk-delete-btn', '移至回收站', 'bg-red-600 hover:bg-red-700 text-white');
             }
         };
-
         const resetSelection = () => {
             selectedImageIds.clear();
             document.querySelectorAll('.bulk-checkbox').forEach(cb => cb.checked = false);
             updateBulkActionBar();
         };
-
         const performBulkAction = async (action, payload = {}) => {
             const ids = Array.from(selectedImageIds);
             try {
-                await apiRequest('/api/admin/images/bulk-action', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ action, ids, payload })
-                });
+                await apiRequest('/api/admin/images/bulk-action', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, ids, payload }) });
                 showToast(`批量操作成功！`);
-                
-                // Animate and remove cards from UI
-                ids.forEach(id => {
-                    const card = DOMElements.imageList.querySelector(`.admin-image-card[data-id="${id}"]`);
-                    if (card) {
-                        card.classList.add('fading-out');
-                        setTimeout(() => card.remove(), 400);
-                    }
-                });
-
+                ids.forEach(id => { const card = DOMElements.imageList.querySelector(`.admin-image-item[data-id="${id}"]`); if (card) { card.classList.add('fading-out'); setTimeout(() => card.remove(), 400); } });
                 resetSelection();
-                // Optional: reload data after animation to ensure consistency
-                setTimeout(() => changePage(currentAdminPage), 500);
-
-            } catch (error) {
-                showToast(`批量操作失败: ${error.message}`, 'error');
-            }
+                setTimeout(() => changePage(currentAdminPage, false), 500); // Don't reset page number
+            } catch (error) { showToast(`批量操作失败: ${error.message}`, 'error'); }
         };
         
-        DOMElements.addCategoryBtn.addEventListener('click', () => {
-            showGenericModal(
-                '添加新分类',
-                '<form id="add-cat-form"><label for="new-cat-name" class="sr-only">分类名称</label><input type="text" id="new-cat-name" placeholder="输入新分类的名称" required class="w-full border rounded px-3 py-2"></form>',
-                '<button type="button" class="modal-cancel-btn bg-gray-300 hover:bg-gray-400 text-black py-2 px-4 rounded">取消</button><button type="submit" form="add-cat-form" class="bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded">保存</button>'
-            );
-            const form = document.getElementById('add-cat-form');
-            const input = document.getElementById('new-cat-name');
-            input.focus();
-            form.addEventListener('submit', async (e) => {
-                e.preventDefault();
-                const name = input.value.trim();
-                if (!name) return;
-                try {
-                    await apiRequest('/api/admin/categories', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
-                    hideModal(DOMElements.genericModal);
-                    showToast('分类添加成功');
-                    await refreshAllData();
-                } catch (error) {
-                    showToast(`添加失败: ${error.message}`, 'error');
-                }
-            });
-            DOMElements.genericModal.querySelector('.modal-cancel-btn').addEventListener('click', () => hideModal(DOMElements.genericModal));
-        });
-
+        // --- Upload Logic ---
+        DOMElements.addCategoryBtn.addEventListener('click', () => { showGenericModal( '添加新分类', '<form id="add-cat-form"><label for="new-cat-name" class="sr-only">分类名称</label><input type="text" id="new-cat-name" placeholder="输入新分类的名称" required class="w-full border rounded px-3 py-2"></form>', '<button type="button" class="modal-cancel-btn bg-gray-300 hover:bg-gray-400 text-black py-2 px-4 rounded">取消</button><button type="submit" form="add-cat-form" class="bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded">保存</button>'); const form = document.getElementById('add-cat-form'); const input = document.getElementById('new-cat-name'); input.focus(); form.addEventListener('submit', async (e) => { e.preventDefault(); const name = input.value.trim(); if (!name) return; try { await apiRequest('/api/admin/categories', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) }); hideModal(DOMElements.genericModal); showToast('分类添加成功'); await refreshAllData(); } catch (error) { showToast(`添加失败: ${error.message}`, 'error'); } }); DOMElements.genericModal.querySelector('.modal-cancel-btn').addEventListener('click', () => hideModal(DOMElements.genericModal)); });
         const handleFileSelection = (fileList) => { const imageFiles = Array.from(fileList).filter(f => f.type.startsWith('image/')); const currentFilenames = new Set(filesToUpload.map(item => item.file.name)); const newFiles = imageFiles.filter(f => !currentFilenames.has(f.name)).map(file => ({ file, description: DOMElements.unifiedDescription.value, userHasTyped: DOMElements.unifiedDescription.value !== '', shouldRename: false, status: 'pending' })); filesToUpload.push(...newFiles); DOMElements.uploadBtn.disabled = filesToUpload.length === 0; renderFilePreviews(); };
         const renderFilePreviews = () => { if (filesToUpload.length === 0) { DOMElements.filePreviewContainer.classList.add('hidden'); return; } DOMElements.filePreviewList.innerHTML = ''; let totalSize = 0; filesToUpload.forEach((item, index) => { totalSize += item.file.size; const listItem = document.createElement('div'); const tempId = `file-preview-${index}`; listItem.className = 'file-preview-item text-slate-600 border rounded p-2'; listItem.dataset.fileIndex = index; listItem.innerHTML = `<div class="flex items-start"><img class="w-12 h-12 object-cover rounded mr-3 bg-slate-100" id="thumb-${tempId}"><div class="flex-grow"><div class="flex justify-between items-center text-xs mb-1"><p class="truncate pr-2 font-medium">${item.file.name}</p><button type="button" data-index="${index}" class="remove-file-btn text-xl text-red-500 hover:text-red-700 leading-none">&times;</button></div><p class="text-xs text-slate-500">${formatBytes(item.file.size)}</p></div></div><input type="text" data-index="${index}" class="relative w-full text-xs border rounded px-2 py-1 description-input bg-transparent mt-2" placeholder="添加独立描述..." value="${item.description}"><p class="upload-status text-xs mt-1"></p>`; DOMElements.filePreviewList.appendChild(listItem); const reader = new FileReader(); reader.onload = (e) => { document.getElementById(`thumb-${tempId}`).src = e.target.result; }; reader.readAsDataURL(item.file); }); DOMElements.uploadSummary.textContent = `已选择 ${filesToUpload.length} 个文件，总大小: ${formatBytes(totalSize)}`; DOMElements.filePreviewContainer.classList.remove('hidden'); };
         const dz = DOMElements.dropZone; dz.addEventListener('dragover', (e) => { e.preventDefault(); dz.classList.add('bg-green-50', 'border-green-400'); }); dz.addEventListener('dragleave', (e) => dz.classList.remove('bg-green-50', 'border-green-400')); dz.addEventListener('drop', (e) => { e.preventDefault(); dz.classList.remove('bg-green-50', 'border-green-400'); handleFileSelection(e.dataTransfer.files); });
@@ -1220,123 +1218,132 @@ cat << 'EOF' > public/admin.html
         DOMElements.unifiedDescription.addEventListener('input', e => { const unifiedText = e.target.value; document.querySelectorAll('.file-preview-item').forEach(item => { const index = parseInt(item.dataset.fileIndex, 10); if (filesToUpload[index] && !filesToUpload[index].userHasTyped) { item.querySelector('.description-input').value = unifiedText; filesToUpload[index].description = unifiedText; } }); });
         DOMElements.filePreviewList.addEventListener('input', e => { if (e.target.classList.contains('description-input')) { const index = parseInt(e.target.dataset.index, 10); if(filesToUpload[index]) { filesToUpload[index].description = e.target.value; filesToUpload[index].userHasTyped = true; } } });
         DOMElements.filePreviewList.addEventListener('click', e => { if (e.target.classList.contains('remove-file-btn')) { const index = parseInt(e.target.dataset.index, 10); filesToUpload.splice(index, 1); renderFilePreviews(); DOMElements.uploadBtn.disabled = filesToUpload.length === 0; } });
-        
         const processUploadQueue = async (e) => {
-            e.preventDefault();
-            DOMElements.uploadBtn.disabled = true;
-            const pendingFiles = filesToUpload.filter(f => f.status === 'pending');
-            if (pendingFiles.length === 0) {
-                showToast("没有需要上传的新文件。", "error");
-                DOMElements.uploadBtn.disabled = filesToUpload.length === 0;
-                return;
+            e.preventDefault(); DOMElements.uploadBtn.disabled = true; const pendingFiles = filesToUpload.filter(f => f.status === 'pending');
+            if (pendingFiles.length === 0) { showToast("没有需要上传的新文件。", "error"); DOMElements.uploadBtn.disabled = filesToUpload.length === 0; return; }
+            try { const filenamesToCheck = pendingFiles.map(item => item.file.name); const response = await apiRequest('/api/admin/check-filenames', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({filenames: filenamesToCheck}) }); const { duplicates } = await response.json();
+                for (const item of pendingFiles) { if (duplicates.includes(item.file.name)) { const userConfirmed = await showConfirmationModal('文件已存在', `文件 "<strong>${item.file.name}</strong>" 已存在。是否仍然继续上传？<br>(新文件将被自动重命名)`, '继续上传', '取消此文件'); if (userConfirmed) { item.shouldRename = true; } else { item.status = 'cancelled'; const previewItem = DOMElements.filePreviewList.querySelector(`[data-file-index="${filesToUpload.indexOf(item)}"]`); if(previewItem) previewItem.querySelector('.upload-status').textContent = '已取消'; } } }
+            } catch (error) { showToast(`检查文件名出错: ${error.message}`, 'error'); DOMElements.uploadBtn.disabled = false; return; }
+            const uploadableFiles = filesToUpload.filter(f => f.status === 'pending'); let processedCount = 0; const updateButtonText = () => { DOMElements.uploadBtn.textContent = `正在上传 (${processedCount}/${uploadableFiles.length})...`; }; if (uploadableFiles.length > 0) updateButtonText();
+            for (const item of uploadableFiles) { const originalIndex = filesToUpload.indexOf(item); const previewItem = DOMElements.filePreviewList.querySelector(`[data-file-index="${originalIndex}"]`); if (!previewItem) { processedCount++; updateButtonText(); continue; } const statusEl = previewItem.querySelector('.upload-status');
+                try { statusEl.textContent = '上传中...'; const formData = new FormData(); formData.append('image', item.file); formData.append('category', DOMElements.categorySelect.value); formData.append('description', item.description); formData.append('rename', item.shouldRename); await apiRequest('/api/admin/upload', { method: 'POST', body: formData }); item.status = 'success'; previewItem.classList.add('upload-success'); statusEl.textContent = '✅ 上传成功'; } catch (err) { if (err.message !== 'Unauthorized') { item.status = 'error'; statusEl.textContent = `❌ ${err.message}`; previewItem.classList.add('upload-error'); } } finally { processedCount++; updateButtonText(); }
             }
-            try {
-                const filenamesToCheck = pendingFiles.map(item => item.file.name);
-                const response = await apiRequest('/api/admin/check-filenames', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({filenames: filenamesToCheck}) });
-                const { duplicates } = await response.json();
-
-                for (const item of pendingFiles) {
-                    if (duplicates.includes(item.file.name)) {
-                        const userConfirmed = await showConfirmationModal('文件已存在', `文件 "<strong>${item.file.name}</strong>" 已存在。是否仍然继续上传？<br>(新文件将被自动重命名)`, '继续上传', '取消此文件');
-                        if (userConfirmed) { item.shouldRename = true; } 
-                        else { item.status = 'cancelled'; const previewItem = DOMElements.filePreviewList.querySelector(`[data-file-index="${filesToUpload.indexOf(item)}"]`); if(previewItem) previewItem.querySelector('.upload-status').textContent = '已取消'; }
-                    }
-                }
-            } catch (error) {
-                showToast(`检查文件名出错: ${error.message}`, 'error');
-                DOMElements.uploadBtn.disabled = false;
-                return;
-            }
-            
-            const uploadableFiles = filesToUpload.filter(f => f.status === 'pending');
-            let processedCount = 0;
-            const updateButtonText = () => { DOMElements.uploadBtn.textContent = `正在上传 (${processedCount}/${uploadableFiles.length})...`; };
-            if (uploadableFiles.length > 0) updateButtonText();
-
-            for (const item of uploadableFiles) {
-                const originalIndex = filesToUpload.indexOf(item);
-                const previewItem = DOMElements.filePreviewList.querySelector(`[data-file-index="${originalIndex}"]`);
-                if (!previewItem) { processedCount++; updateButtonText(); continue; }
-                const statusEl = previewItem.querySelector('.upload-status');
-                try {
-                    statusEl.textContent = '上传中...';
-                    const formData = new FormData();
-                    formData.append('image', item.file);
-                    formData.append('category', DOMElements.categorySelect.value);
-                    formData.append('description', item.description);
-                    formData.append('rename', item.shouldRename);
-                    await apiRequest('/api/admin/upload', { method: 'POST', body: formData });
-                    item.status = 'success';
-                    previewItem.classList.add('upload-success');
-                    statusEl.textContent = '✅ 上传成功';
-                } catch (err) {
-                    if (err.message !== 'Unauthorized') {
-                        item.status = 'error';
-                        statusEl.textContent = `❌ ${err.message}`;
-                        previewItem.classList.add('upload-error');
-                    }
-                } finally {
-                    processedCount++;
-                    updateButtonText();
-                }
-            }
-            showToast(`所有任务处理完成。`);
-            DOMElements.uploadBtn.textContent = '上传文件';
-            filesToUpload = [];
-            DOMElements.imageInput.value = '';
-            DOMElements.unifiedDescription.value = '';
-            setTimeout(() => { DOMElements.filePreviewContainer.classList.add('hidden'); DOMElements.uploadBtn.disabled = true; }, 3000);
-            await refreshAllData();
+            showToast(`所有任务处理完成。`); DOMElements.uploadBtn.textContent = '上传文件'; filesToUpload = []; DOMElements.imageInput.value = ''; DOMElements.unifiedDescription.value = '';
+            setTimeout(() => { DOMElements.filePreviewContainer.classList.add('hidden'); DOMElements.uploadBtn.disabled = true; }, 3000); await refreshAllData();
         };
         DOMElements.uploadForm.addEventListener('submit', processUploadQueue);
-
+        
+        // --- Data Loading and Rendering ---
         async function refreshAllData() { await refreshNavigation(); const activeNav = document.querySelector('.nav-item.active'); if (activeNav) { activeNav.click(); } else { document.getElementById('nav-item-all').click(); } }
         async function populateCategorySelects(selectedCategory = null) { try { const response = await apiRequest('/api/categories'); const categories = await response.json(); [DOMElements.categorySelect, DOMElements.editCategorySelect].forEach(select => { const currentVal = select.value; select.innerHTML = ''; categories.forEach(cat => select.add(new Option(cat, cat))); select.value = categories.includes(currentVal) ? currentVal : selectedCategory || categories[0] || ''; }); } catch (error) { if (error.message !== 'Unauthorized') console.error('加载分类失败:', error.message); } }
         async function refreshNavigation() { try { const response = await apiRequest('/api/categories'); const categories = await response.json(); DOMElements.categoryDynamicList.innerHTML = ''; categories.forEach(cat => { const isUncategorized = cat === UNCATEGORIZED; const item = document.createElement('div'); item.className = 'nav-item flex items-center justify-between p-2 rounded cursor-pointer hover:bg-gray-100'; item.dataset.view = 'category'; item.dataset.categoryName = cat; item.innerHTML = `<span class="category-name flex-grow">${cat}</span>` + (isUncategorized ? '' : `<div class="space-x-2 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"><button data-name="${cat}" class="rename-cat-btn text-blue-500 hover:text-blue-700 text-sm">重命名</button><button data-name="${cat}" class="delete-cat-btn text-red-500 hover:red-700 text-sm">删除</button></div>`); item.addEventListener('mouseenter', () => item.classList.add('group')); item.addEventListener('mouseleave', () => item.classList.remove('group')); DOMElements.categoryDynamicList.appendChild(item); }); await populateCategorySelects(); } catch (error) { if (error.message !== 'Unauthorized') console.error('加载导航列表失败:', error.message); } }
         
-        async function loadImages(category, name) { DOMElements.imageLoader.classList.remove('hidden'); DOMElements.imageList.innerHTML = ''; try { const url = `/api/images?category=${category}&search=${encodeURIComponent(currentSearchTerm)}&page=${currentAdminPage}&limit=12`; const response = await apiRequest(url); const data = await response.json(); allLoadedImages = data.images; DOMElements.imageListHeader.innerHTML = `${name} <span class="text-base text-gray-500 font-normal">(共 ${data.totalImages} 张)</span>`; if (allLoadedImages.length === 0) { DOMElements.imageList.innerHTML = '<p class="text-slate-500 col-span-full text-center py-10">没有找到图片。</p>'; DOMElements.selectAllContainer.classList.add('hidden'); } else { DOMElements.selectAllContainer.classList.remove('hidden'); allLoadedImages.forEach((image) => renderAdminImage(image)); } renderPaginationControls(data.page, data.totalPages); } catch (error) { if(error.message !== 'Unauthorized') DOMElements.imageList.innerHTML = `<p class="text-red-500 col-span-full text-center py-10">加载图片失败: ${error.message}</p>`; } finally { DOMElements.imageLoader.classList.add('hidden'); } }
-        async function loadRecycleBin() { DOMElements.imageLoader.classList.remove('hidden'); DOMElements.imageList.innerHTML = ''; try { const url = `/api/admin/recycle-bin?search=${encodeURIComponent(currentSearchTerm)}&page=${currentAdminPage}&limit=12`; const response = await apiRequest(url); const data = await response.json(); allLoadedImages = data.images; DOMElements.imageListHeader.innerHTML = `回收站`; if (allLoadedImages.length === 0) { DOMElements.imageList.innerHTML = '<p class="text-slate-500 col-span-full text-center py-10">回收站是空的。</p>'; DOMElements.selectAllContainer.classList.add('hidden'); } else { DOMElements.selectAllContainer.classList.remove('hidden'); allLoadedImages.forEach((image) => renderAdminImage(image, true)); } renderPaginationControls(data.page, data.totalPages); } catch (error) { if (error.message !== 'Unauthorized') DOMElements.imageList.innerHTML = `<p class="text-red-500 col-span-full text-center py-10">加载回收站失败: ${error.message}</p>`; } finally { DOMElements.imageLoader.classList.add('hidden'); } }
+        function switchMainView(viewType) {
+            DOMElements.imageListWrapper.style.display = viewType === 'content' ? 'block' : 'none';
+            DOMElements.paginationContainer.style.display = viewType === 'content' ? 'flex' : 'none';
+            DOMElements.viewControls.style.display = viewType === 'content' ? 'flex' : 'none';
+            DOMElements.maintenanceView.style.display = viewType === 'maintenance' ? 'block' : 'none';
+        }
+
+        async function loadContent(url, headerText) {
+            DOMElements.imageLoader.classList.remove('hidden'); DOMElements.imageList.innerHTML = '';
+            try {
+                const response = await apiRequest(url);
+                const data = await response.json();
+                allLoadedImages = data.images;
+                DOMElements.imageListHeader.innerHTML = `${headerText} <span class="text-base text-gray-500 font-normal">(共 ${data.totalImages} 张)</span>`;
+                if (allLoadedImages.length === 0) {
+                    DOMElements.imageList.innerHTML = '<p class="text-slate-500 col-span-full text-center py-10">没有找到图片。</p>';
+                } else {
+                    allLoadedImages.forEach((image) => renderAdminImage(image, headerText.includes('回收站')));
+                }
+                renderPaginationControls(data.page, data.totalPages);
+            } catch (error) {
+                if (error.message !== 'Unauthorized') DOMElements.imageList.innerHTML = `<p class="text-red-500 col-span-full text-center py-10">加载内容失败: ${error.message}</p>`;
+            } finally {
+                DOMElements.imageLoader.classList.add('hidden');
+            }
+        }
+        
+        async function loadImages(category, name) {
+            switchMainView('content');
+            const sortBy = DOMElements.sortSelect.value;
+            const url = `/api/images?category=${category}&search=${encodeURIComponent(currentSearchTerm)}&page=${currentAdminPage}&limit=${itemsPerPage}&sort_by=${sortBy}`;
+            await loadContent(url, name);
+        }
+        
+        async function loadRecycleBin() {
+            switchMainView('content');
+            const sortBy = DOMElements.sortSelect.value;
+            const url = `/api/admin/recycle-bin?search=${encodeURIComponent(currentSearchTerm)}&page=${currentAdminPage}&limit=${itemsPerPage}&sort_by=${sortBy}`;
+            await loadContent(url, '回收站');
+        }
 
         function renderAdminImage(image, isRecycleBinView = false) {
-            const buttonsHtml = isRecycleBinView 
-            ? `
-                <button title="预览" class="preview-btn p-2 rounded-full text-slate-600 hover:bg-slate-200 hover:text-slate-800 transition-colors" data-id="${image.id}"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 pointer-events-none"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg></button>
-                <button title="恢复" class="restore-btn p-2 rounded-full text-green-600 hover:bg-green-100 transition-colors" data-id="${image.id}"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 pointer-events-none"><path stroke-linecap="round" stroke-linejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" /></svg></button>
-                <button title="彻底删除" class="purge-btn p-2 rounded-full text-red-500 hover:bg-red-100 hover:text-red-700 transition-colors" data-id="${image.id}"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 pointer-events-none"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.134-2.036-2.134H8.718c-1.126 0-2.037.955-2.037 2.134v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg></button>
-            `
-            : `
-                <button title="预览" class="preview-btn p-2 rounded-full text-slate-600 hover:bg-slate-200 hover:text-slate-800 transition-colors" data-id="${image.id}"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 pointer-events-none"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg></button>
-                <a href="${image.src}" download="${image.originalFilename}" title="下载" class="p-2 rounded-full text-slate-600 hover:bg-slate-200 hover:text-slate-800 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg></a>
-                <button title="编辑" class="edit-btn p-2 rounded-full text-slate-600 hover:bg-slate-200 hover:text-slate-800 transition-colors" data-id="${image.id}"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 pointer-events-none"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487zm0 0L19.5 7.125" /></svg></button>
-                <button title="移至回收站" class="delete-btn p-2 rounded-full text-red-500 hover:bg-red-100 hover:text-red-700 transition-colors" data-id="${image.id}"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 pointer-events-none"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.134-2.036-2.134H8.718c-1.126 0-2.037.955-2.037 2.134v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg></button>
-            `;
+            const item = document.createElement('div');
+            item.className = `admin-image-item is-${currentViewMode}`;
+            item.dataset.id = image.id;
+
+            const buttonsHtml = isRecycleBinView
+                ? `<button title="恢复" class="restore-btn p-2 rounded-full text-green-600 hover:bg-green-100 transition-colors" data-id="${image.id}"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 pointer-events-none"><path stroke-linecap="round" stroke-linejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" /></svg></button>
+                   <button title="彻底删除" class="purge-btn p-2 rounded-full text-red-500 hover:bg-red-100 hover:text-red-700 transition-colors" data-id="${image.id}"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 pointer-events-none"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.134-2.036-2.134H8.718c-1.126 0-2.037.955-2.037 2.134v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg></button>`
+                : `<a href="${image.src}" download="${image.originalFilename}" title="下载" class="p-2 rounded-full text-slate-600 hover:bg-slate-200 hover:text-slate-800 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg></a>
+                   <button title="编辑" class="edit-btn p-2 rounded-full text-slate-600 hover:bg-slate-200 hover:text-slate-800 transition-colors" data-id="${image.id}"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 pointer-events-none"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487zm0 0L19.5 7.125" /></svg></button>
+                   <button title="移至回收站" class="delete-btn p-2 rounded-full text-red-500 hover:bg-red-100 hover:text-red-700 transition-colors" data-id="${image.id}"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 pointer-events-none"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.134-2.036-2.134H8.718c-1.126 0-2.037.955-2.037 2.134v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg></button>`;
             
-            const cardHtml = `
-                <div class="admin-image-card border rounded-lg shadow-sm bg-white overflow-hidden flex flex-col" data-id="${image.id}">
+            if (currentViewMode === 'grid') {
+                item.innerHTML = `
                     <input type="checkbox" class="bulk-checkbox" data-id="${image.id}">
                     <a href="#" class="image-preview-container flex-shrink-0 preview-trigger" data-id="${image.id}">
                         <div class="card-spinner"></div>
                         <img src="/image-proxy/${image.filename}?w=400" alt="${image.description || image.originalFilename}" class="pointer-events-none" onload="this.classList.add('loaded'); this.previousElementSibling.style.display='none';">
                     </a>
-                    <div class="p-3 flex-grow flex flex-col min-h-0">
+                    <div class="image-info-wrapper">
                         <p class="font-bold text-sm truncate" title="${image.originalFilename}">${image.originalFilename}</p>
                         <div class="flex justify-between items-center text-xs text-slate-500 my-2">
                             <span class="flex items-center gap-1.5" title="文件大小"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-3.5 h-3.5"><path d="M2 3.5A1.5 1.5 0 0 1 3.5 2h9A1.5 1.5 0 0 1 14 3.5v9a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 12.5v-9ZM3.5 3a.5.5 0 0 0-.5.5v9a.5.5 0 0 0 .5.5h9a.5.5 0 0 0 .5-.5v-9a.5.5 0 0 0-.5-.5h-9Z" /><path d="M5 5.5A.5.5 0 0 1 5.5 5h5a.5.5 0 0 1 0 1h-5A.5.5 0 0 1 5 5.5Zm0 2A.5.5 0 0 1 5.5 7h5a.5.5 0 0 1 0 1h-5A.5.5 0 0 1 5 7.5Zm0 2A.5.5 0 0 1 5.5 9h3a.5.5 0 0 1 0 1h-3A.5.5 0 0 1 5 9.5Z" /></svg>${formatBytes(image.size)}</span>
-                            <span class="flex items-center gap-1.5 truncate" title="分类: ${image.category}"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-3.5 h-3.5"><path d="M3.5 2A1.5 1.5 0 0 0 2 3.5v.986c.543-.294 1.25-.486 2-.486h7.5a.5.5 0 0 1 .5.5v2.875a.5.5 0 0 0 .5.5h.875a.5.5 0 0 0 .5-.5V5.125a.5.5 0 0 0-.146-.353l-1.5-1.5A.5.5 0 0 0 12.125 3H6.5a2.5 2.5 0 0 0-2.482 2H3.5A1.5 1.5 0 0 0 2 6.5v6A1.5 1.5 0 0 0 3.5 14h9a1.5 1.5 0 0 0 1.5-1.5v-5A1.5 1.5 0 0 0 12.5 6H4a1.5 1.5 0 0 1-1.5-1.5V3.5ZM3 6.5A.5.5 0 0 1 3.5 6H12a.5.5 0 0 1 .5.5v5a.5.5 0 0 1-.5.5h-9A.5.5 0 0 1 3 12.5v-6Z" /></svg><span class="truncate">${image.category || UNCATEGORIZED}</span></span>
+                            <span class="flex items-center gap-1.5 truncate" title="尺寸"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-3.5 h-3.5"><path d="M1.5 2.5A1 1 0 0 1 2.5 1.5h11A1 1 0 0 1 15 2.5v11a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-11zM2.5 2a.5.5 0 0 0-.5.5v11a.5.5 0 0 0 .5.5h11a.5.5 0 0 0 .5-.5v-11a.5.5 0 0 0-.5-.5h-11z" /><path d="M4.25 10.75a.75.75 0 0 1 0-1.5h1.5a.75.75 0 0 1 0 1.5h-1.5zM10.25 5a.75.75 0 0 1 0 1.5h-5.5a.75.75 0 0 1 0-1.5h5.5zM4.75 5.25a.75.75 0 0 1 1.5 0v5.5a.75.75 0 0 1-1.5 0v-5.5z" /></svg>${image.width}x${image.height}</span>
                         </div>
                         <p class="text-xs text-slate-600 flex-grow pt-1" title="${image.description || ''}"><span class="description-clamp">${image.description || '无描述'}</span></p>
                         ${isRecycleBinView ? `<p class="text-xs text-red-500 mt-auto pt-2"><strong>删除于:</strong> ${new Date(image.deletedAt).toLocaleString()}</p>` : ''}
+                        <div class="bg-slate-50 p-1 flex justify-end items-center gap-1 mt-auto flex-shrink-0 -mx-3 -mb-3">
+                            <button title="预览" class="preview-btn p-2 rounded-full text-slate-600 hover:bg-slate-200 hover:text-slate-800 transition-colors" data-id="${image.id}"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 pointer-events-none"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg></button>
+                            ${buttonsHtml}
+                        </div>
                     </div>
-                    <div class="bg-slate-50 p-2 flex justify-end items-center gap-1 mt-auto flex-shrink-0">
+                `;
+            } else { // List View
+                item.innerHTML = `
+                    <input type="checkbox" class="bulk-checkbox" data-id="${image.id}">
+                    <a href="#" class="image-preview-container flex-shrink-0 preview-trigger" data-id="${image.id}">
+                         <div class="card-spinner"></div>
+                        <img src="/image-proxy/${image.filename}?w=100" alt="${image.description || image.originalFilename}" class="pointer-events-none" onload="this.classList.add('loaded'); this.previousElementSibling.style.display='none';">
+                    </a>
+                    <div class="image-info-wrapper">
+                        <div class="info-col-1">
+                            <p class="font-bold text-sm truncate" title="${image.originalFilename}">${image.originalFilename}</p>
+                            <p class="text-xs text-slate-500 truncate" title="${image.description || ''}">${image.description || '无描述'}</p>
+                        </div>
+                        <div class="info-col-2">
+                             <p class="truncate" title="分类: ${image.category}">${image.category || UNCATEGORIZED}</p>
+                             <p class="text-xs text-slate-500">${new Date(isRecycleBinView ? image.deletedAt : image.uploadedAt).toLocaleDateString()}</p>
+                        </div>
+                        <div class="info-col-3">
+                            <p>${formatBytes(image.size)}</p>
+                            <p class="text-xs text-slate-500">${image.width} x ${image.height}</p>
+                        </div>
+                    </div>
+                    <div class="action-buttons flex items-center gap-1">
+                        <button title="预览" class="preview-btn p-2 rounded-full text-slate-600 hover:bg-slate-200 hover:text-slate-800 transition-colors" data-id="${image.id}"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 pointer-events-none"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg></button>
                         ${buttonsHtml}
                     </div>
-                </div>
-            `;
-            DOMElements.imageList.insertAdjacentHTML('beforeend', cardHtml);
+                `;
+            }
+            DOMElements.imageList.appendChild(item);
         }
         
-        const changePage = (page) => {
-            currentAdminPage = page;
+        const changePage = (page, resetPage = true) => {
+            currentAdminPage = resetPage ? 1 : page;
             const activeNav = document.querySelector('.nav-item.active');
             if (!activeNav) return;
             const view = activeNav.dataset.view;
@@ -1348,14 +1355,15 @@ cat << 'EOF' > public/admin.html
             DOMElements.imageLoader.classList.remove('hidden');
 
             if (view === 'recycle_bin') { loadRecycleBin(); } 
+            else if (view === 'maintenance') { loadMaintenanceView(); }
             else { loadImages(categoryName || 'all', headerText); }
         };
 
         function renderPaginationControls(currentPage, totalPages) {
-            DOMElements.paginationContainer.innerHTML = '';
+            DOMElements.pageLinksContainer.innerHTML = '';
             if (totalPages <= 1) { return; }
             let html = '<div class="flex items-center space-x-1">';
-            const createBtnHTML = (text, page, disabled = false, active = false) => `<button data-page="${page}" class="page-item px-3 py-1 text-sm font-medium border border-gray-300 rounded-md hover:bg-gray-100 ${disabled ? 'opacity-50 cursor-not-allowed' : ''} ${active ? 'active' : ''}">${text}</button>`;
+            const createBtnHTML = (text, page, disabled = false, active = false) => `<button data-page="${page}" class="page-item px-3 py-1 text-sm font-medium border border-gray-300 rounded-md hover:bg-gray-100 ${disabled ? 'opacity-50 cursor-not-allowed' : ''} ${active ? 'active' : 'bg-white'}">${text}</button>`;
             html += createBtnHTML('上一页', currentPage - 1, currentPage === 1);
             
             let pages = [];
@@ -1369,53 +1377,31 @@ cat << 'EOF' > public/admin.html
                 pages.push(totalPages);
             }
             pages.forEach(p => { if (p === '...') html += '<span class="px-3 py-1 text-sm">...</span>'; else html += createBtnHTML(p, p, false, p === currentPage); });
-
             html += createBtnHTML('下一页', currentPage + 1, currentPage === totalPages);
             html += '</div>';
-            DOMElements.paginationContainer.innerHTML = html;
+            DOMElements.pageLinksContainer.innerHTML = html;
         }
 
-        DOMElements.paginationContainer.addEventListener('click', e => { 
+        DOMElements.pageLinksContainer.addEventListener('click', e => { 
             const target = e.target.closest('.page-item'); 
             if(!target || target.disabled || target.classList.contains('active')) return;
             e.preventDefault();
             const newPage = parseInt(target.dataset.page);
-            DOMElements.paginationContainer.querySelector('.page-item.active')?.classList.remove('active');
-            DOMElements.paginationContainer.querySelector(`.page-item[data-page="${newPage}"]`)?.classList.add('active');
-            changePage(newPage);
+            changePage(newPage, false);
         });
 
         DOMElements.navigationList.addEventListener('click', async (e) => {
             const navItem = e.target.closest('.nav-item');
             if (!navItem) return;
             if (e.target.matches('.rename-cat-btn, .delete-cat-btn')) { 
-                e.preventDefault(); 
-                e.stopPropagation(); 
-                const catName = e.target.dataset.name; 
+                e.preventDefault(); e.stopPropagation(); const catName = e.target.dataset.name; 
                 if (e.target.classList.contains('rename-cat-btn')) { 
                     showGenericModal(`重命名分类 "${catName}"`, '<form id="modal-form"><input type="text" id="modal-input" required class="w-full border rounded px-3 py-2"></form>', '<button type="button" class="modal-cancel-btn bg-gray-300 hover:bg-gray-400 text-black py-2 px-4 rounded">取消</button><button type="submit" form="modal-form" class="bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded">保存</button>'); 
-                    const input = document.getElementById('modal-input'); 
-                    input.value = catName; 
-                    DOMElements.genericModal.querySelector('.modal-cancel-btn').onclick=() => hideModal(DOMElements.genericModal); 
-                    document.getElementById('modal-form').onsubmit = async (ev) => { 
-                        ev.preventDefault(); 
-                        const newName = input.value.trim(); 
-                        if (!newName || newName === catName) { hideModal(DOMElements.genericModal); return; } 
-                        try { 
-                            await apiRequest('/api/admin/categories', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ oldName: catName, newName }) }); 
-                            hideModal(DOMElements.genericModal); showToast('重命名成功'); 
-                            await refreshAllData(); 
-                        } catch (error) { showToast(`重命名失败: ${error.message}`, 'error'); } 
-                    }; 
+                    const input = document.getElementById('modal-input'); input.value = catName; DOMElements.genericModal.querySelector('.modal-cancel-btn').onclick=() => hideModal(DOMElements.genericModal); 
+                    document.getElementById('modal-form').onsubmit = async (ev) => { ev.preventDefault(); const newName = input.value.trim(); if (!newName || newName === catName) { hideModal(DOMElements.genericModal); return; } try { await apiRequest('/api/admin/categories', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ oldName: catName, newName }) }); hideModal(DOMElements.genericModal); showToast('重命名成功'); await refreshAllData(); } catch (error) { showToast(`重命名失败: ${error.message}`, 'error'); } }; 
                 } else if (e.target.classList.contains('delete-cat-btn')) { 
                     const confirmed = await showConfirmationModal('确认删除', `<p>确定要删除分类 "<strong>${catName}</strong>" 吗？<br>此分类下的图片将归入 "未分类"。</p>`, '确认删除'); 
-                    if(confirmed) { 
-                        try { 
-                            await apiRequest('/api/admin/categories', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: catName }) }); 
-                            showToast('删除成功'); 
-                            await refreshAllData(); 
-                        } catch (error) { showToast(`删除失败: ${error.message}`, 'error'); } 
-                    } 
+                    if(confirmed) { try { await apiRequest('/api/admin/categories', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: catName }) }); showToast('删除成功'); await refreshAllData(); } catch (error) { showToast(`删除失败: ${error.message}`, 'error'); } } 
                 } 
                 return; 
             }
@@ -1423,251 +1409,152 @@ cat << 'EOF' > public/admin.html
             document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
             navItem.classList.add('active');
             DOMElements.searchInput.value = ''; currentSearchTerm = '';
-            changePage(1);
+            toggleSelectMode(true); // Always exit select mode on nav change
+            changePage(1, true);
         });
         
         DOMElements.imageList.addEventListener('click', async (e) => {
-            const target = e.target;
-            const button = target.closest('button, a');
-            
-            // Handle bulk checkbox clicks
-            if (target.matches('.bulk-checkbox')) {
-                const id = target.dataset.id;
-                if (target.checked) {
-                    selectedImageIds.add(id);
-                } else {
-                    selectedImageIds.delete(id);
-                }
-                updateBulkActionBar();
-                return; // Stop further processing
-            }
-
-            if (!button) return;
-
-            if (button.tagName === 'A' && button.hasAttribute('download')) {
-                return;
-            }
-            
-            e.preventDefault();
-
-            const imageId = button.dataset.id;
-            if (!imageId) return;
-
+            const target = e.target; const imageItem = target.closest('.admin-image-item'); if (!imageItem) return; const imageId = imageItem.dataset.id;
+            if (target.matches('.bulk-checkbox')) { if (target.checked) { selectedImageIds.add(imageId); } else { selectedImageIds.delete(imageId); } updateBulkActionBar(); return; }
+            const button = target.closest('button, a'); if (!button) return;
+            if (button.tagName === 'A' && button.hasAttribute('download')) { return; } e.preventDefault();
             const image = allLoadedImages.find(img => img.id === imageId);
-            
-            if (button.matches('.preview-trigger, .preview-btn')) {
-                const newIndex = allLoadedImages.findIndex(img => img.id === imageId);
-                if (newIndex === -1) { 
-                    showToast('无法在列表中找到此图片。', 'error'); 
-                    return; 
-                }
-                DOMElements.lightbox.classList.add('active');
-                document.body.classList.add('lightbox-open');
-                showImageAtIndex(newIndex);
-            }
-            else if (button.matches('.edit-btn')) {
-                if (!image) return;
-                await populateCategorySelects(image.category);
-                DOMElements.editImageModal.querySelector('#edit-id').value = image.id;
-                DOMElements.editImageModal.querySelector('#edit-originalFilename').value = image.originalFilename;
-                DOMElements.editImageModal.querySelector('#edit-description').value = image.description;
-                DOMElements.editImageModal.classList.add('active');
-            }
-            else if (button.matches('.delete-btn')) {
-                if (!image) return;
-                const confirmed = await showConfirmationModal('移至回收站', `<p>确定要将图片 "<strong>${image.originalFilename}</strong>" 移至回收站吗？</p>`, '确认移动');
-                if (confirmed) {
-                    try {
-                        await apiRequest(`/api/admin/images/${imageId}`, { method: 'DELETE' });
-                        showToast('图片已移至回收站');
-                        const cardToRemove = button.closest('.admin-image-card');
-                        if (cardToRemove) {
-                           cardToRemove.classList.add('fading-out');
-                           setTimeout(() => cardToRemove.remove(), 400);
-                        }
-                        const imageIndex = allLoadedImages.findIndex(i => i.id === imageId);
-                        if (imageIndex > -1) allLoadedImages.splice(imageIndex, 1);
-                    } catch (error) { showToast(error.message, 'error'); }
-                }
-            }
-            else if (button.matches('.restore-btn')) {
-                try {
-                    await apiRequest(`/api/admin/recycle-bin/${imageId}/restore`, { method: 'POST' });
-                    showToast('图片已恢复');
-                    const cardToRemove = button.closest('.admin-image-card');
-                    if(cardToRemove) {
-                        cardToRemove.classList.add('fading-out');
-                        setTimeout(() => cardToRemove.remove(), 400);
-                    }
-                    const imageIndex = allLoadedImages.findIndex(i => i.id === imageId);
-                    if (imageIndex > -1) allLoadedImages.splice(imageIndex, 1);
-                } catch (error) { showToast(error.message, 'error'); }
-            }
-            else if (button.matches('.purge-btn')) {
-                const confirmed = await showConfirmationModal('彻底删除', `<p>确定要永久删除这张图片吗？<br><strong>此操作无法撤销。</strong></p>`, '确认删除');
-                if (confirmed) {
-                    try {
-                        await apiRequest(`/api/admin/recycle-bin/${imageId}/purge`, { method: 'DELETE' });
-                        showToast('图片已彻底删除');
-                        const cardToRemove = button.closest('.admin-image-card');
-                        if(cardToRemove) {
-                            cardToRemove.classList.add('fading-out');
-                            setTimeout(() => cardToRemove.remove(), 400);
-                        }
-                        const imageIndex = allLoadedImages.findIndex(i => i.id === imageId);
-                        if (imageIndex > -1) allLoadedImages.splice(imageIndex, 1);
-                    } catch (error) { showToast(error.message, 'error'); }
-                }
-            }
+            if (button.matches('.preview-trigger, .preview-btn')) { const newIndex = allLoadedImages.findIndex(img => img.id === imageId); if (newIndex === -1) { showToast('无法在列表中找到此图片。', 'error'); return; } DOMElements.lightbox.classList.add('active'); document.body.classList.add('lightbox-open'); showImageAtIndex(newIndex); }
+            else if (button.matches('.edit-btn')) { if (!image) return; await populateCategorySelects(image.category); DOMElements.editImageModal.querySelector('#edit-id').value = image.id; DOMElements.editImageModal.querySelector('#edit-originalFilename').value = image.originalFilename; DOMElements.editImageModal.querySelector('#edit-description').value = image.description; DOMElements.editImageModal.classList.add('active'); }
+            else if (button.matches('.delete-btn')) { if (!image) return; const confirmed = await showConfirmationModal('移至回收站', `<p>确定要将图片 "<strong>${image.originalFilename}</strong>" 移至回收站吗？</p>`, '确认移动'); if (confirmed) { try { await apiRequest(`/api/admin/images/${imageId}`, { method: 'DELETE' }); showToast('图片已移至回收站'); if (imageItem) { imageItem.classList.add('fading-out'); setTimeout(() => imageItem.remove(), 400); } const imageIndex = allLoadedImages.findIndex(i => i.id === imageId); if (imageIndex > -1) allLoadedImages.splice(imageIndex, 1); } catch (error) { showToast(error.message, 'error'); } } }
+            else if (button.matches('.restore-btn')) { try { await apiRequest(`/api/admin/recycle-bin/${imageId}/restore`, { method: 'POST' }); showToast('图片已恢复'); if(imageItem) { imageItem.classList.add('fading-out'); setTimeout(() => imageItem.remove(), 400); } const imageIndex = allLoadedImages.findIndex(i => i.id === imageId); if (imageIndex > -1) allLoadedImages.splice(imageIndex, 1); } catch (error) { showToast(error.message, 'error'); } }
+            else if (button.matches('.purge-btn')) { const confirmed = await showConfirmationModal('彻底删除', `<p>确定要永久删除这张图片吗？<br><strong>此操作无法撤销。</strong></p>`, '确认删除'); if (confirmed) { try { await apiRequest(`/api/admin/recycle-bin/${imageId}/purge`, { method: 'DELETE' }); showToast('图片已彻底删除'); if(imageItem) { imageItem.classList.add('fading-out'); setTimeout(() => imageItem.remove(), 400); } const imageIndex = allLoadedImages.findIndex(i => i.id === imageId); if (imageIndex > -1) allLoadedImages.splice(imageIndex, 1); } catch (error) { showToast(error.message, 'error'); } } }
         });
         
-        // 新增：全选复选框事件
         DOMElements.selectAllCheckbox.addEventListener('change', (e) => {
             const isChecked = e.target.checked;
             const checkboxes = DOMElements.imageList.querySelectorAll('.bulk-checkbox');
-            checkboxes.forEach(cb => {
-                const id = cb.dataset.id;
-                cb.checked = isChecked;
-                if (isChecked) {
-                    selectedImageIds.add(id);
-                } else {
-                    selectedImageIds.delete(id);
-                }
-            });
+            checkboxes.forEach(cb => { const id = cb.dataset.id; cb.checked = isChecked; if (isChecked) { selectedImageIds.add(id); } else { selectedImageIds.delete(id); } });
             updateBulkActionBar();
         });
         
-        // 新增：浮动操作栏按钮事件
         DOMElements.bulkButtonsContainer.addEventListener('click', async (e) => {
-            const target = e.target.closest('button');
-            if (!target) return;
-            
+            const target = e.target.closest('button'); if (!target) return;
             switch(target.id) {
-                case 'bulk-delete-btn': {
-                    const confirmed = await showConfirmationModal('批量移至回收站', `<p>确定要将选中的 <strong>${selectedImageIds.size}</strong> 张图片移至回收站吗？</p>`, '确认移动');
-                    if (confirmed) performBulkAction('delete');
-                    break;
-                }
-                case 'bulk-restore-btn': {
-                    const confirmed = await showConfirmationModal('批量恢复', `<p>确定要恢复选中的 <strong>${selectedImageIds.size}</strong> 张图片吗？</p>`, '确认恢复');
-                    if (confirmed) performBulkAction('restore');
-                    break;
-                }
-                case 'bulk-purge-btn': {
-                     const confirmed = await showConfirmationModal('批量彻底删除', `<p>确定要永久删除选中的 <strong>${selectedImageIds.size}</strong> 张图片吗？<br><strong>此操作无法撤销！</strong></p>`, '确认删除');
-                    if (confirmed) performBulkAction('purge');
-                    break;
-                }
-                case 'bulk-recategorize-btn': {
-                    const response = await apiRequest('/api/categories');
-                    const categories = await response.json();
-                    let optionsHtml = categories.map(cat => `<option value="${cat}">${cat}</option>`).join('');
-                    showGenericModal(
-                        '批量修改分类',
-                        `<form id="recategorize-form">
-                            <p class="mb-2 text-sm">为选中的 ${selectedImageIds.size} 张图片选择一个新的分类：</p>
-                            <select id="bulk-category-select" class="w-full border rounded px-3 py-2">${optionsHtml}</select>
-                         </form>`,
-                        '<button type="button" class="modal-cancel-btn bg-gray-300 hover:bg-gray-400 text-black py-2 px-4 rounded">取消</button><button type="submit" form="recategorize-form" class="bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded">应用</button>'
-                    );
-                    document.getElementById('recategorize-form').onsubmit = (ev) => {
-                        ev.preventDefault();
-                        const newCategory = document.getElementById('bulk-category-select').value;
-                        hideModal(DOMElements.genericModal);
-                        performBulkAction('recategorize', { newCategory });
-                    };
-                    DOMElements.genericModal.querySelector('.modal-cancel-btn').onclick = () => hideModal(DOMElements.genericModal);
-                    break;
-                }
+                case 'bulk-delete-btn': { const c = await showConfirmationModal('批量移至回收站', `<p>确定要将选中的 <strong>${selectedImageIds.size}</strong> 张图片移至回收站吗？</p>`, '确认移动'); if (c) performBulkAction('delete'); break; }
+                case 'bulk-restore-btn': { const c = await showConfirmationModal('批量恢复', `<p>确定要恢复选中的 <strong>${selectedImageIds.size}</strong> 张图片吗？</p>`, '确认恢复'); if (c) performBulkAction('restore'); break; }
+                case 'bulk-purge-btn': { const c = await showConfirmationModal('批量彻底删除', `<p>确定要永久删除选中的 <strong>${selectedImageIds.size}</strong> 张图片吗？<br><strong>此操作无法撤销！</strong></p>`, '确认删除'); if (c) performBulkAction('purge'); break; }
+                case 'bulk-recategorize-btn': { const r = await apiRequest('/api/categories'); const c = await r.json(); let o = c.map(cat => `<option value="${cat}">${cat}</option>`).join(''); showGenericModal('批量修改分类', `<form id="recategorize-form"><p class="mb-2 text-sm">为选中的 ${selectedImageIds.size} 张图片选择一个新的分类：</p><select id="bulk-category-select" class="w-full border rounded px-3 py-2">${o}</select></form>`, '<button type="button" class="modal-cancel-btn bg-gray-300 hover:bg-gray-400 text-black py-2 px-4 rounded">取消</button><button type="submit" form="recategorize-form" class="bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded">应用</button>'); document.getElementById('recategorize-form').onsubmit = (ev) => { ev.preventDefault(); const newCategory = document.getElementById('bulk-category-select').value; hideModal(DOMElements.genericModal); performBulkAction('recategorize', { newCategory }); }; DOMElements.genericModal.querySelector('.modal-cancel-btn').onclick = () => hideModal(DOMElements.genericModal); break; }
             }
         });
 
-        DOMElements.editImageForm.addEventListener('submit', async (e) => { e.preventDefault(); const id = document.getElementById('edit-id').value; const body = JSON.stringify({ originalFilename: document.getElementById('edit-originalFilename').value, category: DOMElements.editCategorySelect.value, description: document.getElementById('edit-description').value }); try { await apiRequest(`/api/admin/images/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body }); hideModal(DOMElements.editImageModal); showToast('更新成功'); changePage(currentAdminPage); } catch (error) { showToast(`更新失败: ${error.message}`, 'error'); } });
+        DOMElements.editImageForm.addEventListener('submit', async (e) => { e.preventDefault(); const id = document.getElementById('edit-id').value; const body = JSON.stringify({ originalFilename: document.getElementById('edit-originalFilename').value, category: DOMElements.editCategorySelect.value, description: document.getElementById('edit-description').value }); try { await apiRequest(`/api/admin/images/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body }); hideModal(DOMElements.editImageModal); showToast('更新成功'); changePage(currentAdminPage, false); } catch (error) { showToast(`更新失败: ${error.message}`, 'error'); } });
         
+        // --- Security and Maintenance ---
         async function renderSecuritySection() { try { const response = await apiRequest('/api/admin/2fa/status'); const { enabled } = await response.json(); let content; if (enabled) { content = `<p class="text-sm text-slate-600 mb-3">两步验证 (2FA) 当前已<span class="font-bold text-green-600">启用</span>。</p><button id="disable-tfa-btn" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg">禁用 2FA</button>`; } else { content = `<p class="text-sm text-slate-600 mb-3">通过启用两步验证，为您的账户增加一层额外的安全保障。</p><button id="enable-tfa-btn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg">启用 2FA</button>`; } DOMElements.securitySection.innerHTML = content; } catch (error) { DOMElements.securitySection.innerHTML = `<p class="text-red-500">无法加载安全状态: ${error.message}</p>`; } }
-        DOMElements.securitySection.addEventListener('click', async e => { if (e.target.id === 'enable-tfa-btn') { try { const response = await apiRequest('/api/admin/2fa/generate', {method: 'POST'}); const data = await response.json(); DOMElements.tfaModal.querySelector('#tfa-setup-content').innerHTML = `<p class="text-sm mb-4">1. 使用您的 Authenticator 应用 (如 Google Authenticator, Authy) 扫描下方的二维码。</p><img src="${data.qrCode}" alt="2FA QR Code" class="mx-auto border p-2 bg-white"><p class="text-sm mt-4 mb-2">或者手动输入密钥:</p><p class="font-mono bg-gray-100 p-2 rounded text-center text-sm break-all">${data.secret}</p><p class="text-sm mt-6 mb-2">2. 在下方输入应用生成的6位验证码以完成设置：</p><form id="tfa-verify-form" class="flex gap-2"><input type="text" id="tfa-token-input" required maxlength="6" class="w-full border rounded px-3 py-2" placeholder="6位数字码"><button type="submit" class="bg-green-600 hover:bg-green-700 text-white py-2 px-4 rounded">验证并启用</button></form><p id="tfa-error" class="text-red-500 text-sm mt-2 hidden"></p>`; DOMElements.tfaModal.classList.add('active'); document.getElementById('tfa-verify-form').addEventListener('submit', async ev => { ev.preventDefault(); const token = document.getElementById('tfa-token-input').value; try { const response = await apiRequest('/api/admin/2fa/enable', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ secret: data.secret, token })}); const result = await response.json(); showToast(result.message); hideModal(DOMElements.tfaModal); await renderSecuritySection(); } catch (err) { document.getElementById('tfa-error').textContent = err.message; document.getElementById('tfa-error').classList.remove('hidden'); } }); } catch (error) { showToast(error.message, 'error'); } } else if (e.target.id === 'disable-tfa-btn') { const confirmed = await showConfirmationModal('禁用 2FA', `<p>确定要禁用两步验证吗？您的账户安全性将会降低。</p>`, '确认禁用'); if (confirmed) { try { await apiRequest('/api/admin/2fa/disable', {method: 'POST'}); showToast('2FA已禁用'); await renderSecuritySection(); } catch(err) { showToast(err.message, 'error'); } } } });
+        DOMElements.securitySection.addEventListener('click', async e => { if (e.target.id === 'enable-tfa-btn') { try { const response = await apiRequest('/api/admin/2fa/generate', {method: 'POST'}); const data = await response.json(); DOMElements.tfaModal.querySelector('#tfa-setup-content').innerHTML = `<p class="text-sm mb-4">1. 使用您的 Authenticator 应用扫描二维码。</p><img src="${data.qrCode}" alt="2FA QR Code" class="mx-auto border p-2 bg-white"><p class="text-sm mt-4 mb-2">或手动输入密钥:</p><p class="font-mono bg-gray-100 p-2 rounded text-center text-sm break-all">${data.secret}</p><p class="text-sm mt-6 mb-2">2. 输入应用生成的6位验证码以完成设置：</p><form id="tfa-verify-form" class="flex gap-2"><input type="text" id="tfa-token-input" required maxlength="6" class="w-full border rounded px-3 py-2" placeholder="6位数字码"><button type="submit" class="bg-green-600 hover:bg-green-700 text-white py-2 px-4 rounded">验证并启用</button></form><p id="tfa-error" class="text-red-500 text-sm mt-2 hidden"></p>`; DOMElements.tfaModal.classList.add('active'); document.getElementById('tfa-verify-form').addEventListener('submit', async ev => { ev.preventDefault(); const token = document.getElementById('tfa-token-input').value; try { const response = await apiRequest('/api/admin/2fa/enable', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ secret: data.secret, token })}); const result = await response.json(); showToast(result.message); hideModal(DOMElements.tfaModal); await renderSecuritySection(); } catch (err) { document.getElementById('tfa-error').textContent = err.message; document.getElementById('tfa-error').classList.remove('hidden'); } }); } catch (error) { showToast(error.message, 'error'); } } else if (e.target.id === 'disable-tfa-btn') { const confirmed = await showConfirmationModal('禁用 2FA', `<p>确定要禁用两步验证吗？您的账户安全性将会降低。</p>`, '确认禁用'); if (confirmed) { try { await apiRequest('/api/admin/2fa/disable', {method: 'POST'}); showToast('2FA已禁用'); await renderSecuritySection(); } catch(err) { showToast(err.message, 'error'); } } } });
+        
+        async function loadMaintenanceView() {
+            switchMainView('maintenance');
+            DOMElements.imageListHeader.textContent = '系统维护';
+            DOMElements.maintenanceView.innerHTML = `
+                <div class="bg-slate-50 p-6 rounded-lg">
+                    <h3 class="text-lg font-semibold mb-2">清理冗余文件</h3>
+                    <p class="text-sm text-slate-600 mb-4">扫描 uploads 目录中存在，但数据库记录里却不存在的“孤立”文件。这些文件可能是由异常操作产生，可以安全清理以释放空间。</p>
+                    <button id="scan-orphans-btn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg">开始扫描</button>
+                    <div id="orphan-results" class="mt-6 hidden"></div>
+                </div>`;
+        }
+
+        DOMElements.maintenanceView.addEventListener('click', async e => {
+            if (e.target.id === 'scan-orphans-btn') {
+                const btn = e.target;
+                btn.disabled = true;
+                btn.textContent = '扫描中...';
+                const resultsContainer = document.getElementById('orphan-results');
+                try {
+                    const res = await apiRequest('/api/admin/maintenance/find-orphans');
+                    const orphans = await res.json();
+                    resultsContainer.classList.remove('hidden');
+                    if (orphans.length === 0) {
+                        resultsContainer.innerHTML = '<p class="text-green-600 font-medium">太棒了！没有发现任何冗余文件。</p>';
+                        return;
+                    }
+                    resultsContainer.innerHTML = `
+                        <h4 class="font-semibold mb-2">扫描结果：发现 ${orphans.length} 个冗余文件</h4>
+                        <div class="flex items-center gap-2 mb-2"><input type="checkbox" id="select-all-orphans"><label for="select-all-orphans">全选</label></div>
+                        <div id="orphan-list" class="border rounded max-h-72 overflow-y-auto p-2 space-y-1">
+                            ${orphans.map(f => `<div class="flex items-center gap-2 text-sm"><input type="checkbox" class="orphan-checkbox" value="${f.filename}"><span>${f.filename} (${formatBytes(f.size)})</span></div>`).join('')}
+                        </div>
+                        <button id="delete-orphans-btn" class="mt-4 bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg disabled:bg-gray-400" disabled>删除选中文件</button>`;
+                } catch (err) {
+                    resultsContainer.innerHTML = `<p class="text-red-500">扫描失败: ${err.message}</p>`;
+                } finally {
+                    btn.disabled = false;
+                    btn.textContent = '重新扫描';
+                }
+            } else if (e.target.id === 'delete-orphans-btn') {
+                const checked = Array.from(document.querySelectorAll('.orphan-checkbox:checked')).map(cb => cb.value);
+                if (checked.length === 0) return;
+                const confirmed = await showConfirmationModal('确认删除', `确定要永久删除这 ${checked.length} 个冗余文件吗？此操作无法撤销。`, '确认删除');
+                if (confirmed) {
+                    try {
+                        const res = await apiRequest('/api/admin/maintenance/delete-orphans', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filenames: checked }) });
+                        const result = await res.json();
+                        showToast(result.message);
+                        if(result.errors && result.errors.length > 0) {
+                            showToast(`发生错误: ${result.errors.join(', ')}`, 'error');
+                        }
+                        document.getElementById('scan-orphans-btn').click(); // Rescan
+                    } catch (err) {
+                        showToast(`删除失败: ${err.message}`, 'error');
+                    }
+                }
+            } else if (e.target.id === 'select-all-orphans') {
+                document.querySelectorAll('.orphan-checkbox').forEach(cb => cb.checked = e.target.checked);
+            }
+            // Enable delete button if any checkbox is checked
+            if (document.getElementById('delete-orphans-btn')) {
+                document.getElementById('delete-orphans-btn').disabled = !Array.from(document.querySelectorAll('.orphan-checkbox')).some(cb => cb.checked);
+            }
+        });
         
         // --- Lightbox Logic ---
-        const updateAdminLightbox = (item) => {
-            if (!item) return;
-            DOMElements.lightboxImage.src = `/image-proxy/${item.filename}`;
-            DOMElements.lightboxImage.alt = item.description || item.originalFilename;
-            DOMElements.lightboxCounter.textContent = `${currentImageIndex + 1} / ${allLoadedImages.length}`;
-            DOMElements.lightboxDownloadLink.href = item.src;
-            DOMElements.lightboxDownloadLink.download = item.originalFilename;
-            
-            const isRecycleBinView = document.querySelector('#nav-item-recycle-bin').classList.contains('active');
-            DOMElements.lightboxDeleteBtn.style.display = isRecycleBinView ? 'none' : 'inline-flex';
-        };
-
-        const preloadImage = (index, callback) => {
-            if (isLightboxLoading) return;
-            const item = allLoadedImages[index];
-            if (!item) return;
-
-            isLightboxLoading = true;
-            DOMElements.lightbox.classList.add('is-loading');
-
-            const preloader = new Image();
-            preloader.src = `/image-proxy/${item.filename}`;
-            
-            preloader.onload = () => { 
-                isLightboxLoading = false;
-                DOMElements.lightbox.classList.remove('is-loading');
-                callback(item); 
-            };
-            preloader.onerror = () => { 
-                isLightboxLoading = false;
-                DOMElements.lightbox.classList.remove('is-loading');
-                showToast('无法加载预览图片', 'error'); 
-            };
-        };
-
-        const showImageAtIndex = (index) => {
-            currentImageIndex = index;
-            preloadImage(index, updateAdminLightbox);
-        };
-        
+        const updateAdminLightbox = (item) => { if (!item) return; DOMElements.lightboxImage.src = `/image-proxy/${item.filename}`; DOMElements.lightboxImage.alt = item.description || item.originalFilename; DOMElements.lightboxCounter.textContent = `${currentImageIndex + 1} / ${allLoadedImages.length}`; DOMElements.lightboxDownloadLink.href = item.src; DOMElements.lightboxDownloadLink.download = item.originalFilename; const isRecycleBinView = document.querySelector('#nav-item-recycle-bin').classList.contains('active'); DOMElements.lightboxDeleteBtn.style.display = isRecycleBinView ? 'none' : 'inline-flex'; };
+        const preloadImage = (index, callback) => { if (isLightboxLoading) return; const item = allLoadedImages[index]; if (!item) return; isLightboxLoading = true; DOMElements.lightbox.classList.add('is-loading'); const preloader = new Image(); preloader.src = `/image-proxy/${item.filename}`; preloader.onload = () => { isLightboxLoading = false; DOMElements.lightbox.classList.remove('is-loading'); callback(item); }; preloader.onerror = () => { isLightboxLoading = false; DOMElements.lightbox.classList.remove('is-loading'); showToast('无法加载预览图片', 'error'); }; };
+        const showImageAtIndex = (index) => { currentImageIndex = index; preloadImage(index, updateAdminLightbox); };
         const showNextImage = () => showImageAtIndex((currentImageIndex + 1) % allLoadedImages.length);
         const showPrevImage = () => showImageAtIndex((currentImageIndex - 1 + allLoadedImages.length) % allLoadedImages.length);
         const closeLightbox = () => { DOMElements.lightbox.classList.remove('active'); document.body.classList.remove('lightbox-open'); };
-        
-        DOMElements.lightbox.addEventListener('click', async (e) => { 
-            const target = e.target.closest('button, a') || e.target;
-            if (target.matches('.lb-next')) { showNextImage(); }
-            else if (target.matches('.lb-prev')) { showPrevImage(); }
-            else if (target.matches('.lb-close') || e.target === DOMElements.lightbox) { closeLightbox(); }
-            else if (target.id === 'lb-delete') {
-                const imageToDelete = allLoadedImages[currentImageIndex];
-                if (!imageToDelete) return;
-                const confirmed = await showConfirmationModal('移至回收站', `<p>确定要将图片 "<strong>${imageToDelete.originalFilename}</strong>" 移至回收站吗？</p>`, '确认移动', '取消');
-                if (confirmed) {
-                    try {
-                        await apiRequest(`/api/admin/images/${imageToDelete.id}`, { method: 'DELETE' });
-                        showToast('图片已移至回收站');
-                        const cardToRemove = DOMElements.imageList.querySelector(`.admin-image-card[data-id='${imageToDelete.id}']`);
-                        if (cardToRemove) { cardToRemove.classList.add('fading-out'); setTimeout(() => cardToRemove.remove(), 400); }
-                        
-                        allLoadedImages.splice(currentImageIndex, 1);
-                        
-                        if (allLoadedImages.length === 0) {
-                            closeLightbox();
-                            changePage(currentAdminPage);
-                        } else {
-                            if (currentImageIndex >= allLoadedImages.length) {
-                                currentImageIndex = allLoadedImages.length - 1;
-                            }
-                            showImageAtIndex(currentImageIndex);
-                        }
-                    } catch (error) { showToast(error.message, 'error'); }
-                }
+        DOMElements.lightbox.addEventListener('click', async (e) => { const target = e.target.closest('button, a') || e.target; if (target.matches('.lb-next')) { showNextImage(); } else if (target.matches('.lb-prev')) { showPrevImage(); } else if (target.matches('.lb-close') || e.target === DOMElements.lightbox) { closeLightbox(); } else if (target.id === 'lb-delete') { const imageToDelete = allLoadedImages[currentImageIndex]; if (!imageToDelete) return; const confirmed = await showConfirmationModal('移至回收站', `<p>确定要将图片 "<strong>${imageToDelete.originalFilename}</strong>" 移至回收站吗？</p>`, '确认移动', '取消'); if (confirmed) { try { await apiRequest(`/api/admin/images/${imageToDelete.id}`, { method: 'DELETE' }); showToast('图片已移至回收站'); const cardToRemove = DOMElements.imageList.querySelector(`.admin-image-item[data-id='${imageToDelete.id}']`); if (cardToRemove) { cardToRemove.classList.add('fading-out'); setTimeout(() => cardToRemove.remove(), 400); } allLoadedImages.splice(currentImageIndex, 1); if (allLoadedImages.length === 0) { closeLightbox(); changePage(currentAdminPage, false); } else { if (currentImageIndex >= allLoadedImages.length) { currentImageIndex = allLoadedImages.length - 1; } showImageAtIndex(currentImageIndex); } } catch (error) { showToast(error.message, 'error'); } } } });
+
+        // --- Event Listeners and Init ---
+        const applyViewMode = (mode) => {
+            DOMElements.imageList.className = `view-${mode}`;
+            DOMElements.viewToggle.querySelectorAll('button').forEach(b => b.classList.toggle('bg-slate-200', b.dataset.view === mode));
+            allLoadedImages.forEach(img => renderAdminImage(img, document.querySelector('#nav-item-recycle-bin').classList.contains('active')));
+        };
+        DOMElements.viewToggle.addEventListener('click', (e) => {
+            const button = e.target.closest('button');
+            if (button && button.dataset.view !== currentViewMode) {
+                currentViewMode = button.dataset.view;
+                localStorage.setItem('adminViewMode', currentViewMode);
+                DOMElements.imageList.innerHTML = '';
+                applyViewMode(currentViewMode);
             }
         });
-
+        DOMElements.itemsPerPageSelect.addEventListener('change', () => {
+            itemsPerPage = parseInt(DOMElements.itemsPerPageSelect.value, 10);
+            localStorage.setItem('adminItemsPerPage', itemsPerPage);
+            changePage(1, true);
+        });
+        DOMElements.sortSelect.addEventListener('change', () => changePage(1, true));
+        DOMElements.searchInput.addEventListener('input', () => { clearTimeout(debounceTimer); debounceTimer = setTimeout(() => { currentSearchTerm = DOMElements.searchInput.value.trim(); changePage(1, true); }, 500); });
         document.addEventListener('keydown', e => { if (DOMElements.lightbox.classList.contains('active')) { if (e.key === 'ArrowRight') showNextImage(); if (e.key === 'ArrowLeft') showPrevImage(); if (e.key === 'Escape') closeLightbox(); } });
         [DOMElements.genericModal, DOMElements.editImageModal, DOMElements.tfaModal].forEach(modal => { const cancelBtn = modal.querySelector('.modal-cancel-btn'); if(cancelBtn) { cancelBtn.addEventListener('click', () => hideModal(modal)); } modal.addEventListener('click', (e) => { if (e.target === modal) hideModal(modal); }); });
         
-        async function init() { await Promise.all([refreshNavigation(), renderSecuritySection()]); DOMElements.navigationList.querySelector('#nav-item-all').click(); }
+        async function init() {
+            DOMElements.itemsPerPageSelect.value = itemsPerPage;
+            DOMElements.viewToggle.querySelector(`button[data-view="${currentViewMode}"]`).classList.add('bg-slate-200');
+            DOMElements.imageList.className = `view-${currentViewMode}`;
+            await Promise.all([refreshNavigation(), renderSecuritySection()]);
+            DOMElements.navigationList.querySelector('#nav-item-all').click();
+        }
         init();
     });
     </script>
