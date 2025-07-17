@@ -1,11 +1,13 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v1.5.1)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v1.5.2)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
+#   v1.5.2 更新:
+#   - 优化(后台): 优化图片预览中的删除体验，删除后自动切换到下一张，而不是退出预览。
 #   v1.5.1 更新:
-#   - 优化(前台): 同步后台的加载动画，统一前后端图片预览的加载效果。
+#   - 重构(后台): 对齐后台与前台的图片预览(Lightbox)逻辑，确保代码结构和行为的完全一致性。
 #   v1.5.0 更新:
 #   - 新增(后台): 为回收站中的图片增加预览功能。
 #   - 优化(后台): 为后台图片预览窗口添加加载动画，提升切换图片时的用户体验。
@@ -19,7 +21,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 PROMPT_Y="(${GREEN}y${NC}/${RED}n${NC})"
 
-SCRIPT_VERSION="1.5.1"
+SCRIPT_VERSION="1.5.2"
 APP_NAME="image-gallery"
 
 # --- 路径设置 ---
@@ -46,7 +48,7 @@ overwrite_app_files() {
 cat << 'EOF' > package.json
 {
   "name": "image-gallery-pro",
-  "version": "1.5.1",
+  "version": "1.5.2",
   "description": "A high-performance, full-stack image gallery application with all features.",
   "main": "server.js",
   "scripts": {
@@ -548,7 +550,7 @@ cat << 'EOF' > public/index.html
         @keyframes spin { to { transform: rotate(360deg); } }
         .image-placeholder.item-loaded .spinner { opacity: 0; }
         .lightbox .spinner { border-color: rgba(255,255,255,0.2); border-top-color: rgba(255,255,255,0.8); display: none; }
-        .lightbox.is-loading .spinner { display: block; animation: spin 1s linear infinite; }
+        .lightbox.is-loading .spinner { display: block; }
 
 
         .image-placeholder img { display: block; width: 100%; height: auto; opacity: 0; transition: opacity 0.4s ease-in-out, transform 0.3s ease-in-out; }
@@ -889,8 +891,8 @@ cat << 'EOF' > public/admin.html
 
         .lightbox { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.9); display: none; justify-content: center; align-items: center; z-index: 1000; opacity: 0; visibility: hidden; transition: opacity 0.3s ease; }
         .lightbox.active { opacity: 1; visibility: visible; }
-        .lightbox .spinner { border-color: rgba(255,255,255,0.2); border-top-color: rgba(255,255,255,0.8); display: none; position: absolute; z-index: 1; width: 3rem; height: 3rem; }
-        .lightbox.is-loading .spinner { display: block; animation: spin 1s linear infinite; }
+        .lightbox .spinner { border-color: rgba(255,255,255,0.2); border-top-color: rgba(255,255,255,0.8); display: none; position: absolute; z-index: 1; width: 3rem; height: 3rem; animation: spin 1s linear infinite; }
+        .lightbox.is-loading .spinner { display: block; }
         .lightbox-image { max-width: 85%; max-height: 85%; display: block; object-fit: contain; }
         .lightbox-btn { position: absolute; top: 50%; transform: translateY(-50%); background-color: rgba(255,255,255,0.1); color: white; border: none; font-size: 2.5rem; cursor: pointer; padding: 0.5rem 1rem; border-radius: 0.5rem; transition: background-color 0.2s; z-index: 10;}
         .lightbox-btn:hover { background-color: rgba(255,255,255,0.2); }
@@ -982,7 +984,7 @@ cat << 'EOF' > public/admin.html
             lightboxDownloadLink: document.getElementById('lb-download'),
             lightboxDeleteBtn: document.getElementById('lb-delete')
         };
-        let filesToUpload = []; let allLoadedImages = []; let currentImageIndex = 0; let currentSearchTerm = ''; let debounceTimer; let currentAdminPage = 1; let isLightboxLoading = false;
+        let filesToUpload = []; let allLoadedImages = []; let currentImageIndex = 0; let currentSearchTerm = ''; let debounceTimer; let currentAdminPage = 1; let lastFocusedElement;
         
         const apiRequest = async (url, options = {}) => {
             try {
@@ -1138,7 +1140,7 @@ cat << 'EOF' > public/admin.html
             `;
             
             const cardHtml = `
-                <div class="admin-image-card border rounded-lg shadow-sm bg-white overflow-hidden flex flex-col">
+                <div class="admin-image-card border rounded-lg shadow-sm bg-white overflow-hidden flex flex-col" data-id="${image.id}">
                     <a href="#" class="image-preview-container flex-shrink-0 preview-trigger" data-id="${image.id}">
                         <div class="card-spinner"></div>
                         <img src="/image-proxy/${image.filename}?w=400" alt="${image.description || image.originalFilename}" class="pointer-events-none" onload="this.classList.add('loaded'); this.previousElementSibling.style.display='none';">
@@ -1257,6 +1259,10 @@ cat << 'EOF' > public/admin.html
             if (button.tagName === 'A' && button.hasAttribute('download')) {
                 return;
             }
+
+            if (button.matches('.preview-trigger, .preview-btn')) {
+                return; // Let the dedicated lightbox listener handle this.
+            }
             
             e.preventDefault();
 
@@ -1265,17 +1271,7 @@ cat << 'EOF' > public/admin.html
 
             const image = allLoadedImages.find(img => img.id === imageId);
             
-            if (button.matches('.preview-trigger, .preview-btn')) {
-                const newIndex = allLoadedImages.findIndex(img => img.id === imageId);
-                if (newIndex === -1) { 
-                    showToast('无法在列表中找到此图片。', 'error'); 
-                    return; 
-                }
-                DOMElements.lightbox.classList.add('active');
-                document.body.classList.add('lightbox-open');
-                showImageAtIndex(newIndex);
-            }
-            else if (button.matches('.edit-btn')) {
+            if (button.matches('.edit-btn')) {
                 if (!image) return;
                 await populateCategorySelects(image.category);
                 DOMElements.editImageModal.querySelector('#edit-id').value = image.id;
@@ -1336,84 +1332,140 @@ cat << 'EOF' > public/admin.html
         async function renderSecuritySection() { try { const response = await apiRequest('/api/admin/2fa/status'); const { enabled } = await response.json(); let content; if (enabled) { content = `<p class="text-sm text-slate-600 mb-3">两步验证 (2FA) 当前已<span class="font-bold text-green-600">启用</span>。</p><button id="disable-tfa-btn" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg">禁用 2FA</button>`; } else { content = `<p class="text-sm text-slate-600 mb-3">通过启用两步验证，为您的账户增加一层额外的安全保障。</p><button id="enable-tfa-btn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg">启用 2FA</button>`; } DOMElements.securitySection.innerHTML = content; } catch (error) { DOMElements.securitySection.innerHTML = `<p class="text-red-500">无法加载安全状态: ${error.message}</p>`; } }
         DOMElements.securitySection.addEventListener('click', async e => { if (e.target.id === 'enable-tfa-btn') { try { const response = await apiRequest('/api/admin/2fa/generate', {method: 'POST'}); const data = await response.json(); DOMElements.tfaModal.querySelector('#tfa-setup-content').innerHTML = `<p class="text-sm mb-4">1. 使用您的 Authenticator 应用 (如 Google Authenticator, Authy) 扫描下方的二维码。</p><img src="${data.qrCode}" alt="2FA QR Code" class="mx-auto border p-2 bg-white"><p class="text-sm mt-4 mb-2">或者手动输入密钥:</p><p class="font-mono bg-gray-100 p-2 rounded text-center text-sm break-all">${data.secret}</p><p class="text-sm mt-6 mb-2">2. 在下方输入应用生成的6位验证码以完成设置：</p><form id="tfa-verify-form" class="flex gap-2"><input type="text" id="tfa-token-input" required maxlength="6" class="w-full border rounded px-3 py-2" placeholder="6位数字码"><button type="submit" class="bg-green-600 hover:bg-green-700 text-white py-2 px-4 rounded">验证并启用</button></form><p id="tfa-error" class="text-red-500 text-sm mt-2 hidden"></p>`; DOMElements.tfaModal.classList.add('active'); document.getElementById('tfa-verify-form').addEventListener('submit', async ev => { ev.preventDefault(); const token = document.getElementById('tfa-token-input').value; try { const response = await apiRequest('/api/admin/2fa/enable', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ secret: data.secret, token })}); const result = await response.json(); showToast(result.message); hideModal(DOMElements.tfaModal); await renderSecuritySection(); } catch (err) { document.getElementById('tfa-error').textContent = err.message; document.getElementById('tfa-error').classList.remove('hidden'); } }); } catch (error) { showToast(error.message, 'error'); } } else if (e.target.id === 'disable-tfa-btn') { const confirmed = await showConfirmationModal('禁用 2FA', `<p>确定要禁用两步验证吗？您的账户安全性将会降低。</p>`, '确认禁用'); if (confirmed) { try { await apiRequest('/api/admin/2fa/disable', {method: 'POST'}); showToast('2FA已禁用'); await renderSecuritySection(); } catch(err) { showToast(err.message, 'error'); } } } });
         
-        // --- Lightbox Logic ---
-        const updateAdminLightbox = (item) => {
-            if (!item) return;
-            DOMElements.lightboxImage.src = `/image-proxy/${item.filename}`;
-            DOMElements.lightboxImage.alt = item.description || item.originalFilename;
-            DOMElements.lightboxCounter.textContent = `${currentImageIndex + 1} / ${allLoadedImages.length}`;
-            DOMElements.lightboxDownloadLink.href = item.src;
-            DOMElements.lightboxDownloadLink.download = item.originalFilename;
-            
-            const isRecycleBinView = document.querySelector('#nav-item-recycle-bin').classList.contains('active');
-            DOMElements.lightboxDeleteBtn.style.display = isRecycleBinView ? 'none' : 'inline-flex';
-        };
+        // --- Lightbox Logic (v1.5.2 - Enhanced Delete Experience) ---
+        {
+            const lightbox = DOMElements.lightbox;
+            const lightboxImage = DOMElements.lightboxImage;
+            const lbCounter = DOMElements.lightboxCounter;
+            const lbDownloadLink = DOMElements.lightboxDownloadLink;
+            const lbDeleteBtn = DOMElements.lightboxDeleteBtn;
+            let isLightboxLoading = false;
 
-        const preloadImage = (index, callback) => {
-            if (isLightboxLoading) return;
-            const item = allLoadedImages[index];
-            if (!item) return;
-
-            isLightboxLoading = true;
-            DOMElements.lightbox.classList.add('is-loading');
-
-            const preloader = new Image();
-            preloader.src = `/image-proxy/${item.filename}`;
-            
-            preloader.onload = () => { 
-                isLightboxLoading = false;
-                DOMElements.lightbox.classList.remove('is-loading');
-                callback(item); 
+            // 此函数仅更新计数器、下载链接和删除按钮等元数据
+            const updateLightboxMetadata = (item, index) => {
+                currentImageIndex = index;
+                lbCounter.textContent = `${index + 1} / ${allLoadedImages.length}`;
+                lbDownloadLink.href = item.src;
+                lbDownloadLink.download = item.originalFilename;
+                const isRecycleBinView = document.querySelector('#nav-item-recycle-bin').classList.contains('active');
+                lbDeleteBtn.style.display = isRecycleBinView ? 'none' : 'inline-flex';
             };
-            preloader.onerror = () => { 
-                isLightboxLoading = false;
-                DOMElements.lightbox.classList.remove('is-loading');
-                showToast('无法加载预览图片', 'error'); 
-            };
-        };
 
-        const showImageAtIndex = (index) => {
-            currentImageIndex = index;
-            preloadImage(index, updateAdminLightbox);
-        };
-        
-        const showNextImage = () => showImageAtIndex((currentImageIndex + 1) % allLoadedImages.length);
-        const showPrevImage = () => showImageAtIndex((currentImageIndex - 1 + allLoadedImages.length) % allLoadedImages.length);
-        const closeLightbox = () => { DOMElements.lightbox.classList.remove('active'); document.body.classList.remove('lightbox-open'); };
-        
-        DOMElements.lightbox.addEventListener('click', async (e) => { 
-            const target = e.target.closest('button, a') || e.target;
-            if (target.matches('.lb-next')) { showNextImage(); }
-            else if (target.matches('.lb-prev')) { showPrevImage(); }
-            else if (target.matches('.lb-close') || e.target === DOMElements.lightbox) { closeLightbox(); }
-            else if (target.id === 'lb-delete') {
-                const imageToDelete = allLoadedImages[currentImageIndex];
-                if (!imageToDelete) return;
-                const confirmed = await showConfirmationModal('移至回收站', `<p>确定要将图片 "<strong>${imageToDelete.originalFilename}</strong>" 移至回收站吗？</p>`, '确认移动', '取消');
-                if (confirmed) {
-                    try {
-                        await apiRequest(`/api/admin/images/${imageToDelete.id}`, { method: 'DELETE' });
-                        showToast('图片已移至回收站');
-                        const cardToRemove = DOMElements.imageList.querySelector(`.admin-image-card[data-id='${imageToDelete.id}']`);
-                        if (cardToRemove) { cardToRemove.classList.add('fading-out'); setTimeout(() => cardToRemove.remove(), 400); }
-                        
-                        allLoadedImages.splice(currentImageIndex, 1);
-                        
-                        if (allLoadedImages.length === 0) {
-                            closeLightbox();
-                            changePage(currentAdminPage);
-                        } else {
-                            if (currentImageIndex >= allLoadedImages.length) {
-                                currentImageIndex = allLoadedImages.length - 1;
-                            }
-                            showImageAtIndex(currentImageIndex);
-                        }
-                    } catch (error) { showToast(error.message, 'error'); }
+            const showImageAtIndex = (index) => {
+                if (isLightboxLoading) return;
+                // 使图片索引可以在列表头尾之间循环
+                if (index < 0) { index = allLoadedImages.length - 1; }
+                else if (index >= allLoadedImages.length) { index = 0; }
+                
+                if (allLoadedImages.length === 0) { // 如果已经没有图片了，就直接关闭
+                    closeLightbox();
+                    return;
                 }
-            }
-        });
 
-        document.addEventListener('keydown', e => { if (DOMElements.lightbox.classList.contains('active')) { if (e.key === 'ArrowRight') showNextImage(); if (e.key === 'ArrowLeft') showPrevImage(); if (e.key === 'Escape') closeLightbox(); } });
+                isLightboxLoading = true;
+                const item = allLoadedImages[index];
+                if (!item) { isLightboxLoading = false; return; }
+
+                // 立即显示加载动画并更新图片序号等文字信息
+                lightbox.classList.add('is-loading');
+                updateLightboxMetadata(item, index);
+
+                // 在后台预加载新图片
+                const preloader = new Image();
+                preloader.src = `/image-proxy/${item.filename}`;
+                preloader.alt = item.description || item.originalFilename;
+
+                preloader.onload = () => {
+                    // 当新图片加载完成后，才更新实际显示的<img>元素，并隐藏加载动画
+                    lightboxImage.src = preloader.src;
+                    lightboxImage.alt = preloader.alt;
+                    lightbox.classList.remove('is-loading');
+                    isLightboxLoading = false;
+                };
+                preloader.onerror = () => {
+                    showToast('无法加载预览图片', 'error');
+                    lightbox.classList.remove('is-loading');
+                    isLightboxLoading = false;
+                };
+            };
+
+            const showNextImage = () => showImageAtIndex(currentImageIndex + 1);
+            const showPrevImage = () => showImageAtIndex(currentImageIndex - 1);
+            const closeLightbox = () => {
+                lightbox.classList.remove('active');
+                document.body.classList.remove('lightbox-open');
+                if (lastFocusedElement) lastFocusedElement.focus();
+            };
+
+            // 从图片卡片打开预览的事件监听
+            DOMElements.imageList.addEventListener('click', (e) => {
+                const target = e.target.closest('.preview-trigger, .preview-btn');
+                if (!target) return;
+
+                e.preventDefault();
+                lastFocusedElement = document.activeElement;
+                const imageId = target.dataset.id;
+                const newIndex = allLoadedImages.findIndex(img => img.id === imageId);
+
+                if (newIndex === -1) {
+                    showToast('无法在当前列表中找到此图片。', 'error');
+                    return;
+                }
+
+                lightbox.classList.add('active');
+                document.body.classList.add('lightbox-open');
+                showImageAtIndex(newIndex);
+            });
+
+            // Lightbox内部控件的事件监听（上一张、下一张、关闭、删除）
+            lightbox.addEventListener('click', async (e) => {
+                const target = e.target.closest('button, a') || e.target;
+                if (target.matches('.lb-next')) { showNextImage(); }
+                else if (target.matches('.lb-prev')) { showPrevImage(); }
+                else if (target.matches('.lb-close') || e.target === lightbox) { closeLightbox(); }
+                else if (target.id === 'lb-delete') {
+                    const imageToDelete = allLoadedImages[currentImageIndex];
+                    if (!imageToDelete || isLightboxLoading) return;
+                    
+                    const confirmed = await showConfirmationModal('移至回收站', `<p>确定要将图片 "<strong>${imageToDelete.originalFilename}</strong>" 移至回收站吗？</p>`, '确认移动', '取消');
+                    
+                    if (confirmed) {
+                        try {
+                            await apiRequest(`/api/admin/images/${imageToDelete.id}`, { method: 'DELETE' });
+                            showToast('图片已移至回收站');
+
+                            const cardToRemove = DOMElements.imageList.querySelector(`.admin-image-card[data-id='${imageToDelete.id}']`);
+                            if (cardToRemove) {
+                                cardToRemove.classList.add('fading-out');
+                                setTimeout(() => cardToRemove.remove(), 400);
+                            }
+                            
+                            allLoadedImages.splice(currentImageIndex, 1);
+
+                            // 检查是否还有剩余图片
+                            if (allLoadedImages.length === 0) {
+                                closeLightbox(); // 没有图片了，关闭预览
+                            } else {
+                                // 还有图片，自动显示下一张
+                                showImageAtIndex(currentImageIndex);
+                            }
+                        } catch (error) { 
+                            showToast(error.message, 'error'); 
+                        }
+                    }
+                }
+            });
+
+            // 键盘事件监听
+            document.addEventListener('keydown', e => {
+                if (lightbox.classList.contains('active')) {
+                    if (e.key === 'ArrowRight') showNextImage();
+                    else if (e.key === 'ArrowLeft') showPrevImage();
+                    else if (e.key === 'Escape') closeLightbox();
+                }
+            });
+        }
+        
         [DOMElements.genericModal, DOMElements.editImageModal, DOMElements.tfaModal].forEach(modal => { const cancelBtn = modal.querySelector('.modal-cancel-btn'); if(cancelBtn) { cancelBtn.addEventListener('click', () => hideModal(modal)); } modal.addEventListener('click', (e) => { if (e.target === modal) hideModal(modal); }); });
         
         async function init() { await Promise.all([refreshNavigation(), renderSecuritySection()]); DOMElements.navigationList.querySelector('#nav-item-all').click(); }
