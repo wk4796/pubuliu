@@ -1,12 +1,17 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v1.7.6)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v1.7.8)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
-#   v1.7.6 更新:
-#   - 修复(后台): 修正了后台CSS的z-index(图层)问题，彻底解决了弹窗和加载动画被预览图层遮挡的Bug。
-#   - 优化(前后台): 实现智能加载动画。现在只有在图片加载较慢(如未缓存)时才会显示加载动画，已缓存图片则即时切换。
+#   v1.7.8 更新:
+#   - 修复(后台): 为后台预览大图时的加载动画(spinner)添加了缺失的CSS属性(border, border-radius)，
+#               解决了因元素不可见导致加载动画不显示的Bug。
+#
+#   v1.7.7 更新:
+#   - 修复(后台): 通过JS直接操作样式，绕过潜在的CSS冲突，彻底修复后台预览图片时加载动画不显示的顽固问题。
+#   - 修复(后台): 修正了后台CSS的z-index(图层)问题，解决了弹窗被预览图层遮挡的Bug。
+#   - 优化(前后台): 实现智能加载动画。现在只有在图片加载较慢(如未缓存)时才会显示加载动画。
 # =================================================================
 
 # --- 配置 ---
@@ -17,7 +22,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 PROMPT_Y="(${GREEN}y${NC}/${RED}n${NC})"
 
-SCRIPT_VERSION="1.7.6"
+SCRIPT_VERSION="1.7.8"
 APP_NAME="image-gallery"
 
 # --- 路径设置 ---
@@ -44,7 +49,7 @@ overwrite_app_files() {
 cat << 'EOF' > package.json
 {
   "name": "image-gallery-pro",
-  "version": "1.7.6",
+  "version": "1.7.8",
   "description": "A high-performance, full-stack image gallery application with all features.",
   "main": "server.js",
   "scripts": {
@@ -463,7 +468,7 @@ apiAdminRouter.get('/recycle-bin', handleApiError(async (req, res) => {
         case 'name_asc': deletedImages.sort((a, b) => a.originalFilename.localeCompare(b.originalFilename, 'zh-CN')); break;
         case 'name_desc': deletedImages.sort((a, b) => b.originalFilename.localeCompare(a.originalFilename, 'zh-CN')); break;
         case 'size_asc': deletedImages.sort((a, b) => a.size - b.size); break;
-        case 'size_desc': deletedImages.sort((a, b) => b.size - b.size); break;
+        case 'size_desc': deletedImages.sort((a, b) => b.size - a.size); break;
         case 'date_desc': default: deletedImages.sort((a, b) => new Date(b.deletedAt) - new Date(a.deletedAt)); break;
     }
 
@@ -1001,11 +1006,21 @@ cat << 'EOF' > public/admin.html
         
         .lightbox { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.9); display: none; justify-content: center; align-items: center; opacity: 0; visibility: hidden; transition: opacity 0.3s ease; }
         .lightbox.active { opacity: 1; visibility: visible; }
-        .lightbox .spinner { border-color: rgba(255,255,255,0.2); border-top-color: rgba(255,255,255,0.8); display: none; position: absolute; z-index: 1; width: 3rem; height: 3rem; }
-        .lightbox.is-loading .spinner { display: block; animation: spin 1s linear infinite; }
+        .lightbox .spinner { 
+            display: none;
+            position: absolute; 
+            z-index: 1; 
+            width: 3rem; 
+            height: 3rem; 
+            /* === CSS BUG FIX START === */
+            border: 4px solid rgba(255,255,255,0.2); 
+            border-radius: 50%;
+            /* === CSS BUG FIX END === */
+            border-top-color: rgba(255,255,255,0.8);
+            animation: spin 1s linear infinite;
+        }
         
         .lightbox-image { max-width: 85%; max-height: 85%; display: block; object-fit: contain; opacity: 0; transition: opacity 0.3s ease; }
-        .lightbox.is-loading .lightbox-image { opacity: 0; }
         .lightbox-image.loaded { opacity: 1; }
 
         .lightbox-btn { position: absolute; top: 50%; transform: translateY(-50%); background-color: rgba(255,255,255,0.1); color: white; border: none; font-size: 2.5rem; cursor: pointer; padding: 0.5rem 1rem; border-radius: 0.5rem; transition: background-color 0.2s; z-index: 10;}
@@ -1136,6 +1151,7 @@ cat << 'EOF' > public/admin.html
             sortSelect: document.getElementById('sort-select'), viewToggle: document.getElementById('view-toggle'), viewControls: document.getElementById('view-controls'),
             maintenanceView: document.getElementById('maintenance-view'), imageListWrapper: document.getElementById('image-list-wrapper'),
             lightbox: document.getElementById('lightbox'),
+            lightboxSpinner: document.querySelector('#lightbox .spinner'),
             lightboxImage: document.querySelector('#lightbox .lightbox-image'),
             lightboxCounter: document.getElementById('lb-counter'),
             lightboxDownloadLink: document.getElementById('lb-download'),
@@ -1560,7 +1576,7 @@ cat << 'EOF' > public/admin.html
             
             clearTimeout(loadingSpinnerTimeout);
             loadingSpinnerTimeout = setTimeout(() => {
-                DOMElements.lightbox.classList.add('is-loading');
+                DOMElements.lightboxSpinner.style.display = 'block';
             }, 200);
 
             DOMElements.lightboxImage.src = `/image-proxy/${item.filename}`;
@@ -1631,12 +1647,12 @@ cat << 'EOF' > public/admin.html
             // Attach lightbox image event handlers
             DOMElements.lightboxImage.onload = () => {
                 clearTimeout(loadingSpinnerTimeout);
-                DOMElements.lightbox.classList.remove('is-loading');
+                DOMElements.lightboxSpinner.style.display = 'none';
                 DOMElements.lightboxImage.classList.add('loaded');
             };
             DOMElements.lightboxImage.onerror = () => {
                 clearTimeout(loadingSpinnerTimeout);
-                DOMElements.lightbox.classList.remove('is-loading');
+                DOMElements.lightboxSpinner.style.display = 'none';
                 showToast('无法加载预览图片', 'error');
             };
 
