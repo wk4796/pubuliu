@@ -1,17 +1,16 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v1.7.8)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v2.0.0)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
-#   v1.7.8 更新:
-#   - 修复(后台): 为后台预览大图时的加载动画(spinner)添加了缺失的CSS属性(border, border-radius)，
-#               解决了因元素不可见导致加载动画不显示的Bug。
-#
-#   v1.7.7 更新:
-#   - 修复(后台): 通过JS直接操作样式，绕过潜在的CSS冲突，彻底修复后台预览图片时加载动画不显示的顽固问题。
-#   - 修复(后台): 修正了后台CSS的z-index(图层)问题，解决了弹窗被预览图层遮挡的Bug。
-#   - 优化(前后台): 实现智能加载动画。现在只有在图片加载较慢(如未缓存)时才会显示加载动画。
+#   v2.0.0 更新:
+#   - 核心升级(后台): 数据库从 JSON 文件迁移至 SQLite (使用 better-sqlite3)，
+#                  大幅提升了在大数据量下的查询、排序和筛选性能。
+#   - 新增功能(后台): 在“空间清理”中增加了“清理图片缓存”功能，可安全清空
+#                  由 Sharp.js 生成的缩略图缓存，释放磁盘空间。
+#   - 优化(安装): 增强了安装脚本，可自动检测并安装 SQLite 的系统
+#                开发依赖库 (如 libsqlite3-dev)，简化部署流程。
 # =================================================================
 
 # --- 配置 ---
@@ -22,7 +21,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 PROMPT_Y="(${GREEN}y${NC}/${RED}n${NC})"
 
-SCRIPT_VERSION="1.7.8"
+SCRIPT_VERSION="2.0.0"
 APP_NAME="image-gallery"
 
 # --- 路径设置 ---
@@ -49,13 +48,14 @@ overwrite_app_files() {
 cat << 'EOF' > package.json
 {
   "name": "image-gallery-pro",
-  "version": "1.7.8",
-  "description": "A high-performance, full-stack image gallery application with all features.",
+  "version": "2.0.0",
+  "description": "A high-performance, full-stack image gallery application powered by SQLite.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
   "dependencies": {
+    "better-sqlite3": "^9.4.3",
     "body-parser": "^1.19.0",
     "cookie-parser": "^1.4.6",
     "dotenv": "^16.0.0",
@@ -76,13 +76,15 @@ const express = require('express');
 const multer = require('multer');
 const bodyParser = require('body-parser');
 const path = require('path');
-const fs = require('fs').promises;
+const fs = require('fs');
+const fsp = fs.promises;
 const { v4: uuidv4 } = require('uuid');
 const cookieParser = require('cookie-parser');
 const jwt = require('jsonwebtoken');
 const sharp = require('sharp');
 const speakeasy = require('speakeasy');
 const qrcode = require('qrcode');
+const Database = require('better-sqlite3');
 require('dotenv').config();
 
 const app = express();
@@ -93,35 +95,72 @@ const JWT_SECRET = process.env.JWT_SECRET;
 const AUTH_TOKEN_NAME = 'auth_token';
 const UNCATEGORIZED = '未分类';
 
-const dbPath = path.join(__dirname, 'data', 'images.json');
-const categoriesPath = path.join(__dirname, 'data', 'categories.json');
-const configPath = path.join(__dirname, 'data', 'config.json');
+const dataDir = path.join(__dirname, 'data');
+const dbPath = path.join(dataDir, 'gallery.db');
 const uploadsDir = path.join(__dirname, 'public', 'uploads');
 const cacheDir = path.join(__dirname, 'public', 'cache');
 
-let appConfig = {};
+let db;
 
-const initializeApp = async () => {
+const initializeApp = () => {
     try {
-        await fs.mkdir(path.join(__dirname, 'data'), { recursive: true });
-        await fs.mkdir(uploadsDir, { recursive: true });
-        await fs.mkdir(cacheDir, { recursive: true });
-        appConfig = await readDB(configPath, {});
-    } catch (error) { console.error('初始化失败:', error); process.exit(1); }
+        fs.mkdirSync(dataDir, { recursive: true });
+        fs.mkdirSync(uploadsDir, { recursive: true });
+        fs.mkdirSync(cacheDir, { recursive: true });
+
+        db = new Database(dbPath);
+
+        // 初始化数据库表结构
+        db.exec(`
+            CREATE TABLE IF NOT EXISTS images (
+                id TEXT PRIMARY KEY,
+                src TEXT NOT NULL,
+                category TEXT NOT NULL DEFAULT '${UNCATEGORIZED}',
+                description TEXT,
+                originalFilename TEXT NOT NULL,
+                filename TEXT NOT NULL UNIQUE,
+                size INTEGER NOT NULL,
+                uploadedAt TEXT NOT NULL,
+                width INTEGER,
+                height INTEGER,
+                status TEXT NOT NULL DEFAULT 'active',
+                deletedAt TEXT
+            );
+            CREATE TABLE IF NOT EXISTS categories (
+                name TEXT PRIMARY KEY NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS config (
+                key TEXT PRIMARY KEY NOT NULL,
+                value TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_images_category ON images(category);
+            CREATE INDEX IF NOT EXISTS idx_images_status ON images(status);
+            CREATE INDEX IF NOT EXISTS idx_images_uploadedAt ON images(uploadedAt);
+        `);
+
+        // 确保 '未分类' 存在
+        db.prepare('INSERT OR IGNORE INTO categories (name) VALUES (?)').run(UNCATEGORIZED);
+
+        console.log('数据库初始化成功。');
+    } catch (error) {
+        console.error('初始化失败:', error);
+        process.exit(1);
+    }
+};
+
+const getConfig = (key, defaultValue = null) => {
+    const stmt = db.prepare('SELECT value FROM config WHERE key = ?');
+    const result = stmt.get(key);
+    return result ? JSON.parse(result.value) : defaultValue;
+};
+const setConfig = (key, value) => {
+    const stmt = db.prepare('INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)');
+    stmt.run(key, JSON.stringify(value));
 };
 
 app.use(bodyParser.json({ limit: '50mb' }));
 app.use(bodyParser.urlencoded({ extended: true, limit: '50mb' }));
 app.use(cookieParser());
-
-const readDB = async (filePath, defaultVal = []) => {
-    try { await fs.access(filePath); const data = await fs.readFile(filePath, 'utf-8'); return data.trim() === '' ? defaultVal : JSON.parse(data); } 
-    catch (error) { if (error.code === 'ENOENT') return defaultVal; throw new Error(`读取DB时出错: ${error.message}`); }
-};
-const writeDB = async (filePath, data) => {
-    try { await fs.writeFile(filePath, JSON.stringify(data, null, 2)); } 
-    catch (error) { throw new Error(`写入DB时出错: ${error.message}`); }
-};
 
 const authMiddleware = (isApi) => (req, res, next) => {
     const token = req.cookies[AUTH_TOKEN_NAME];
@@ -137,14 +176,16 @@ const handleApiError = (handler) => async (req, res, next) => {
         await handler(req, res, next);
     } catch (error) {
         console.error(`API Error on ${req.method} ${req.path}:`, error);
+        if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') {
+            return res.status(409).json({ message: '操作失败：一个或多个字段违反了唯一性约束（例如，文件名或分类名重复）。' });
+        }
         res.status(500).json({ message: error.message || '服务器发生未知错误。' });
     }
 };
 
 app.get('/api/2fa/is-enabled', handleApiError(async (req, res) => {
-    const currentConfig = await readDB(configPath, {});
-    const isEnabled = !!(currentConfig.tfa && currentConfig.tfa.secret);
-    res.json({ enabled: isEnabled });
+    const tfaConfig = getConfig('tfa');
+    res.json({ enabled: !!(tfaConfig && tfaConfig.secret) });
 }));
 
 app.post('/api/login', handleApiError(async (req, res) => {
@@ -153,13 +194,13 @@ app.post('/api/login', handleApiError(async (req, res) => {
         return res.redirect('/login.html?error=1');
     }
     
-    appConfig = await readDB(configPath, {});
-    if (appConfig.tfa && appConfig.tfa.secret) {
+    const tfaConfig = getConfig('tfa');
+    if (tfaConfig && tfaConfig.secret) {
         if (!tfa_token) {
              return res.redirect('/login.html?error=2'); 
         }
         const verified = speakeasy.totp.verify({
-            secret: appConfig.tfa.secret,
+            secret: tfaConfig.secret,
             encoding: 'base32',
             token: tfa_token,
         });
@@ -178,87 +219,75 @@ app.get('/admin.html', requirePageAuth, (req, res) => res.sendFile(path.join(__d
 app.get('/admin', requirePageAuth, (req, res) => res.redirect('/admin.html'));
 
 app.get('/api/images', handleApiError(async (req, res) => {
-    let images = await readDB(dbPath);
-    images = images.filter(img => img.status !== 'deleted');
+    const { category, search, page = 1, limit = 20, sort_by = 'date_desc' } = req.query;
     
-    const { category, search, page = 1, limit = 20, sort_by = 'date_desc', sort_order } = req.query; // sort_order is for legacy, use sort_by
+    let whereClauses = ["status != 'deleted'"];
+    const params = [];
 
     if (search) {
-        const searchTerm = search.toLowerCase();
-        images = images.filter(img => (img.originalFilename && img.originalFilename.toLowerCase().includes(searchTerm)) || (img.description && img.description.toLowerCase().includes(searchTerm)));
-    }
-    
-    if (category && category !== 'all' && category !== 'random') {
-        images = images.filter(img => img.category === category);
-    }
-    
-    // Sorting logic
-    switch (sort_by) {
-        case 'date_asc':
-            images.sort((a, b) => new Date(a.uploadedAt) - new Date(b.uploadedAt));
-            break;
-        case 'name_asc':
-            images.sort((a, b) => a.originalFilename.localeCompare(b.originalFilename, 'zh-CN'));
-            break;
-        case 'name_desc':
-            images.sort((a, b) => b.originalFilename.localeCompare(a.originalFilename, 'zh-CN'));
-            break;
-        case 'size_asc':
-            images.sort((a, b) => a.size - b.size);
-            break;
-        case 'size_desc':
-            images.sort((a, b) => b.size - a.size);
-            break;
-        case 'random':
-             images.sort(() => 0.5 - Math.random());
-            break;
-        case 'date_desc':
-        default:
-            images.sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt));
-            break;
+        whereClauses.push("(originalFilename LIKE ? OR description LIKE ?)");
+        params.push(`%${search}%`, `%${search}%`);
     }
 
-    // Front-end gallery special random case
-    if (category === 'random') {
-         images.sort(() => 0.5 - Math.random());
+    if (category && category !== 'all' && category !== 'random') {
+        whereClauses.push("category = ?");
+        params.push(category);
     }
+
+    let orderByClause;
+    switch (sort_by) {
+        case 'date_asc': orderByClause = 'ORDER BY uploadedAt ASC'; break;
+        case 'name_asc': orderByClause = 'ORDER BY originalFilename ASC'; break;
+        case 'name_desc': orderByClause = 'ORDER BY originalFilename DESC'; break;
+        case 'size_asc': orderByClause = 'ORDER BY size ASC'; break;
+        case 'size_desc': orderByClause = 'ORDER BY size DESC'; break;
+        case 'random': orderByClause = 'ORDER BY RANDOM()'; break;
+        case 'date_desc': default: orderByClause = 'ORDER BY uploadedAt DESC'; break;
+    }
+
+    // Front-end gallery special random case, overrides other sorting
+    if (category === 'random') {
+        orderByClause = 'ORDER BY RANDOM()';
+    }
+
+    const whereString = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
     
+    const countStmt = db.prepare(`SELECT COUNT(*) as total FROM images ${whereString}`);
+    const { total } = countStmt.get(...params);
+
     const pageNum = parseInt(page);
     const limitNum = parseInt(limit);
-    const startIndex = (pageNum - 1) * limitNum;
-    const endIndex = pageNum * limitNum;
-    
-    const paginatedImages = images.slice(startIndex, endIndex);
-    const totalImages = images.length;
-    const totalPages = Math.ceil(totalImages / limitNum);
+    const offset = (pageNum - 1) * limitNum;
+    const totalPages = Math.ceil(total / limitNum);
 
+    const imagesStmt = db.prepare(`SELECT * FROM images ${whereString} ${orderByClause} LIMIT ? OFFSET ?`);
+    const images = imagesStmt.all(...params, limitNum, offset);
+    
     res.json({
-        images: paginatedImages,
+        images: images,
         page: pageNum,
         limit: limitNum,
         totalPages: totalPages,
-        totalImages: totalImages,
+        totalImages: total,
         hasMore: pageNum < totalPages
     });
 }));
 
 app.get('/api/categories', handleApiError(async (req, res) => {
-    const categories = await readDB(categoriesPath, [UNCATEGORIZED]);
-    if (!categories.includes(UNCATEGORIZED)) {
-        categories.unshift(UNCATEGORIZED);
-    }
+    const rows = db.prepare("SELECT name FROM categories").all();
+    const categories = rows.map(r => r.name);
     res.json(categories.sort((a,b) => a === UNCATEGORIZED ? -1 : b === UNCATEGORIZED ? 1 : a.localeCompare(b, 'zh-CN')));
 }));
 
 app.get('/api/public/categories', handleApiError(async (req, res) => {
-    const allDefinedCategories = await readDB(categoriesPath, [UNCATEGORIZED]);
-    let images = await readDB(dbPath);
-    images = images.filter(img => img.status !== 'deleted');
-    const categoriesInUse = new Set(images.map(img => img.category || UNCATEGORIZED));
-    if (!allDefinedCategories.includes(UNCATEGORIZED)) {
-        allDefinedCategories.unshift(UNCATEGORIZED);
-    }
-    let categoriesToShow = allDefinedCategories.filter(cat => categoriesInUse.has(cat));
+    // Get categories that actually have active images in them
+    const rows = db.prepare(`
+        SELECT DISTINCT c.name 
+        FROM categories c 
+        JOIN images i ON c.name = i.category 
+        WHERE i.status = 'active'
+    `).all();
+    let categoriesToShow = rows.map(r => r.name);
     res.json(categoriesToShow.sort((a,b) => a === UNCATEGORIZED ? -1 : b === UNCATEGORIZED ? 1 : a.localeCompare(b, 'zh-CN')));
 }));
 
@@ -277,14 +306,14 @@ app.get('/image-proxy/:filename', async (req, res) => {
     const cachePath = path.join(cacheDir, cacheFilename);
 
     try {
-        await fs.access(cachePath);
+        await fsp.access(cachePath);
         res.sendFile(cachePath);
     } catch (error) {
         try {
-            await fs.access(originalPath);
+            await fsp.access(originalPath);
             const transformer = sharp(originalPath).resize(width, height, { fit: 'inside', withoutEnlargement: true });
             const processedImageBuffer = await (targetFormat === 'webp' ? transformer.webp({ quality: 80 }) : transformer.jpeg({ quality: 85 })).toBuffer();
-            await fs.writeFile(cachePath, processedImageBuffer);
+            await fsp.writeFile(cachePath, processedImageBuffer);
             res.setHeader('Content-Type', mimeType);
             res.send(processedImageBuffer);
         } catch (procError) { res.status(404).send('Image not found or processing failed.'); }
@@ -300,27 +329,32 @@ const upload = multer({ storage: storage });
 apiAdminRouter.post('/check-filenames', handleApiError(async(req, res) => {
     const { filenames } = req.body;
     if (!Array.isArray(filenames)) { return res.status(400).json({message: '无效的输入格式。'}); }
-    const images = await readDB(dbPath);
-    const existingFilenames = new Set(images.filter(img => img.status !== 'deleted').map(img => img.originalFilename));
-    const duplicates = filenames.filter(name => existingFilenames.has(name));
+    
+    const placeholders = filenames.map(() => '?').join(',');
+    const stmt = db.prepare(`SELECT originalFilename FROM images WHERE status != 'deleted' AND originalFilename IN (${placeholders})`);
+    const rows = stmt.all(...filenames);
+    const duplicates = rows.map(r => r.originalFilename);
+    
     res.json({ duplicates });
 }));
 
 apiAdminRouter.post('/upload', upload.single('image'), handleApiError(async (req, res) => {
     if (!req.file) return res.status(400).json({ message: '没有选择文件。' });
     const metadata = await sharp(req.file.path).metadata();
-    const images = await readDB(dbPath);
     
     let originalFilename = req.file.originalname;
-    const existingFilenames = new Set(images.filter(img => img.status !== 'deleted').map(img => img.originalFilename));
-    if (req.body.rename === 'true' && existingFilenames.has(originalFilename)) {
-        const ext = path.extname(originalFilename);
-        const baseName = path.basename(originalFilename, ext);
-        let counter = 1;
-        do {
-            originalFilename = `${baseName} (${counter})${ext}`;
-            counter++;
-        } while (existingFilenames.has(originalFilename));
+
+    if (req.body.rename === 'true') {
+        const checkStmt = db.prepare("SELECT 1 FROM images WHERE status != 'deleted' AND originalFilename = ?");
+        if (checkStmt.get(originalFilename)) {
+             const ext = path.extname(originalFilename);
+             const baseName = path.basename(originalFilename, ext);
+             let counter = 1;
+             do {
+                 originalFilename = `${baseName} (${counter})${ext}`;
+                 counter++;
+             } while (checkStmt.get(originalFilename));
+        }
     }
 
     const newImage = { 
@@ -331,39 +365,44 @@ apiAdminRouter.post('/upload', upload.single('image'), handleApiError(async (req
         filename: req.file.filename, 
         size: req.file.size, uploadedAt: new Date().toISOString(),
         width: metadata.width, height: metadata.height,
-        status: 'active'
+        status: 'active',
+        deletedAt: null
     };
-    images.unshift(newImage);
-    await writeDB(dbPath, images);
+
+    const stmt = db.prepare(`INSERT INTO images (id, src, category, description, originalFilename, filename, size, uploadedAt, width, height, status, deletedAt) 
+        VALUES (@id, @src, @category, @description, @originalFilename, @filename, @size, @uploadedAt, @width, @height, @status, @deletedAt)`);
+    stmt.run(newImage);
+
     res.status(200).json({ message: '上传成功', image: newImage });
 }));
 
 apiAdminRouter.delete('/images/:id', handleApiError(async (req, res) => {
-    let images = await readDB(dbPath);
-    const imageIndex = images.findIndex(img => img.id === req.params.id);
-    if (imageIndex === -1) return res.status(404).json({ message: '图片未找到' });
-    images[imageIndex].status = 'deleted';
-    images[imageIndex].deletedAt = new Date().toISOString();
-    await writeDB(dbPath, images);
+    const stmt = db.prepare("UPDATE images SET status = 'deleted', deletedAt = ? WHERE id = ?");
+    const info = stmt.run(new Date().toISOString(), req.params.id);
+
+    if (info.changes === 0) return res.status(404).json({ message: '图片未找到' });
     res.json({ message: '图片已移至回收站' });
 }));
 
 apiAdminRouter.put('/images/:id', handleApiError(async (req, res) => {
-    let images = await readDB(dbPath);
     const { category, description, originalFilename } = req.body;
-    const imageIndex = images.findIndex(img => img.id === req.params.id);
-    if (imageIndex === -1) return res.status(404).json({ message: '图片未找到' });
-    const imageToUpdate = { ...images[imageIndex] };
-    imageToUpdate.category = category || imageToUpdate.category;
-    imageToUpdate.description = description === undefined ? imageToUpdate.description : description;
-    if (originalFilename && originalFilename !== imageToUpdate.originalFilename) {
-        const existingFilenames = new Set(images.filter(img => img.status !== 'deleted').map(img => img.originalFilename).filter(name => name !== images[imageIndex].originalFilename));
-        if (existingFilenames.has(originalFilename)) { return res.status(409).json({ message: '该文件名已存在。'}); }
-        imageToUpdate.originalFilename = originalFilename;
+    const imageId = req.params.id;
+
+    if (originalFilename) {
+        const checkStmt = db.prepare("SELECT id FROM images WHERE status != 'deleted' AND originalFilename = ?");
+        const existing = checkStmt.get(originalFilename);
+        if (existing && existing.id !== imageId) {
+            return res.status(409).json({ message: '该文件名已存在。'});
+        }
     }
-    images[imageIndex] = imageToUpdate;
-    await writeDB(dbPath, images);
-    res.json({ message: '更新成功', image: imageToUpdate });
+
+    const stmt = db.prepare("UPDATE images SET category = ?, description = ?, originalFilename = ? WHERE id = ?");
+    const info = stmt.run(category, description, originalFilename, imageId);
+
+    if (info.changes === 0) return res.status(404).json({ message: '图片未找到' });
+    
+    const updatedImage = db.prepare("SELECT * FROM images WHERE id = ?").get(imageId);
+    res.json({ message: '更新成功', image: updatedImage });
 }));
 
 apiAdminRouter.post('/images/bulk-action', handleApiError(async (req, res) => {
@@ -371,152 +410,152 @@ apiAdminRouter.post('/images/bulk-action', handleApiError(async (req, res) => {
     if (!action || !Array.isArray(ids) || ids.length === 0) {
         return res.status(400).json({ message: '无效的请求：缺少 action 或 ids。' });
     }
-    let allImages = await readDB(dbPath);
-    const idsToProcess = new Set(ids);
-    let modified = false;
-
-    if (action === 'purge') {
-        const imagesToDelete = allImages.filter(img => idsToProcess.has(img.id));
-        for (const image of imagesToDelete) {
-            const filePath = path.join(uploadsDir, image.filename);
-            try { await fs.unlink(filePath); } 
-            catch (error) { console.error(`永久删除文件失败: ${filePath}`, error); }
-        }
-        allImages = allImages.filter(img => !idsToProcess.has(img.id));
-        modified = true;
-    } else {
-        allImages.forEach(img => {
-            if (idsToProcess.has(img.id)) {
-                modified = true;
-                switch (action) {
-                    case 'delete':
-                        img.status = 'deleted';
-                        img.deletedAt = new Date().toISOString();
-                        break;
-                    case 'restore':
-                        img.status = 'active';
-                        delete img.deletedAt;
-                        break;
-                    case 'recategorize':
-                        if (payload && payload.newCategory) {
-                            img.category = payload.newCategory;
-                        }
-                        break;
-                    case 'edit_description':
-                        if (payload && typeof payload.newDescription !== 'undefined') {
-                            img.description = payload.newDescription;
-                        }
-                        break;
+    
+    const placeholders = ids.map(() => '?').join(',');
+    const transaction = db.transaction(() => {
+        switch (action) {
+            case 'delete':
+                db.prepare(`UPDATE images SET status = 'deleted', deletedAt = ? WHERE id IN (${placeholders})`).run(new Date().toISOString(), ...ids);
+                break;
+            case 'restore':
+                db.prepare(`UPDATE images SET status = 'active', deletedAt = NULL WHERE id IN (${placeholders})`).run(...ids);
+                break;
+            case 'recategorize':
+                if (payload && payload.newCategory) {
+                    db.prepare(`UPDATE images SET category = ? WHERE id IN (${placeholders})`).run(payload.newCategory, ...ids);
                 }
-            }
-        });
-    }
+                break;
+            case 'edit_description':
+                 if (payload && typeof payload.newDescription !== 'undefined') {
+                    db.prepare(`UPDATE images SET description = ? WHERE id IN (${placeholders})`).run(payload.newDescription, ...ids);
+                 }
+                break;
+            case 'purge':
+                const imagesToPurge = db.prepare(`SELECT filename FROM images WHERE id IN (${placeholders})`).all(...ids);
+                for (const image of imagesToPurge) {
+                    const filePath = path.join(uploadsDir, image.filename);
+                    try { fsp.unlink(filePath); } catch (error) { console.error(`永久删除文件失败: ${filePath}`, error); }
+                }
+                db.prepare(`DELETE FROM images WHERE id IN (${placeholders})`).run(...ids);
+                break;
+        }
+    });
 
-    if (modified) { await writeDB(dbPath, allImages); }
+    transaction();
     res.json({ message: `批量操作 '${action}' 已成功完成。` });
 }));
 
 apiAdminRouter.post('/categories', handleApiError(async (req, res) => {
     const { name } = req.body;
     if (!name || name.trim() === '') return res.status(400).json({ message: '分类名称不能为空。' });
-    let categories = await readDB(categoriesPath, [UNCATEGORIZED]);
-    if (categories.includes(name)) return res.status(409).json({ message: '该分类已存在。' });
-    categories.push(name);
-    await writeDB(categoriesPath, categories);
+    
+    const stmt = db.prepare('INSERT INTO categories (name) VALUES (?)');
+    stmt.run(name);
+
     res.status(201).json({ message: '分类创建成功', category: name });
 }));
 
 apiAdminRouter.delete('/categories', handleApiError(async (req, res) => {
     const { name } = req.body;
     if (!name || name === UNCATEGORIZED) return res.status(400).json({ message: '无效的分类或“未分类”无法删除。' });
-    let categories = await readDB(categoriesPath);
-    if (!categories.includes(name)) return res.status(404).json({ message: '该分类不存在。' });
-    const updatedCategories = categories.filter(cat => cat !== name);
-    await writeDB(categoriesPath, updatedCategories);
-    let images = await readDB(dbPath);
-    images.forEach(img => { if (img.category === name) { img.category = UNCATEGORIZED; } });
-    await writeDB(dbPath, images);
-    res.status(200).json({ message: `分类 '${name}' 已删除，相关图片已归入 '${UNCATEGORIZED}'。` });
+
+    const transaction = db.transaction(() => {
+        db.prepare("UPDATE images SET category = ? WHERE category = ?").run(UNCATEGORIZED, name);
+        const info = db.prepare("DELETE FROM categories WHERE name = ?").run(name);
+        if (info.changes === 0) throw new Error('该分类不存在。');
+    });
+
+    try {
+        transaction();
+        res.status(200).json({ message: `分类 '${name}' 已删除，相关图片已归入 '${UNCATEGORIZED}'。` });
+    } catch (error) {
+        res.status(404).json({ message: error.message });
+    }
 }));
 
 apiAdminRouter.put('/categories', handleApiError(async (req, res) => {
     const { oldName, newName } = req.body;
     if (!oldName || !newName || oldName === newName || oldName === UNCATEGORIZED) return res.status(400).json({ message: '无效的分类名称。' });
-    let categories = await readDB(categoriesPath);
-    if (!categories.includes(oldName)) return res.status(404).json({ message: '旧分类不存在。' });
-    if (categories.includes(newName)) return res.status(409).json({ message: '新的分类名称已存在。' });
-    const updatedCategories = categories.map(cat => (cat === oldName ? newName : cat));
-    await writeDB(categoriesPath, updatedCategories);
-    let images = await readDB(dbPath);
-    images.forEach(img => { if (img.category === oldName) { img.category = newName; } });
-    await writeDB(dbPath, images);
-    res.status(200).json({ message: `分类 '${oldName}' 已重命名为 '${newName}'。` });
+    
+    const transaction = db.transaction(() => {
+        db.prepare("UPDATE categories SET name = ? WHERE name = ?").run(newName, oldName);
+        db.prepare("UPDATE images SET category = ? WHERE category = ?").run(newName, oldName);
+    });
+
+    try {
+        transaction();
+        res.status(200).json({ message: `分类 '${oldName}' 已重命名为 '${newName}'。` });
+    } catch(err) {
+        if (err.code === 'SQLITE_CONSTRAINT_PRIMARYKEY') {
+            return res.status(409).json({ message: '新的分类名称已存在。' });
+        }
+        throw err;
+    }
 }));
 
 apiAdminRouter.get('/recycle-bin', handleApiError(async (req, res) => {
     const { search, page = 1, limit = 12, sort_by = 'date_desc' } = req.query;
-    let images = await readDB(dbPath);
-    let deletedImages = images.filter(img => img.status === 'deleted');
+    
+    let whereClauses = ["status = 'deleted'"];
+    const params = [];
 
     if (search) {
-        const searchTerm = search.toLowerCase();
-        deletedImages = deletedImages.filter(img => (img.originalFilename && img.originalFilename.toLowerCase().includes(searchTerm)) || (img.description && img.description.toLowerCase().includes(searchTerm)));
+        whereClauses.push("(originalFilename LIKE ? OR description LIKE ?)");
+        params.push(`%${search}%`, `%${search}%`);
     }
-    
+
+    let orderByClause;
     switch (sort_by) {
-        case 'date_asc': deletedImages.sort((a, b) => new Date(a.deletedAt) - new Date(b.deletedAt)); break;
-        case 'name_asc': deletedImages.sort((a, b) => a.originalFilename.localeCompare(b.originalFilename, 'zh-CN')); break;
-        case 'name_desc': deletedImages.sort((a, b) => b.originalFilename.localeCompare(a.originalFilename, 'zh-CN')); break;
-        case 'size_asc': deletedImages.sort((a, b) => a.size - b.size); break;
-        case 'size_desc': deletedImages.sort((a, b) => b.size - a.size); break;
-        case 'date_desc': default: deletedImages.sort((a, b) => new Date(b.deletedAt) - new Date(a.deletedAt)); break;
+        case 'date_asc': orderByClause = 'ORDER BY deletedAt ASC'; break;
+        case 'name_asc': orderByClause = 'ORDER BY originalFilename ASC'; break;
+        case 'name_desc': orderByClause = 'ORDER BY originalFilename DESC'; break;
+        case 'size_asc': orderByClause = 'ORDER BY size ASC'; break;
+        case 'size_desc': orderByClause = 'ORDER BY size DESC'; break;
+        case 'date_desc': default: orderByClause = 'ORDER BY deletedAt DESC'; break;
     }
+
+    const whereString = `WHERE ${whereClauses.join(' AND ')}`;
+    const countStmt = db.prepare(`SELECT COUNT(*) as total FROM images ${whereString}`);
+    const { total } = countStmt.get(...params);
 
     const pageNum = parseInt(page);
     const limitNum = parseInt(limit);
-    const startIndex = (pageNum - 1) * limitNum;
-    const endIndex = pageNum * limitNum;
-    const paginatedImages = deletedImages.slice(startIndex, endIndex);
-    const totalImages = deletedImages.length;
-    res.json({ images: paginatedImages, page: pageNum, totalPages: Math.ceil(totalImages / limitNum), totalImages: totalImages });
+    const offset = (pageNum - 1) * limitNum;
+    const totalPages = Math.ceil(total / limitNum);
+
+    const imagesStmt = db.prepare(`SELECT * FROM images ${whereString} ${orderByClause} LIMIT ? OFFSET ?`);
+    const deletedImages = imagesStmt.all(...params, limitNum, offset);
+
+    res.json({ images: deletedImages, page: pageNum, totalPages: totalPages, totalImages: total });
 }));
 
 apiAdminRouter.post('/recycle-bin/:id/restore', handleApiError(async (req, res) => {
-    let images = await readDB(dbPath);
-    const imageIndex = images.findIndex(img => img.id === req.params.id);
-    if (imageIndex === -1) return res.status(404).json({ message: '图片未找到' });
-    images[imageIndex].status = 'active';
-    delete images[imageIndex].deletedAt;
-    await writeDB(dbPath, images);
+    const info = db.prepare("UPDATE images SET status = 'active', deletedAt = NULL WHERE id = ?").run(req.params.id);
+    if (info.changes === 0) return res.status(404).json({ message: '图片未找到' });
     res.json({ message: '图片已成功恢复' });
 }));
 
 apiAdminRouter.delete('/recycle-bin/:id/purge', handleApiError(async (req, res) => {
-    let images = await readDB(dbPath);
-    const imageToDelete = images.find(img => img.id === req.params.id);
+    const imageToDelete = db.prepare("SELECT filename FROM images WHERE id = ?").get(req.params.id);
     if (!imageToDelete) return res.status(404).json({ message: '图片未找到' });
+
     const filePath = path.join(uploadsDir, imageToDelete.filename);
-    try { await fs.unlink(filePath); } catch (error) { console.error(`删除文件失败: ${filePath}`, error); }
-    const updatedImages = images.filter(img => img.id !== req.params.id);
-    await writeDB(dbPath, updatedImages);
+    try { await fsp.unlink(filePath); } catch (error) { console.error(`删除文件失败: ${filePath}`, error); }
+
+    db.prepare("DELETE FROM images WHERE id = ?").run(req.params.id);
     res.json({ message: '图片已永久删除' });
 }));
 
 apiAdminRouter.get('/maintenance/find-orphans', handleApiError(async (req, res) => {
-    const allFiles = await fs.readdir(uploadsDir);
-    const imagesDb = await readDB(dbPath);
-    const dbFilenames = new Set(imagesDb.map(img => img.filename));
+    const allFiles = await fsp.readdir(uploadsDir);
+    const dbFilenames = new Set(db.prepare("SELECT filename FROM images").all().map(img => img.filename));
     const orphanFiles = allFiles.filter(file => !dbFilenames.has(file));
     
     const orphanDetails = [];
     for (const file of orphanFiles) {
         try {
-            const stats = await fs.stat(path.join(uploadsDir, file));
-            orphanDetails.push({
-                filename: file,
-                size: stats.size,
-                createdAt: stats.birthtime
-            });
+            const stats = await fsp.stat(path.join(uploadsDir, file));
+            orphanDetails.push({ filename: file, size: stats.size, createdAt: stats.birthtime });
         } catch (e) {
              console.error(`无法获取文件信息: ${file}`, e);
         }
@@ -537,7 +576,7 @@ apiAdminRouter.post('/maintenance/delete-orphans', handleApiError(async (req, re
             continue;
         }
         try {
-            await fs.unlink(path.join(uploadsDir, filename));
+            await fsp.unlink(path.join(uploadsDir, filename));
             deletedCount++;
         } catch (error) {
             errors.push(`无法删除 ${filename}: ${error.message}`);
@@ -546,9 +585,30 @@ apiAdminRouter.post('/maintenance/delete-orphans', handleApiError(async (req, re
     res.json({ message: `操作完成。成功删除 ${deletedCount} 个文件。`, errors: errors });
 }));
 
+apiAdminRouter.post('/maintenance/clear-cache', handleApiError(async (req, res) => {
+    const files = await fsp.readdir(cacheDir);
+    let clearedCount = 0;
+    let errors = [];
+    for (const file of files) {
+        try {
+            await fsp.unlink(path.join(cacheDir, file));
+            clearedCount++;
+        } catch (error) {
+            console.error(`无法删除缓存文件 ${file}:`, error);
+            errors.push(file);
+        }
+    }
+     if (errors.length > 0) {
+        res.status(500).json({ message: `完成，但有 ${errors.length} 个文件无法删除。成功清理 ${clearedCount} 个文件。` });
+    } else {
+        res.json({ message: `成功清理了 ${clearedCount} 个缓存文件。` });
+    }
+}));
+
+
 apiAdminRouter.get('/2fa/status', handleApiError(async(req, res) => {
-    appConfig = await readDB(configPath, {});
-    res.json({ enabled: !!(appConfig.tfa && appConfig.tfa.secret) });
+    const tfaConfig = getConfig('tfa');
+    res.json({ enabled: !!(tfaConfig && tfaConfig.secret) });
 }));
 
 apiAdminRouter.post('/2fa/generate', handleApiError((req, res) => {
@@ -564,8 +624,7 @@ apiAdminRouter.post('/2fa/enable', handleApiError(async (req, res) => {
     const verified = speakeasy.totp.verify({ secret, encoding: 'base32', token });
 
     if (verified) {
-        appConfig.tfa = { secret: secret };
-        await writeDB(configPath, appConfig);
+        setConfig('tfa', { secret: secret });
         res.json({ message: '2FA 已成功启用！' });
     } else {
         res.status(400).json({ message: '验证码不正确。' });
@@ -573,19 +632,27 @@ apiAdminRouter.post('/2fa/enable', handleApiError(async (req, res) => {
 }));
 
 apiAdminRouter.post('/2fa/disable', handleApiError(async (req, res) => {
-    appConfig = await readDB(configPath, {});
-    delete appConfig.tfa;
-    await writeDB(configPath, appConfig);
+    setConfig('tfa', null); // or handle deletion if preferred
     res.json({ message: '2FA 已禁用。' });
 }));
 
 app.use('/api/admin', apiAdminRouter);
 app.use(express.static(path.join(__dirname, 'public')));
+
 (async () => {
     if (!JWT_SECRET) { console.error(`错误: JWT_SECRET 未在 .env 文件中设置。`); process.exit(1); }
-    await initializeApp();
+    initializeApp();
     app.listen(PORT, () => console.log(`服务器正在 http://localhost:${PORT} 运行`));
 })();
+
+process.on('exit', () => {
+    if (db) {
+        db.close();
+        console.log('数据库连接已关闭。');
+    }
+});
+process.on('SIGINT', () => process.exit());
+process.on('SIGTERM', () => process.exit());
 EOF
 
     echo "--> 正在生成主画廊 public/index.html..."
@@ -1012,10 +1079,8 @@ cat << 'EOF' > public/admin.html
             z-index: 1; 
             width: 3rem; 
             height: 3rem; 
-            /* === CSS BUG FIX START === */
             border: 4px solid rgba(255,255,255,0.2); 
             border-radius: 50%;
-            /* === CSS BUG FIX END === */
             border-top-color: rgba(255,255,255,0.8);
             animation: spin 1s linear infinite;
         }
@@ -1445,7 +1510,7 @@ cat << 'EOF' > public/admin.html
             if (button.tagName === 'A' && button.hasAttribute('download')) { return; } e.preventDefault();
             const image = allLoadedImages.find(img => img.id === imageId);
             if (button.matches('.preview-trigger, .preview-btn')) { const newIndex = allLoadedImages.findIndex(img => img.id === imageId); if (newIndex === -1) { showToast('无法在列表中找到此图片。', 'error'); return; } DOMElements.lightbox.classList.add('active'); document.body.classList.add('lightbox-open'); showImageAtIndex(newIndex); }
-            else if (button.matches('.edit-btn')) { if (!image) return; await populateCategorySelects(image.category); DOMElements.editImageModal.querySelector('#edit-id').value = image.id; DOMElements.editImageModal.querySelector('#edit-originalFilename').value = image.originalFilename; DOMElements.editImageModal.querySelector('#edit-description').value = image.description; DOMElements.editImageModal.classList.add('active'); }
+            else if (button.matches('.edit-btn')) { if (!image) return; await populateCategorySelects(image.category); DOMElements.editImageModal.querySelector('#edit-id').value = image.id; DOMElements.editImageModal.querySelector('#edit-originalFilename').value = image.originalFilename; DOMElements.editCategorySelect.value = image.category; DOMElements.editImageModal.querySelector('#edit-description').value = image.description; DOMElements.editImageModal.classList.add('active'); }
             else if (button.matches('.delete-btn')) { if (!image) return; const confirmed = await showConfirmationModal('移至回收站', `<p>确定要将图片 "<strong>${image.originalFilename}</strong>" 移至回收站吗？</p>`, '确认移动'); if (confirmed) { try { await apiRequest(`/api/admin/images/${imageId}`, { method: 'DELETE' }); showToast('图片已移至回收站'); if (imageItem) { imageItem.classList.add('fading-out'); setTimeout(() => imageItem.remove(), 400); } const imageIndex = allLoadedImages.findIndex(i => i.id === imageId); if (imageIndex > -1) allLoadedImages.splice(imageIndex, 1); } catch (error) { showToast(error.message, 'error'); } } }
             else if (button.matches('.restore-btn')) { try { await apiRequest(`/api/admin/recycle-bin/${imageId}/restore`, { method: 'POST' }); showToast('图片已恢复'); if(imageItem) { imageItem.classList.add('fading-out'); setTimeout(() => imageItem.remove(), 400); } const imageIndex = allLoadedImages.findIndex(i => i.id === imageId); if (imageIndex > -1) allLoadedImages.splice(imageIndex, 1); } catch (error) { showToast(error.message, 'error'); } }
             else if (button.matches('.purge-btn')) { const confirmed = await showConfirmationModal('彻底删除', `<p>确定要永久删除这张图片吗？<br><strong>此操作无法撤销。</strong></p>`, '确认删除'); if (confirmed) { try { await apiRequest(`/api/admin/recycle-bin/${imageId}/purge`, { method: 'DELETE' }); showToast('图片已彻底删除'); if(imageItem) { imageItem.classList.add('fading-out'); setTimeout(() => imageItem.remove(), 400); } const imageIndex = allLoadedImages.findIndex(i => i.id === imageId); if (imageIndex > -1) allLoadedImages.splice(imageIndex, 1); } catch (error) { showToast(error.message, 'error'); } } }
@@ -1492,19 +1557,24 @@ cat << 'EOF' > public/admin.html
             switchMainView('maintenance');
             DOMElements.imageListHeader.textContent = '空间清理';
             DOMElements.maintenanceView.innerHTML = `
-                <div class="bg-slate-50 p-6 rounded-lg">
+                <div class="bg-slate-50 p-6 rounded-lg mb-6">
                     <h3 class="text-lg font-semibold mb-2">清理冗余文件</h3>
                     <p class="text-sm text-slate-600 mb-4">扫描 uploads 目录中存在，但数据库记录里却不存在的“孤立”文件。这些文件可能是由异常操作产生，可以安全清理以释放空间。</p>
-                    <button id="scan-orphans-btn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg">开始扫描</button>
+                    <button id="scan-orphans-btn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg">扫描冗余文件</button>
                     <div id="orphan-results" class="mt-6 hidden"></div>
+                </div>
+                <div class="bg-slate-50 p-6 rounded-lg">
+                    <h3 class="text-lg font-semibold mb-2">清理图片缓存</h3>
+                    <p class="text-sm text-slate-600 mb-4">安全地清空 public/cache 目录下的所有图片缩略图。这些文件在用户访问时会自动重新生成，清理它们可以释放磁盘空间。</p>
+                    <button id="clear-cache-btn" class="bg-orange-500 hover:bg-orange-600 text-white font-bold py-2 px-4 rounded-lg">清理图片缓存</button>
                 </div>`;
         }
 
         DOMElements.maintenanceView.addEventListener('click', async e => {
-            if (e.target.id === 'scan-orphans-btn') {
+            const targetId = e.target.id;
+            if (targetId === 'scan-orphans-btn') {
                 const btn = e.target;
-                btn.disabled = true;
-                btn.textContent = '扫描中...';
+                btn.disabled = true; btn.textContent = '扫描中...';
                 const resultsContainer = document.getElementById('orphan-results');
                 try {
                     const res = await apiRequest('/api/admin/maintenance/find-orphans');
@@ -1514,20 +1584,10 @@ cat << 'EOF' > public/admin.html
                         resultsContainer.innerHTML = '<p class="text-green-600 font-medium">太棒了！没有发现任何冗余文件。</p>';
                         return;
                     }
-                    resultsContainer.innerHTML = `
-                        <h4 class="font-semibold mb-2">扫描结果：发现 ${orphans.length} 个冗余文件</h4>
-                        <div class="flex items-center gap-2 mb-2"><input type="checkbox" id="select-all-orphans"><label for="select-all-orphans">全选</label></div>
-                        <div id="orphan-list" class="border rounded max-h-72 overflow-y-auto p-2 space-y-1">
-                            ${orphans.map(f => `<div class="flex items-center gap-2 text-sm"><input type="checkbox" class="orphan-checkbox" value="${f.filename}"><span>${f.filename} (${formatBytes(f.size)})</span></div>`).join('')}
-                        </div>
-                        <button id="delete-orphans-btn" class="mt-4 bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg disabled:bg-gray-400" disabled>删除选中文件</button>`;
-                } catch (err) {
-                    resultsContainer.innerHTML = `<p class="text-red-500">扫描失败: ${err.message}</p>`;
-                } finally {
-                    btn.disabled = false;
-                    btn.textContent = '重新扫描';
-                }
-            } else if (e.target.id === 'delete-orphans-btn') {
+                    resultsContainer.innerHTML = `<h4 class="font-semibold mb-2">扫描结果：发现 ${orphans.length} 个冗余文件</h4><div class="flex items-center gap-2 mb-2"><input type="checkbox" id="select-all-orphans"><label for="select-all-orphans">全选</label></div><div id="orphan-list" class="border rounded max-h-72 overflow-y-auto p-2 space-y-1">${orphans.map(f => `<div class="flex items-center gap-2 text-sm"><input type="checkbox" class="orphan-checkbox" value="${f.filename}"><span>${f.filename} (${formatBytes(f.size)})</span></div>`).join('')}</div><button id="delete-orphans-btn" class="mt-4 bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg disabled:bg-gray-400" disabled>删除选中文件</button>`;
+                } catch (err) { resultsContainer.innerHTML = `<p class="text-red-500">扫描失败: ${err.message}</p>`; } 
+                finally { btn.disabled = false; btn.textContent = '重新扫描'; }
+            } else if (targetId === 'delete-orphans-btn') {
                 const checked = Array.from(document.querySelectorAll('.orphan-checkbox:checked')).map(cb => cb.value);
                 if (checked.length === 0) return;
                 const confirmed = await showConfirmationModal('确认删除', `确定要永久删除这 ${checked.length} 个冗余文件吗？此操作无法撤销。`, '确认删除');
@@ -1536,18 +1596,24 @@ cat << 'EOF' > public/admin.html
                         const res = await apiRequest('/api/admin/maintenance/delete-orphans', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filenames: checked }) });
                         const result = await res.json();
                         showToast(result.message);
-                        if(result.errors && result.errors.length > 0) {
-                            showToast(`发生错误: ${result.errors.join(', ')}`, 'error');
-                        }
-                        document.getElementById('scan-orphans-btn').click(); // Rescan
-                    } catch (err) {
-                        showToast(`删除失败: ${err.message}`, 'error');
-                    }
+                        if(result.errors && result.errors.length > 0) showToast(`发生错误: ${result.errors.join(', ')}`, 'error');
+                        document.getElementById('scan-orphans-btn').click();
+                    } catch (err) { showToast(`删除失败: ${err.message}`, 'error'); }
                 }
-            } else if (e.target.id === 'select-all-orphans') {
+            } else if (targetId === 'clear-cache-btn') {
+                 const confirmed = await showConfirmationModal('确认清理缓存', `确定要清空所有图片缩略图缓存吗？这不会删除原始图片，缓存会在下次访问时重建。`, '确认清理');
+                 if (confirmed) {
+                    try {
+                        const res = await apiRequest('/api/admin/maintenance/clear-cache', { method: 'POST' });
+                        const result = await res.json();
+                        showToast(result.message, 'success');
+                    } catch (err) {
+                        showToast(`清理缓存失败: ${err.message}`, 'error');
+                    }
+                 }
+            } else if (targetId === 'select-all-orphans') {
                 document.querySelectorAll('.orphan-checkbox').forEach(cb => cb.checked = e.target.checked);
             }
-            // Enable delete button if any checkbox is checked
             const deleteBtn = document.getElementById('delete-orphans-btn');
             if (deleteBtn) {
                 const anyChecked = Array.from(document.querySelectorAll('.orphan-checkbox')).some(cb => cb.checked);
@@ -1644,7 +1710,6 @@ cat << 'EOF' > public/admin.html
             DOMElements.viewToggle.querySelector(`button[data-view="${currentViewMode}"]`).classList.add('bg-slate-200');
             DOMElements.imageList.className = `view-${currentViewMode}`;
             
-            // Attach lightbox image event handlers
             DOMElements.lightboxImage.onload = () => {
                 clearTimeout(loadingSpinnerTimeout);
                 DOMElements.lightboxSpinner.style.display = 'none';
@@ -1750,7 +1815,7 @@ EOF
     return 0
 }
 
-# --- 管理菜单功能 (以下部分无改动，保持原样) ---
+# --- 管理菜单功能 ---
 run_update_procedure() {
     echo -e "${GREEN}--- 开始覆盖更新(保留数据) ---${NC}"
     cd "${INSTALL_DIR}" || { echo -e "${RED}错误: 无法进入安装目录 '${INSTALL_DIR}'。${NC}"; return 1; }
@@ -1835,6 +1900,7 @@ install_app() {
 
     check_and_install_deps "Node.js & npm" "nodejs npm" "node" "${sudo_cmd}" || return 1
     check_and_install_deps "编译工具(for sharp)" "build-essential" "make" "${sudo_cmd}" || return 1
+    check_and_install_deps "SQLite3开发库" "libsqlite3-dev" "sqlite3" "${sudo_cmd}" || return 1
 
     if ! command -v pm2 &> /dev/null; then
         echo -e "${YELLOW}--> 检测到 PM2 未安装，将通过 npm 全局安装...${NC}"
@@ -1885,40 +1951,65 @@ install_app() {
 }
 
 check_and_install_deps() {
-    local dep_to_check=$1
-    local package_name=$2
-    local command_to_check=$3
-    local sudo_cmd=$4
+    local dep_name="$1"
+    local deb_pkg="$2"
+    local command_to_check="$3"
+    local sudo_cmd="$4"
     
-    if command -v "$command_to_check" &> /dev/null; then
+    # 对于sqlite3，我们检查库文件而不是命令
+    if [ "$command_to_check" == "sqlite3" ]; then
+        if dpkg -s "$deb_pkg" >/dev/null 2>&1 || \
+           (command -v dnf &> /dev/null && dnf list installed sqlite-devel &>/dev/null) || \
+           (command -v yum &> /dev/null && yum list installed sqlite-devel &>/dev/null); then
+            return 0
+        fi
+    elif command -v "$command_to_check" &> /dev/null; then
         return 0
     fi
     
-    echo -e "${YELLOW}--> 检测到核心依赖 '${dep_to_check}' 未安装，正在尝试自动安装...${NC}"
+    echo -e "${YELLOW}--> 检测到核心依赖 '${dep_name}' 未安装，正在尝试自动安装...${NC}"
     
     local pm_cmd=""
+    local package_name=""
 
     if command -v apt-get &> /dev/null; then
         pm_cmd="apt-get install -y"
+        package_name="$deb_pkg"
         echo "--> 检测到 APT 包管理器，正在更新..."
         ${sudo_cmd} apt-get update -y
     elif command -v dnf &> /dev/null; then
         pm_cmd="dnf install -y"
+        package_name="sqlite-devel" # dnf/yum use a different name
         echo "--> 检测到 DNF 包管理器..."
     elif command -v yum &> /dev/null; then
         pm_cmd="yum install -y"
+        package_name="sqlite-devel"
         echo "--> 检测到 YUM 包管理器..."
     else
-        echo -e "${RED}错误: 未找到 apt, dnf 或 yum 包管理器。请手动安装 '${dep_to_check}' (${package_name})。${NC}"
+        echo -e "${RED}错误: 未找到 apt, dnf 或 yum 包管理器。请手动安装 '${dep_name}'。${NC}"
         return 1
     fi
+    
+    # 修正Nodejs的包名，在某些系统上不同
+    if [ "$deb_pkg" == "nodejs npm" ] && [ "$package_name" == "nodejs npm" ]; then
+        if command -v dnf &> /dev/null || command -v yum &> /dev/null; then
+             package_name="nodejs" # 通常npm会一起安装
+        fi
+    fi
 
+    # 对于编译工具
+    if [[ "$deb_pkg" == "build-essential" ]]; then
+         if command -v dnf &> /dev/null || command -v yum &> /dev/null; then
+             package_name='"Development Tools"'
+         fi
+    fi
+    
     echo "--> 准备执行: ${sudo_cmd} ${pm_cmd} ${package_name}"
     if eval "${sudo_cmd} ${pm_cmd} ${package_name}"; then
-        echo -e "${GREEN}--> '${dep_to_check}' 安装成功！${NC}"
+        echo -e "${GREEN}--> '${dep_name}' 安装成功！${NC}"
         return 0
     else
-        echo -e "${RED}--> 自动安装 '${dep_to_check}' 失败。请检查错误并手动安装。${NC}"
+        echo -e "${RED}--> 自动安装 '${dep_name}' 失败。请检查错误并手动安装。${NC}"
         return 1
     fi
 }
@@ -1954,14 +2045,11 @@ display_status() {
             printf "  %-15s %b%s%b\n" "日志文件:" "${YELLOW}" "未知 (PM2未管理)" "${NC}"
         fi
 
-        if [ -f "data/config.json" ]; then
-             if grep -q "tfa" "data/config.json"; then
-                printf "  %-15s %b%s%b\n" "2FA 状态:" "${GREEN}" "已启用" "${NC}"
-            else
-                printf "  %-15s %b%s%b\n" "2FA 状态:" "${RED}" "未启用" "${NC}"
-            fi
+        if [ -f "data/gallery.db" ]; then
+             # 无法直接从shell判断2fa状态，因为配置在DB里
+             printf "  %-15s %b%s%b\n" "2FA 状态:" "${BLUE}" "请登录后台查看" "${NC}"
         else
-             printf "  %-15s %b%s%b\n" "2FA 状态:" "${RED}" "未启用" "${NC}"
+             printf "  %-15s %b%s%b\n" "数据库:" "${RED}" "未找到 (gallery.db)" "${NC}"
         fi
 
         printf "  %-15s %bhttp://%s:%s%b\n" "前台画廊:" "${GREEN}" "${SERVER_IP}" "${PORT}" "${NC}"
@@ -2096,28 +2184,39 @@ manage_2fa() {
     echo -e "${YELLOW}--- 管理 2FA (双因素认证) ---${NC}"
     [ ! -d "${INSTALL_DIR}" ] || [ ! -f "${INSTALL_DIR}/.env" ] && { echo -e "${RED}错误: 应用未安装。${NC}"; return 1; }
     
-    local config_file="${INSTALL_DIR}/data/config.json"
-    local tfa_enabled=false
-    if [ -f "$config_file" ] && grep -q "tfa" "$config_file"; then
-        tfa_enabled=true
-    fi
+    echo -e "${YELLOW}由于配置已迁移至数据库，请登录后台管理页面，在“安全”区域进行 2FA 的启用或禁用操作。${NC}"
+    echo -e "${YELLOW}如果因 2FA 问题无法登录，可选择强制重置。${NC}"
+    read -p "您想 [1] 强制重置 2FA (会清空2FA设置) 吗? (输入其他任意键取消): " tfa_choice
+    if [[ "$tfa_choice" == "1" ]]; then
+        echo -e "${YELLOW}正在连接数据库以移除 2FA 配置...${NC}"
+        cd "${INSTALL_DIR}" || return 1
+        
+        # 使用Node.js脚本来安全地操作数据库
+        cat << 'NODE_SCRIPT' > reset_tfa.js
+const path = require('path');
+const Database = require('better-sqlite3');
+const dbPath = path.join(__dirname, 'data', 'gallery.db');
+try {
+    const db = new Database(dbPath);
+    db.prepare("DELETE FROM config WHERE key = 'tfa'").run();
+    console.log("2FA setting has been cleared from the database.");
+    db.close();
+} catch (e) {
+    console.error("Failed to reset 2FA:", e.message);
+    process.exit(1);
+}
+NODE_SCRIPT
 
-    if [ "$tfa_enabled" = true ]; then
-        echo -e "当前 2FA 状态: ${GREEN}已启用${NC}"
-        read -p "您想 [1] 禁用 2FA 还是 [2] 强制重置 2FA? (输入其他任意键取消): " tfa_choice
-        if [[ "$tfa_choice" == "1" || "$tfa_choice" == "2" ]]; then
-            echo -e "${YELLOW}正在移除 2FA 配置...${NC}"
-            rm -f "$config_file"
-            echo -e "${GREEN}2FA 配置已移除。${NC}"
-            echo -e "${YELLOW}请注意：这仅移除了服务器端的密钥。您可能需要手动从您的 Authenticator 应用中删除旧的条目。${NC}"
-            echo -e "${YELLOW}正在重启应用...${NC}"
-            restart_app
-        else
-            echo -e "${YELLOW}操作已取消。${NC}"
-        fi
+        node reset_tfa.js
+        rm reset_tfa.js
+        cd - >/dev/null 2>&1
+
+        echo -e "${GREEN}2FA 配置已清除。${NC}"
+        echo -e "${YELLOW}请注意：这仅移除了服务器端的密钥。您需要手动从您的 Authenticator 应用中删除旧的条目。${NC}"
+        echo -e "${YELLOW}正在重启应用...${NC}"
+        restart_app
     else
-        echo -e "当前 2FA 状态: ${RED}未启用${NC}"
-        echo -e "${YELLOW}要启用 2FA，请登录后台管理页面，在“安全”区域进行设置。${NC}"
+        echo -e "${YELLOW}操作已取消。${NC}"
     fi
 }
 
@@ -2130,9 +2229,9 @@ backup_data() {
     local BACKUP_FILE="${BACKUP_DIR}/image-gallery-backup-${TIMESTAMP}.tar.gz"
 
     echo "--> 需要备份的目录:"
-    echo "    - ${INSTALL_DIR}/data"
-    echo "    - ${INSTALL_DIR}/public/uploads"
-    echo "    - ${INSTALL_DIR}/.env"
+    echo "    - ${INSTALL_DIR}/data (数据库)"
+    echo "    - ${INSTALL_DIR}/public/uploads (原始图片)"
+    echo "    - ${INSTALL_DIR}/.env (配置文件)"
     
     echo "--> 正在创建备份文件: ${BACKUP_FILE}..."
     if tar -czf "${BACKUP_FILE}" -C "${INSTALL_DIR}" data public/uploads .env; then
