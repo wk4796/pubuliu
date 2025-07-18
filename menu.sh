@@ -1,20 +1,19 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v2.1.1)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v2.1.2)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
+#   v2.1.2 更新:
+#   - 优化(后台): 优化了后台切换视图的体验。现在点击导航项后，右侧标题会
+#                  立即更新，无需等待数据加载完成，提升了操作的响应速度。
+#
 #   v2.1.1 更新:
 #   - 修复(后台): 修正了“空间清理”视图因HTML结构错误而无法显示的布局问题。
 #
 #   v2.1.0 更新:
-#   - 新增功能(后台): 在“空间清理”中增加了缓存大小的实时显示，可直观了解
-#                  缩略图缓存占用的磁盘空间。
-#   - 优化(UI/UX): 全面优化了前台画廊和后台管理界面的响应式设计，提升了
-#                  在手机、平板和桌面设备上的视觉和操作体验。
-#                  - 后台“列表视图”在移动端将自动垂直堆叠，解决了信息
-#                    拥挤的问题。
-#                  - 后台控制栏增加了 flex-wrap，以适应不同屏幕宽度。
+#   - 新增功能(后台): 在“空间清理”中增加了缓存大小的实时显示。
+#   - 优化(UI/UX): 全面优化了前后台的响应式设计。
 #
 #   v2.0.1 更新:
 #   - 修复(后台): 修正了 server.js 中的一个致命 `ReferenceError`。
@@ -32,7 +31,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 PROMPT_Y="(${GREEN}y${NC}/${RED}n${NC})"
 
-SCRIPT_VERSION="2.1.1"
+SCRIPT_VERSION="2.1.2"
 APP_NAME="image-gallery"
 
 # --- 路径设置 ---
@@ -59,7 +58,7 @@ overwrite_app_files() {
 cat << 'EOF' > package.json
 {
   "name": "image-gallery-pro",
-  "version": "2.1.1",
+  "version": "2.1.2",
   "description": "A high-performance, full-stack image gallery application powered by SQLite.",
   "main": "server.js",
   "scripts": {
@@ -1390,7 +1389,6 @@ cat << 'EOF' > public/admin.html
         }
 
         async function loadContent(url, headerText) {
-            DOMElements.imageLoader.classList.remove('hidden'); DOMElements.imageList.innerHTML = '';
             try {
                 const response = await apiRequest(url);
                 const data = await response.json();
@@ -1493,6 +1491,8 @@ cat << 'EOF' > public/admin.html
             const view = activeNav.dataset.view;
             const categoryName = activeNav.dataset.categoryName;
             const headerText = activeNav.querySelector('.category-name')?.textContent || '所有图片';
+            
+            DOMElements.imageListHeader.textContent = headerText; // 立即更新标题
             
             resetSelection();
             DOMElements.imageList.innerHTML = '';
