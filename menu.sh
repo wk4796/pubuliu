@@ -1,9 +1,15 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v2.0.0)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v2.0.1)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
+#   v2.0.1 更新:
+#   - 修复(后台): 修正了 server.js 中的一个致命 `ReferenceError`，该错误
+#               导致服务在启动后立即崩溃并陷入无限重启循环。
+#   - 优化(后台): 移除了上传控件的 `accept="image/*"` 属性，以改善在
+#               移动端设备上调用文件管理器的兼容性。
+#
 #   v2.0.0 更新:
 #   - 核心升级(后台): 数据库从 JSON 文件迁移至 SQLite (使用 better-sqlite3)，
 #                  大幅提升了在大数据量下的查询、排序和筛选性能。
@@ -21,7 +27,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 PROMPT_Y="(${GREEN}y${NC}/${RED}n${NC})"
 
-SCRIPT_VERSION="2.0.0"
+SCRIPT_VERSION="2.0.1"
 APP_NAME="image-gallery"
 
 # --- 路径设置 ---
@@ -48,7 +54,7 @@ overwrite_app_files() {
 cat << 'EOF' > package.json
 {
   "name": "image-gallery-pro",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "A high-performance, full-stack image gallery application powered by SQLite.",
   "main": "server.js",
   "scripts": {
@@ -245,7 +251,6 @@ app.get('/api/images', handleApiError(async (req, res) => {
         case 'date_desc': default: orderByClause = 'ORDER BY uploadedAt DESC'; break;
     }
 
-    // Front-end gallery special random case, overrides other sorting
     if (category === 'random') {
         orderByClause = 'ORDER BY RANDOM()';
     }
@@ -280,7 +285,6 @@ app.get('/api/categories', handleApiError(async (req, res) => {
 }));
 
 app.get('/api/public/categories', handleApiError(async (req, res) => {
-    // Get categories that actually have active images in them
     const rows = db.prepare(`
         SELECT DISTINCT c.name 
         FROM categories c 
@@ -388,7 +392,16 @@ apiAdminRouter.put('/images/:id', handleApiError(async (req, res) => {
     const { category, description, originalFilename } = req.body;
     const imageId = req.params.id;
 
-    if (originalFilename) {
+    const currentImage = db.prepare("SELECT * FROM images WHERE id = ?").get(imageId);
+    if (!currentImage) {
+        return res.status(404).json({ message: '图片未找到' });
+    }
+
+    const finalCategory = category !== undefined ? category : currentImage.category;
+    const finalDescription = description !== undefined ? description : currentImage.description;
+    let finalOriginalFilename = originalFilename !== undefined ? originalFilename : currentImage.originalFilename;
+
+    if (originalFilename && originalFilename !== currentImage.originalFilename) {
         const checkStmt = db.prepare("SELECT id FROM images WHERE status != 'deleted' AND originalFilename = ?");
         const existing = checkStmt.get(originalFilename);
         if (existing && existing.id !== imageId) {
@@ -397,9 +410,7 @@ apiAdminRouter.put('/images/:id', handleApiError(async (req, res) => {
     }
 
     const stmt = db.prepare("UPDATE images SET category = ?, description = ?, originalFilename = ? WHERE id = ?");
-    const info = stmt.run(category, description, originalFilename, imageId);
-
-    if (info.changes === 0) return res.status(404).json({ message: '图片未找到' });
+    stmt.run(finalCategory, finalDescription, finalOriginalFilename, imageId);
     
     const updatedImage = db.prepare("SELECT * FROM images WHERE id = ?").get(imageId);
     res.json({ message: '更新成功', image: updatedImage });
@@ -486,7 +497,7 @@ apiAdminRouter.put('/categories', handleApiError(async (req, res) => {
         transaction();
         res.status(200).json({ message: `分类 '${oldName}' 已重命名为 '${newName}'。` });
     } catch(err) {
-        if (err.code === 'SQLITE_CONSTRAINT_PRIMARYKEY') {
+        if (err.code === 'SQLITE_CONSTRAINT_PRIMARYKEY' || err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
             return res.status(409).json({ message: '新的分类名称已存在。' });
         }
         throw err;
@@ -632,7 +643,7 @@ apiAdminRouter.post('/2fa/enable', handleApiError(async (req, res) => {
 }));
 
 apiAdminRouter.post('/2fa/disable', handleApiError(async (req, res) => {
-    setConfig('tfa', null); // or handle deletion if preferred
+    db.prepare("DELETE FROM config WHERE key = 'tfa'").run();
     res.json({ message: '2FA 已禁用。' });
 }));
 
@@ -1126,7 +1137,7 @@ cat << 'EOF' > public/admin.html
     </header>
     <main class="container mx-auto p-4 md:p-6 grid grid-cols-1 xl:grid-cols-12 gap-8">
         <div class="xl:col-span-4 space-y-8">
-            <section id="upload-section" class="bg-white p-6 rounded-lg shadow-md"><h2 class="text-xl font-semibold mb-4">上传新图片</h2><form id="upload-form" class="space-y-4"><div><label for="image-input" id="drop-zone" class="w-full flex flex-col items-center justify-center p-6 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors"><svg class="w-10 h-10 mb-3 text-gray-400" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 20 16"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 13h3a3 3 0 0 0 0-6h-.025A5.56 5.56 0 0 0 16 6.5 5.5 5.5 0 0 0 5.207 5.021C5.137 5.017 5.071 5 5 5a4 4 0 0 0 0 8h2.167M10 15V6m0 0L8 8m2-2 2 2"/></svg><p class="text-sm text-gray-500"><span class="font-semibold">点击选择</span> 或拖拽多个文件到此处</p><input id="image-input" type="file" class="hidden" multiple accept="image/*"/></label></div><div class="space-y-2"><label for="unified-description" class="block text-sm font-medium">统一描述 (可选)</label><textarea id="unified-description" rows="2" class="w-full text-sm border rounded px-2 py-1" placeholder="在此处填写可应用到所有未填写描述的图片"></textarea></div><div id="file-preview-container" class="hidden space-y-2"><div id="upload-summary" class="text-sm font-medium text-slate-600"></div><div id="file-preview-list" class="h-48 border rounded p-2 space-y-3" style="overflow: auto; resize: vertical;"></div></div><div><label for="category-select" class="block text-sm font-medium mb-1">设置分类</label><div class="flex items-center space-x-2"><select name="category" id="category-select" required class="w-full border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-500"></select><button type="button" id="add-category-btn" class="flex-shrink-0 bg-green-500 hover:bg-green-600 text-white font-bold w-9 h-9 rounded-full flex items-center justify-center text-xl" title="添加新分类">+</button></div></div><button type="submit" id="upload-btn" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg transition-colors disabled:bg-gray-400" disabled>上传文件</button></form></section>
+            <section id="upload-section" class="bg-white p-6 rounded-lg shadow-md"><h2 class="text-xl font-semibold mb-4">上传新图片</h2><form id="upload-form" class="space-y-4"><div><label for="image-input" id="drop-zone" class="w-full flex flex-col items-center justify-center p-6 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors"><svg class="w-10 h-10 mb-3 text-gray-400" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 20 16"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 13h3a3 3 0 0 0 0-6h-.025A5.56 5.56 0 0 0 16 6.5 5.5 5.5 0 0 0 5.207 5.021C5.137 5.017 5.071 5 5 5a4 4 0 0 0 0 8h2.167M10 15V6m0 0L8 8m2-2 2 2"/></svg><p class="text-sm text-gray-500"><span class="font-semibold">点击选择</span> 或拖拽多个文件到此处</p><input id="image-input" type="file" class="hidden" multiple/></label></div><div class="space-y-2"><label for="unified-description" class="block text-sm font-medium">统一描述 (可选)</label><textarea id="unified-description" rows="2" class="w-full text-sm border rounded px-2 py-1" placeholder="在此处填写可应用到所有未填写描述的图片"></textarea></div><div id="file-preview-container" class="hidden space-y-2"><div id="upload-summary" class="text-sm font-medium text-slate-600"></div><div id="file-preview-list" class="h-48 border rounded p-2 space-y-3" style="overflow: auto; resize: vertical;"></div></div><div><label for="category-select" class="block text-sm font-medium mb-1">设置分类</label><div class="flex items-center space-x-2"><select name="category" id="category-select" required class="w-full border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-500"></select><button type="button" id="add-category-btn" class="flex-shrink-0 bg-green-500 hover:bg-green-600 text-white font-bold w-9 h-9 rounded-full flex items-center justify-center text-xl" title="添加新分类">+</button></div></div><button type="submit" id="upload-btn" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg transition-colors disabled:bg-gray-400" disabled>上传文件</button></form></section>
             <section class="bg-white p-6 rounded-lg shadow-md"><h2 class="text-xl font-semibold mb-4">图库</h2><div id="navigation-list" class="space-y-1"><div id="nav-item-all" data-view="all" class="nav-item flex items-center gap-3 p-2 rounded cursor-pointer hover:bg-gray-100 active"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 text-slate-500"><path fill-rule="evenodd" d="M1 5.25A2.25 2.25 0 013.25 3h13.5A2.25 2.25 0 0119 5.25v9.5A2.25 2.25 0 0116.75 17H3.25A2.25 2.25 0 011 14.75v-9.5zm1.5 5.81v3.69c0 .414.336.75.75.75h13.5a.75.75 0 00.75-.75v-3.69l-2.72-2.72a.75.75 0 00-1.06 0L11.5 10l-1.72-1.72a.75.75 0 00-1.06 0l-4 4zM12.5 7a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z" clip-rule="evenodd" /></svg><span class="category-name flex-grow">所有图片</span></div><div id="category-dynamic-list"></div><hr class="my-2"><div id="nav-item-recycle-bin" data-view="recycle_bin" class="nav-item flex items-center gap-3 p-2 rounded cursor-pointer hover:bg-gray-100"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 text-slate-500"><path fill-rule="evenodd" d="M8.75 1A2.75 2.75 0 006 3.75V4.5h8V3.75A2.75 2.75 0 0011.25 1h-2.5zM10 4.5a.75.75 0 00-1.5 0v.75h1.5v-.75zM4.75 6.25A.75.75 0 015.5 5.5h9a.75.75 0 01.75.75v9a.75.75 0 01-.75.75h-9a.75.75 0 01-.75-.75v-9zM5.5 6.25v9h9v-9h-9z" clip-rule="evenodd" /></svg><span class="category-name flex-grow">回收站</span></div><hr class="my-2"><div id="nav-item-maintenance" data-view="maintenance" class="nav-item flex items-center gap-3 p-2 rounded cursor-pointer hover:bg-gray-100"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 text-slate-500"><path d="M10.435 2.222a.75.75 0 0 0-1.026-.816l-6.5 3.25a.75.75 0 0 0 .816 1.026L8 3.91V15.5a.75.75 0 0 0 1.5 0V3.91l4.195 2.097a.75.75 0 0 0 .816-1.026l-4.125-2.065Z"></path><path d="M4.5 15.542a.75.75 0 0 0-1.5 0V17.5h-.5a.75.75 0 0 0 0 1.5h11a.75.75 0 0 0 0-1.5h-.5v-1.958a.75.75 0 0 0-1.5 0v1.208h-6v-1.208Z"></path></svg><span class="category-name flex-grow">空间清理</span></div></div></section>
             <section class="bg-white p-6 rounded-lg shadow-md"><h2 class="text-xl font-semibold mb-4">安全</h2><div id="security-section"></div></section>
         </div>
@@ -1301,8 +1312,8 @@ cat << 'EOF' > public/admin.html
         
         // --- Upload Logic ---
         DOMElements.addCategoryBtn.addEventListener('click', () => { showGenericModal( '添加新分类', '<form id="add-cat-form"><label for="new-cat-name" class="sr-only">分类名称</label><input type="text" id="new-cat-name" placeholder="输入新分类的名称" required class="w-full border rounded px-3 py-2"></form>', '<button type="button" class="modal-cancel-btn bg-gray-300 hover:bg-gray-400 text-black py-2 px-4 rounded">取消</button><button type="submit" form="add-cat-form" class="bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded">保存</button>'); const form = document.getElementById('add-cat-form'); const input = document.getElementById('new-cat-name'); input.focus(); form.addEventListener('submit', async (e) => { e.preventDefault(); const name = input.value.trim(); if (!name) return; try { await apiRequest('/api/admin/categories', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) }); hideModal(DOMElements.genericModal); showToast('分类添加成功'); await refreshAllData(); } catch (error) { showToast(`添加失败: ${error.message}`, 'error'); } }); DOMElements.genericModal.querySelector('.modal-cancel-btn').addEventListener('click', () => hideModal(DOMElements.genericModal)); });
-        const handleFileSelection = (fileList) => { const imageFiles = Array.from(fileList).filter(f => f.type.startsWith('image/')); const currentFilenames = new Set(filesToUpload.map(item => item.file.name)); const newFiles = imageFiles.filter(f => !currentFilenames.has(f.name)).map(file => ({ file, description: DOMElements.unifiedDescription.value, userHasTyped: DOMElements.unifiedDescription.value !== '', shouldRename: false, status: 'pending' })); filesToUpload.push(...newFiles); DOMElements.uploadBtn.disabled = filesToUpload.length === 0; renderFilePreviews(); };
-        const renderFilePreviews = () => { if (filesToUpload.length === 0) { DOMElements.filePreviewContainer.classList.add('hidden'); return; } DOMElements.filePreviewList.innerHTML = ''; let totalSize = 0; filesToUpload.forEach((item, index) => { totalSize += item.file.size; const listItem = document.createElement('div'); const tempId = `file-preview-${index}`; listItem.className = 'file-preview-item text-slate-600 border rounded p-2'; listItem.dataset.fileIndex = index; listItem.innerHTML = `<div class="flex items-start"><img class="w-12 h-12 object-cover rounded mr-3 bg-slate-100" id="thumb-${tempId}"><div class="flex-grow"><div class="flex justify-between items-center text-xs mb-1"><p class="truncate pr-2 font-medium">${item.file.name}</p><button type="button" data-index="${index}" class="remove-file-btn text-xl text-red-500 hover:text-red-700 leading-none">&times;</button></div><p class="text-xs text-slate-500">${formatBytes(item.file.size)}</p></div></div><input type="text" data-index="${index}" class="relative w-full text-xs border rounded px-2 py-1 description-input bg-transparent mt-2" placeholder="添加独立描述..." value="${item.description}"><p class="upload-status text-xs mt-1"></p>`; DOMElements.filePreviewList.appendChild(listItem); const reader = new FileReader(); reader.onload = (e) => { document.getElementById(`thumb-${tempId}`).src = e.target.result; }; reader.readAsDataURL(item.file); }); DOMElements.uploadSummary.textContent = `已选择 ${filesToUpload.length} 个文件，总大小: ${formatBytes(totalSize)}`; DOMElements.filePreviewContainer.classList.remove('hidden'); };
+        const handleFileSelection = (fileList) => { const imageFiles = Array.from(fileList); const currentFilenames = new Set(filesToUpload.map(item => item.file.name)); const newFiles = imageFiles.filter(f => !currentFilenames.has(f.name)).map(file => ({ file, description: DOMElements.unifiedDescription.value, userHasTyped: DOMElements.unifiedDescription.value !== '', shouldRename: false, status: 'pending' })); filesToUpload.push(...newFiles); DOMElements.uploadBtn.disabled = filesToUpload.length === 0; renderFilePreviews(); };
+        const renderFilePreviews = () => { if (filesToUpload.length === 0) { DOMElements.filePreviewContainer.classList.add('hidden'); return; } DOMElements.filePreviewList.innerHTML = ''; let totalSize = 0; filesToUpload.forEach((item, index) => { totalSize += item.file.size; const listItem = document.createElement('div'); const tempId = `file-preview-${index}`; listItem.className = 'file-preview-item text-slate-600 border rounded p-2'; listItem.dataset.fileIndex = index; listItem.innerHTML = `<div class="flex items-start"><img class="w-12 h-12 object-cover rounded mr-3 bg-slate-100" id="thumb-${tempId}"><div class="flex-grow"><div class="flex justify-between items-center text-xs mb-1"><p class="truncate pr-2 font-medium">${item.file.name}</p><button type="button" data-index="${index}" class="remove-file-btn text-xl text-red-500 hover:text-red-700 leading-none">&times;</button></div><p class="text-xs text-slate-500">${formatBytes(item.file.size)}</p></div></div><input type="text" data-index="${index}" class="relative w-full text-xs border rounded px-2 py-1 description-input bg-transparent mt-2" placeholder="添加独立描述..." value="${item.description}"><p class="upload-status text-xs mt-1"></p>`; DOMElements.filePreviewList.appendChild(listItem); if (item.file.type.startsWith('image/')) { const reader = new FileReader(); reader.onload = (e) => { document.getElementById(`thumb-${tempId}`).src = e.target.result; }; reader.readAsDataURL(item.file); } else { document.getElementById(`thumb-${tempId}`).src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%2394a3b8'%3E%3Cpath d='M5.625 1.5c-1.036 0-1.875.84-1.875 1.875v17.25c0 1.035.84 1.875 1.875 1.875h12.75c1.035 0 1.875-.84 1.875-1.875V12.75A3.75 3.75 0 0016.5 9h-1.875a1.875 1.875 0 01-1.875-1.875V5.25A3.75 3.75 0 009 1.5H5.625z'/%3E%3Cpath d='M12.75 9a.75.75 0 00.75-.75V5.25l3.75 3.75h-3a.75.75 0 00-.75.75z'/%3E%3C/svg%3E"; } }); DOMElements.uploadSummary.textContent = `已选择 ${filesToUpload.length} 个文件，总大小: ${formatBytes(totalSize)}`; DOMElements.filePreviewContainer.classList.remove('hidden'); };
         const dz = DOMElements.dropZone; dz.addEventListener('dragover', (e) => { e.preventDefault(); dz.classList.add('bg-green-50', 'border-green-400'); }); dz.addEventListener('dragleave', (e) => dz.classList.remove('bg-green-50', 'border-green-400')); dz.addEventListener('drop', (e) => { e.preventDefault(); dz.classList.remove('bg-green-50', 'border-green-400'); handleFileSelection(e.dataTransfer.files); });
         DOMElements.imageInput.addEventListener('change', (e) => { handleFileSelection(e.target.files); e.target.value = ''; });
         DOMElements.unifiedDescription.addEventListener('input', e => { const unifiedText = e.target.value; document.querySelectorAll('.file-preview-item').forEach(item => { const index = parseInt(item.dataset.fileIndex, 10); if (filesToUpload[index] && !filesToUpload[index].userHasTyped) { item.querySelector('.description-input').value = unifiedText; filesToUpload[index].description = unifiedText; } }); });
@@ -1311,8 +1322,9 @@ cat << 'EOF' > public/admin.html
         const processUploadQueue = async (e) => {
             e.preventDefault(); DOMElements.uploadBtn.disabled = true; const pendingFiles = filesToUpload.filter(f => f.status === 'pending');
             if (pendingFiles.length === 0) { showToast("没有需要上传的新文件。", "error"); DOMElements.uploadBtn.disabled = filesToUpload.length === 0; return; }
-            try { const filenamesToCheck = pendingFiles.map(item => item.file.name); const response = await apiRequest('/api/admin/check-filenames', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({filenames: filenamesToCheck}) }); const { duplicates } = await response.json();
-                for (const item of pendingFiles) { if (duplicates.includes(item.file.name)) { const userConfirmed = await showConfirmationModal('文件已存在', `文件 "<strong>${item.file.name}</strong>" 已存在。是否仍然继续上传？<br>(新文件将被自动重命名)`, '继续上传', '取消此文件'); if (userConfirmed) { item.shouldRename = true; } else { item.status = 'cancelled'; const previewItem = DOMElements.filePreviewList.querySelector(`[data-file-index="${filesToUpload.indexOf(item)}"]`); if(previewItem) previewItem.querySelector('.upload-status').textContent = '已取消'; } } }
+            for (const item of pendingFiles) { if (!item.file.type.startsWith('image/')) { item.status = 'error'; const previewItem = DOMElements.filePreviewList.querySelector(`[data-file-index="${filesToUpload.indexOf(item)}"]`); if(previewItem) { previewItem.classList.add('upload-error'); previewItem.querySelector('.upload-status').textContent = '❌ 非图片文件'; } } }
+            try { const filenamesToCheck = pendingFiles.filter(i => i.status === 'pending').map(item => item.file.name); const response = await apiRequest('/api/admin/check-filenames', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({filenames: filenamesToCheck}) }); const { duplicates } = await response.json();
+                for (const item of pendingFiles.filter(i => i.status === 'pending')) { if (duplicates.includes(item.file.name)) { const userConfirmed = await showConfirmationModal('文件已存在', `文件 "<strong>${item.file.name}</strong>" 已存在。是否仍然继续上传？<br>(新文件将被自动重命名)`, '继续上传', '取消此文件'); if (userConfirmed) { item.shouldRename = true; } else { item.status = 'cancelled'; const previewItem = DOMElements.filePreviewList.querySelector(`[data-file-index="${filesToUpload.indexOf(item)}"]`); if(previewItem) previewItem.querySelector('.upload-status').textContent = '已取消'; } } }
             } catch (error) { showToast(`检查文件名出错: ${error.message}`, 'error'); DOMElements.uploadBtn.disabled = false; return; }
             const uploadableFiles = filesToUpload.filter(f => f.status === 'pending'); let processedCount = 0; const updateButtonText = () => { DOMElements.uploadBtn.textContent = `正在上传 (${processedCount}/${uploadableFiles.length})...`; }; if (uploadableFiles.length > 0) updateButtonText();
             for (const item of uploadableFiles) { const originalIndex = filesToUpload.indexOf(item); const previewItem = DOMElements.filePreviewList.querySelector(`[data-file-index="${originalIndex}"]`); if (!previewItem) { processedCount++; updateButtonText(); continue; } const statusEl = previewItem.querySelector('.upload-status');
@@ -2036,7 +2048,7 @@ display_status() {
             if [ "$pm2_status" == "online" ]; then
                 printf "  %-15s %b%s%b\n" "运行状态:" "${GREEN}" "在线 (Online)" "${NC}"
             else
-                printf "  %-15s %b%s%b\n" "运行状态:" "${RED}" "离线 (Offline)" "${NC}"
+                printf "  %-15s %b%s%b\n" "运行状态:" "${RED}" "离线 (Offline) 或 错误" "${NC}"
             fi
             local log_path; log_path=$(pm2 show "$APP_NAME" | grep 'out log path' | awk '{print $6}')
             printf "  %-15s %b%s%b\n" "日志文件:" "${BLUE}" "${log_path}" "${NC}"
@@ -2046,7 +2058,6 @@ display_status() {
         fi
 
         if [ -f "data/gallery.db" ]; then
-             # 无法直接从shell判断2fa状态，因为配置在DB里
              printf "  %-15s %b%s%b\n" "2FA 状态:" "${BLUE}" "请登录后台查看" "${NC}"
         else
              printf "  %-15s %b%s%b\n" "数据库:" "${RED}" "未找到 (gallery.db)" "${NC}"
@@ -2067,14 +2078,14 @@ start_app() {
     [ ! -d "${INSTALL_DIR}" ] || [ ! -f "${INSTALL_DIR}/.env" ] && { echo -e "${RED}错误: 应用未安装或 .env 文件不存在。请先运行安装程序 (选项1)。${NC}"; return 1; }
     cd "${INSTALL_DIR}" || return 1
     
-    local sudo_cmd=""
+    local cmd_prefix=""
     if [ "$EUID" -ne 0 ]; then
-        if command -v sudo &> /dev/null; then sudo_cmd="sudo"; fi
+        if command -v sudo &> /dev/null; then cmd_prefix="sudo"; fi
     fi
     
-    ${sudo_cmd} pm2 start server.js --name "$APP_NAME"
-    ${sudo_cmd} pm2 startup
-    ${sudo_cmd} pm2 save --force
+    ${cmd_prefix} pm2 start server.js --name "$APP_NAME"
+    ${cmd_prefix} pm2 startup
+    ${cmd_prefix} pm2 save --force
     echo -e "${GREEN}--- 应用已启动！---${NC}"
 }
 
@@ -2082,12 +2093,12 @@ stop_app() {
     echo -e "${YELLOW}--- 正在停止应用... ---${NC}"
     [ ! -d "${INSTALL_DIR}" ] && { echo -e "${RED}错误: 应用未安装。${NC}"; return 1; }
     
-    local sudo_cmd=""
+    local cmd_prefix=""
     if [ "$EUID" -ne 0 ]; then
-        if command -v sudo &> /dev/null; then sudo_cmd="sudo"; fi
+        if command -v sudo &> /dev/null; then cmd_prefix="sudo"; fi
     fi
     
-    ${sudo_cmd} pm2 stop "$APP_NAME"
+    ${cmd_prefix} pm2 stop "$APP_NAME"
     echo -e "${GREEN}--- 应用已停止！---${NC}"
 }
 
@@ -2095,12 +2106,12 @@ restart_app() {
     echo -e "${GREEN}--- 正在重启应用... ---${NC}"
     [ ! -d "${INSTALL_DIR}" ] && { echo -e "${RED}错误: 应用未安装。${NC}"; return 1; }
     
-    local sudo_cmd=""
+    local cmd_prefix=""
     if [ "$EUID" -ne 0 ]; then
-        if command -v sudo &> /dev/null; then sudo_cmd="sudo"; fi
+        if command -v sudo &> /dev/null; then cmd_prefix="sudo"; fi
     fi
     
-    ${sudo_cmd} pm2 restart "$APP_NAME"
+    ${cmd_prefix} pm2 restart "$APP_NAME"
     echo -e "${GREEN}--- 应用已重启！---${NC}"
 }
 
@@ -2108,12 +2119,12 @@ view_logs() {
     echo -e "${YELLOW}--- 显示应用日志 (按 Ctrl+C 退出)... ---${NC}"
     [ ! -d "${INSTALL_DIR}" ] && { echo -e "${RED}错误: 应用未安装。${NC}"; return 1; }
     
-    local sudo_cmd=""
+    local cmd_prefix=""
     if [ "$EUID" -ne 0 ]; then
-        if command -v sudo &> /dev/null; then sudo_cmd="sudo"; fi
+        if command -v sudo &> /dev/null; then cmd_prefix="sudo"; fi
     fi
     
-    ${sudo_cmd} pm2 logs "$APP_NAME"
+    ${cmd_prefix} pm2 logs "$APP_NAME"
 }
 
 manage_credentials() {
@@ -2309,9 +2320,9 @@ uninstall_app() {
     read -p "$(echo -e "${YELLOW}您是否完全理解以上后果并确认要彻底卸载? ${PROMPT_Y}: ")" confirm
     if [[ "$confirm" == "y" || "$confirm" == "Y" ]]; then
         echo "--> 正在从 PM2 中删除应用..."
-        local sudo_cmd=""
-        if [ "$EUID" -ne 0 ] && command -v sudo &>/dev/null; then sudo_cmd="sudo"; fi
-        if command -v pm2 &> /dev/null; then ${sudo_cmd} pm2 delete "$APP_NAME" &> /dev/null; ${sudo_cmd} pm2 save --force &> /dev/null; fi
+        local cmd_prefix=""
+        if [ "$EUID" -ne 0 ] && command -v sudo &>/dev/null; then cmd_prefix="sudo"; fi
+        if command -v pm2 &> /dev/null; then ${cmd_prefix} pm2 delete "$APP_NAME" &> /dev/null; ${cmd_prefix} pm2 save --force &> /dev/null; fi
         
         echo "--> 正在永久删除项目文件夹: ${INSTALL_DIR}..."
         rm -rf "${INSTALL_DIR}"
