@@ -1,9 +1,12 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v2.1.0)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v2.1.1)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
+#   v2.1.1 更新:
+#   - 修复(后台): 修正了“空间清理”视图因HTML结构错误而无法显示的布局问题。
+#
 #   v2.1.0 更新:
 #   - 新增功能(后台): 在“空间清理”中增加了缓存大小的实时显示，可直观了解
 #                  缩略图缓存占用的磁盘空间。
@@ -29,7 +32,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 PROMPT_Y="(${GREEN}y${NC}/${RED}n${NC})"
 
-SCRIPT_VERSION="2.1.0"
+SCRIPT_VERSION="2.1.1"
 APP_NAME="image-gallery"
 
 # --- 路径设置 ---
@@ -56,7 +59,7 @@ overwrite_app_files() {
 cat << 'EOF' > package.json
 {
   "name": "image-gallery-pro",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "description": "A high-performance, full-stack image gallery application powered by SQLite.",
   "main": "server.js",
   "scripts": {
@@ -1211,8 +1214,8 @@ cat << 'EOF' > public/admin.html
             <div id="image-list-wrapper">
                 <div id="image-list"></div>
                 <div id="image-loader" class="text-center py-8 text-slate-500 hidden">正在加载...</div>
-                 <div id="maintenance-view" class="hidden p-4"></div>
             </div>
+            <div id="maintenance-view" class="hidden p-4"></div>
             <div id="pagination-container" class="mt-auto flex justify-center items-center gap-4">
                 <div id="items-per-page-container">
                     <select id="items-per-page-select" class="border rounded-md px-2 py-1 text-sm focus:outline-none">
