@@ -1,9 +1,13 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v2.0.1)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v2.0.2)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
+#   v2.0.2 更新:
+#   - 修复(后台): 修正了 admin.html 的HTML结构错误。该错误导致“空间清理”
+#               视图被错误的父容器隐藏，解决了按钮无法显示的根本问题。
+#
 #   v2.0.1 更新:
 #   - 修复(后台): 修正了 server.js 中的一个致命 `ReferenceError`，该错误
 #               导致服务在启动后立即崩溃并陷入无限重启循环。
@@ -13,10 +17,8 @@
 #   v2.0.0 更新:
 #   - 核心升级(后台): 数据库从 JSON 文件迁移至 SQLite (使用 better-sqlite3)，
 #                  大幅提升了在大数据量下的查询、排序和筛选性能。
-#   - 新增功能(后台): 在“空间清理”中增加了“清理图片缓存”功能，可安全清空
-#                  由 Sharp.js 生成的缩略图缓存，释放磁盘空间。
-#   - 优化(安装): 增强了安装脚本，可自动检测并安装 SQLite 的系统
-#                开发依赖库 (如 libsqlite3-dev)，简化部署流程。
+#   - 新增功能(后台): 在“空间清理”中增加了“清理图片缓存”功能。
+#   - 优化(安装): 增强了安装脚本，可自动安装 SQLite 的系统开发依赖库。
 # =================================================================
 
 # --- 配置 ---
@@ -27,7 +29,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 PROMPT_Y="(${GREEN}y${NC}/${RED}n${NC})"
 
-SCRIPT_VERSION="2.0.1"
+SCRIPT_VERSION="2.0.2"
 APP_NAME="image-gallery"
 
 # --- 路径设置 ---
@@ -54,7 +56,7 @@ overwrite_app_files() {
 cat << 'EOF' > package.json
 {
   "name": "image-gallery-pro",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "description": "A high-performance, full-stack image gallery application powered by SQLite.",
   "main": "server.js",
   "scripts": {
@@ -666,359 +668,6 @@ process.on('SIGINT', () => process.exit());
 process.on('SIGTERM', () => process.exit());
 EOF
 
-    echo "--> 正在生成主画廊 public/index.html..."
-cat << 'EOF' > public/index.html
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>图片画廊</title>
-    <meta name="description" content="一个展示精彩瞬间的瀑布流图片画廊。">
-
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/masonry-layout@4/dist/masonry.pkgd.min.js"></script>
-    <script src="https://unpkg.com/imagesloaded@5/imagesloaded.pkgd.min.js"></script>
-
-    <style>
-        :root {
-            --bg-color: #f0fdf4; --text-color: #14532d; --header-bg: rgba(240, 253, 244, 0.85);
-            --filter-btn-color: #166534; --filter-btn-hover-bg: #dcfce7; --filter-btn-active-bg: #22c55e;
-            --filter-btn-active-border: #16a34a; --grid-item-bg: #e4e4e7; --shimmer-color: #ffffff4d;
-            --search-bg: #ffffff; --search-placeholder-color: #9ca3af; --divider-color: #dcfce7;
-            --spinner-base-color: #ffffff4d; --spinner-top-color: #ffffffbf;
-        }
-        body.dark {
-            --bg-color: #111827; --text-color: #a7f3d0; --header-bg: rgba(17, 24, 39, 0.85);
-            --filter-btn-color: #a7f3d0; --filter-btn-hover-bg: #1f2937; --filter-btn-active-bg: #16a34a;
-            --filter-btn-active-border: #15803d; --grid-item-bg: #374151; --shimmer-color: #ffffff1a;
-            --search-bg: #1f2937; --search-placeholder-color: #6b7280; --divider-color: #166534;
-            --spinner-base-color: #0000004d; --spinner-top-color: #ffffff80;
-        }
-        
-        html { height: 100%; scroll-behavior: smooth; }
-        body { font-family: 'Inter', 'Noto Sans SC', sans-serif; background-color: var(--bg-color); color: var(--text-color); display: flex; flex-direction: column; min-height: 100%; }
-        main { flex-grow: 1; }
-        body.overflow-hidden { overflow: hidden; }
-
-        .header-sticky { background-color: var(--header-bg); backdrop-filter: blur(8px); position: sticky; top: 0; z-index: 40; box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1); transition: transform 0.3s ease-in-out; will-change: transform; }
-        .header-sticky.is-hidden { transform: translateY(-100%); }
-        
-        #search-overlay { opacity: 0; visibility: hidden; transition: opacity 0.3s ease, visibility 0s 0.3s; background-color: transparent; }
-        #search-overlay.active { opacity: 1; visibility: visible; transition: opacity 0.3s ease, visibility 0s 0s; }
-        #search-box { transform: translateY(-20px) scale(0.98); opacity: 0; transition: transform 0.3s ease, opacity 0.3s ease; background-color: var(--search-bg); color: var(--text-color); box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1); }
-        #search-overlay.active #search-box { transform: translateY(0) scale(1); opacity: 1; }
-        #search-input:focus { outline: none; }
-        
-        .grid-item {
-            margin-bottom: 16px;
-            width: calc(50% - 8px);
-        }
-        .grid-item.grid-item--width2 {
-             width: 100%;
-        }
-        @media (min-width: 640px) {
-            .grid-item { width: calc(33.333% - 11px); } 
-            .grid-item.grid-item--width2 { width: calc(66.666% - 6px); }
-        } 
-        @media (min-width: 768px) {
-            .grid-item { width: calc(25% - 12px); }
-            .grid-item.grid-item--width2 { width: calc(50% - 8px); }
-        } 
-        @media (min-width: 1024px) {
-            .grid-item { width: calc(20% - 12.8px); }
-            .grid-item.grid-item--width2 { width: calc(40% - 9.6px); }
-        } 
-        @media (min-width: 1280px) {
-            .grid-item { width: calc(16.666% - 13.33px); }
-            .grid-item.grid-item--width2 { width: calc(33.333% - 10.67px); }
-        }
-
-        .grid-item > a { display: block; border-radius: 0.5rem; overflow: hidden; cursor: pointer; text-decoration: none; }
-        .grid-item > a:hover img { transform: scale(1.05); }
-        
-        .image-placeholder { position: relative; width: 100%; background-color: var(--grid-item-bg); border-radius: 0.5rem; overflow: hidden; }
-        .image-placeholder::after { content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: linear-gradient(100deg, transparent 20%, var(--shimmer-color) 50%, transparent 80%); animation: shimmer 1.5s infinite linear; background-size: 200% 100%; }
-        @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
-        .image-placeholder.item-loaded::after { display: none; }
-
-        .spinner { position: absolute; top: 50%; left: 50%; width: 2.5rem; height: 2.5rem; margin-top: -1.25rem; margin-left: -1.25rem; border: 4px solid var(--spinner-base-color); border-top-color: var(--spinner-top-color); border-radius: 50%; animation: spin 1s linear infinite; transition: opacity 0.3s; z-index: 1; }
-        @keyframes spin { to { transform: rotate(360deg); } }
-        .image-placeholder.item-loaded .spinner { opacity: 0; }
-        .lightbox .spinner { border-color: rgba(255,255,255,0.2); border-top-color: rgba(255,255,255,0.8); display: none; }
-        .lightbox.is-loading .spinner { display: block; }
-
-        .image-placeholder img { display: block; width: 100%; height: auto; opacity: 0; transition: opacity 0.4s ease-in-out, transform 0.3s ease-in-out; }
-        .image-placeholder img.loaded { opacity: 1; }
-
-        .filter-btn { padding: 0.5rem 1rem; border-radius: 9999px; font-weight: 500; transition: all 0.2s ease; border: 1px solid transparent; cursor: pointer; background-color: transparent; color: var(--filter-btn-color); }
-        .filter-btn:hover { background-color: var(--filter-btn-hover-bg); }
-        .filter-btn.active { background-color: var(--filter-btn-active-bg); color: white; border-color: var(--filter-btn-active-border); }
-        
-        .lightbox { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.9); display: flex; justify-content: center; align-items: center; z-index: 1000; opacity: 0; visibility: hidden; transition: opacity 0.3s ease; }
-        .lightbox.active { opacity: 1; visibility: visible; }
-        .lightbox-image { max-width: 85%; max-height: 85%; display: block; object-fit: contain; opacity: 0; transition: opacity 0.3s ease; }
-        .lightbox.is-loading .lightbox-image { opacity: 0; }
-        .lightbox-image.loaded { opacity: 1; }
-
-        .lightbox-btn { position: absolute; top: 50%; transform: translateY(-50%); background-color: rgba(255,255,255,0.1); color: white; border: none; font-size: 2.5rem; cursor: pointer; padding: 0.5rem 1rem; border-radius: 0.5rem; transition: background-color 0.2s; z-index: 10; }
-        .lightbox-btn:hover { background-color: rgba(255,255,255,0.2); }
-        .lb-prev { left: 1rem; } .lb-next { right: 1rem; } .lb-close { top: 1rem; right: 1rem; font-size: 2rem; }
-        .lb-counter { position: absolute; top: 1.5rem; left: 50%; transform: translateX(-50%); color: white; font-size: 1rem; background-color: rgba(0,0,0,0.3); padding: 0.25rem 0.75rem; border-radius: 9999px; }
-        .lb-download { position: absolute; bottom: 1rem; right: 1rem; background-color: #22c55e; color: white; border: none; padding: 0.5rem 1rem; border-radius: 0.5rem; cursor: pointer; transition: background-color 0.2s; font-size: 1rem; text-decoration: none; }
-        .lb-download:hover { background-color: #16a34a; }
-        .back-to-top { position: fixed; bottom: 2rem; right: 2rem; background-color: #22c55e; color: white; width: 3rem; height: 3rem; border-radius: 9999px; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 8px rgba(0,0,0,0.2); cursor: pointer; opacity: 0; visibility: hidden; transform: translateY(20px); transition: all 0.3s ease; }
-        .back-to-top.visible { opacity: 1; visibility: visible; transform: translateY(0); }
-    </style>
-</head>
-<body class="antialiased">
-
-    <header class="text-center header-sticky py-3">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="flex items-center justify-between h-auto md:h-14 mb-4">
-                <div class="flex-1"></div>
-                <h1 class="text-4xl md:text-5xl font-bold text-center whitespace-nowrap">图片画廊</h1>
-                <div class="flex-1 flex items-center justify-end gap-1">
-                    <button id="search-toggle-btn" title="搜索" class="p-2 rounded-full text-[var(--text-color)] hover:bg-gray-500/10"><svg class="w-6 h-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg></button>
-                    <button id="theme-toggle" title="切换主题" class="p-2 rounded-full text-[var(--text-color)] hover:bg-gray-500/10"><svg id="theme-icon-sun" class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" /></svg><svg id="theme-icon-moon" class="w-6 h-6 hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" /></svg></button>
-                </div>
-            </div>
-            <div id="filter-buttons" class="flex justify-center flex-wrap gap-2 px-4"><button class="filter-btn active" data-filter="all">全部</button><button class="filter-btn" data-filter="random">随机</button></div>
-        </div>
-    </header>
-    
-    <div class="border-b-2" style="border-color: var(--divider-color);"></div>
-
-    <main class="max-w-7xl mx-auto w-full px-4 py-8 md:py-10">
-        <div id="gallery-container" class="mx-auto"></div>
-        <div id="loader" class="text-center py-8 hidden">正在加载更多...</div>
-    </main>
-    
-    <footer class="text-center py-6 mt-auto border-t" style="border-color: var(--divider-color);"><p>© 2025 图片画廊</p></footer>
-
-    <div id="search-overlay" class="fixed inset-0 z-50 flex items-start justify-center pt-24 md:pt-32 p-4"><div id="search-box" class="w-full max-w-lg relative rounded-lg"><input type="search" id="search-input" placeholder="输入关键词，按 Enter 搜索..." class="w-full py-4 pl-6 pr-16 text-lg rounded-lg border-0"><button id="search-exec-btn" class="absolute h-full right-0 top-0 text-gray-500 hover:text-green-600 px-5 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg></button></div></div>
-    <div id="lightbox" class="lightbox"><div class="spinner"></div><span class="lb-counter"></span><button class="lightbox-btn lb-close">&times;</button><button class="lightbox-btn lb-prev">&lsaquo;</button><img class="lightbox-image" alt=""><button class="lightbox-btn lb-next">&rsaquo;</button><a href="#" id="lightbox-download-link" download class="lb-download">下载</a></div>
-    <a class="back-to-top" title="返回顶部"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></a>
-
-    <script>
-    document.addEventListener('DOMContentLoaded', function () {
-        const body = document.body;
-        const galleryContainer = document.getElementById('gallery-container');
-        const loader = document.getElementById('loader');
-        const filterButtonsContainer = document.getElementById('filter-buttons');
-        const header = document.querySelector('.header-sticky');
-        
-        let masonry;
-        let allLoadedImages = []; let currentFilter = 'all'; let currentSearch = ''; let currentPage = 1; let isLoading = false; let hasMoreImages = true; let lastFocusedElement;
-        
-        const searchToggleBtn = document.getElementById('search-toggle-btn');
-        const themeToggleBtn = document.getElementById('theme-toggle');
-        const searchOverlay = document.getElementById('search-overlay');
-        const searchInput = document.getElementById('search-input');
-        const searchExecBtn = document.getElementById('search-exec-btn');
-        
-        const openSearch = () => { searchOverlay.classList.add('active'); body.classList.add('overflow-hidden'); setTimeout(() => searchInput.focus(), 50); };
-        const closeSearch = () => { searchOverlay.classList.remove('active'); body.classList.remove('overflow-hidden'); };
-        searchToggleBtn.addEventListener('click', openSearch);
-        searchOverlay.addEventListener('click', (e) => { if (e.target === searchOverlay) closeSearch(); });
-        document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && searchOverlay.classList.contains('active')) closeSearch(); });
-        
-        const performSearch = () => { const newSearchTerm = searchInput.value.trim(); if (newSearchTerm === currentSearch) { closeSearch(); return; } currentSearch = newSearchTerm; document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active')); filterButtonsContainer.querySelector('[data-filter="all"]').classList.add('active'); currentFilter = 'all'; closeSearch(); resetGallery(); fetchAndRenderImages(); };
-        searchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') performSearch(); });
-        searchExecBtn.addEventListener('click', performSearch);
-        
-        const applyTheme = (theme) => { const isDark = theme === 'dark'; body.classList.toggle('dark', isDark); document.getElementById('theme-icon-sun').classList.toggle('hidden', isDark); document.getElementById('theme-icon-moon').classList.toggle('hidden', !isDark); };
-        themeToggleBtn.addEventListener('click', () => { const newTheme = body.classList.contains('dark') ? 'light' : 'dark'; localStorage.setItem('theme', newTheme); applyTheme(newTheme); });
-        applyTheme(localStorage.getItem('theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
-
-        const fetchJSON = async (url) => { const response = await fetch(url); if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`); return response.json(); };
-        const resetGallery = () => { if (masonry) { masonry.remove(Array.from(galleryContainer.children)); masonry.layout(); } allLoadedImages = []; currentPage = 1; hasMoreImages = true; window.scrollTo(0, 0); loader.textContent = '正在加载更多...'; };
-        const fetchAndRenderImages = async () => {
-            if (isLoading || !hasMoreImages) return;
-            isLoading = true;
-            loader.classList.remove('hidden');
-            try {
-                const url = `/api/images?page=${currentPage}&limit=20&category=${currentFilter}&search=${encodeURIComponent(currentSearch)}&sort_by=date_desc`;
-                const data = await fetchJSON(url);
-                if (data.images && data.images.length > 0) {
-                    const itemsFragment = renderItems(data.images);
-                    const newItems = Array.from(itemsFragment.children);
-                    galleryContainer.appendChild(itemsFragment);
-                    masonry.appended(newItems);
-                    imagesLoaded(galleryContainer).on('progress', () => masonry.layout());
-                    allLoadedImages.push(...data.images);
-                    currentPage++;
-                    hasMoreImages = data.hasMore;
-                } else { hasMoreImages = false; if (allLoadedImages.length === 0) loader.textContent = '没有找到符合条件的图片。'; }
-            } catch (error) { console.error('获取图片数据失败:', error); loader.textContent = '加载失败，请刷新页面。'; } 
-            finally { isLoading = false; if (!hasMoreImages) loader.classList.add('hidden'); }
-        };
-
-        const renderItems = (images) => {
-            const fragment = document.createDocumentFragment();
-            images.forEach(image => {
-                const item = document.createElement('div');
-                item.className = 'grid-item';
-                item.dataset.id = image.id;
-                
-                if (image.width && image.height && (image.width / image.height > 1.8)) {
-                    item.classList.add('grid-item--width2');
-                }
-
-                const link = document.createElement('a');
-                link.href = "#"; link.setAttribute('role', 'button'); link.setAttribute('aria-label', image.description || image.originalFilename);
-
-                const placeholder = document.createElement('div');
-                placeholder.className = 'image-placeholder';
-
-                const spinner = document.createElement('div');
-                spinner.className = 'spinner';
-
-                const img = document.createElement('img');
-                img.alt = image.description || image.originalFilename;
-                img.src = `/image-proxy/${image.filename}?w=800`; // Fallback src
-                img.srcset = `/image-proxy/${image.filename}?w=400 400w, /image-proxy/${image.filename}?w=800 800w, /image-proxy/${image.filename}?w=1200 1200w`;
-                img.sizes = '(max-width: 639px) 48vw, (max-width: 767px) 32vw, (max-width: 1023px) 24vw, (max-width: 1279px) 19vw, 16vw';
-
-                img.addEventListener('load', () => {
-                    img.classList.add('loaded');
-                    placeholder.classList.add('item-loaded');
-                    if (masonry) masonry.layout();
-                });
-                img.addEventListener('error', () => {
-                    item.style.display = 'none';
-                    if (masonry) masonry.layout();
-                });
-                
-                placeholder.appendChild(spinner);
-                placeholder.appendChild(img);
-                link.appendChild(placeholder);
-                item.appendChild(link);
-                fragment.appendChild(item);
-            });
-            return fragment;
-        };
-        
-        const createFilterButtons = async () => { try { const categories = await fetchJSON('/api/public/categories'); filterButtonsContainer.querySelectorAll('.dynamic-filter').forEach(btn => btn.remove()); categories.forEach(category => { const button = document.createElement('button'); button.className = 'filter-btn dynamic-filter'; button.dataset.filter = category; button.textContent = category; filterButtonsContainer.appendChild(button); }); } catch (error) { console.error('无法加载分类按钮:', error); } };
-        
-        filterButtonsContainer.addEventListener('click', (e) => {
-            const target = e.target.closest('.filter-btn');
-            if (!target) return;
-            
-            currentFilter = target.dataset.filter;
-            currentSearch = ''; 
-            searchInput.value = '';
-            
-            document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
-            target.classList.add('active');
-            
-            resetGallery();
-            fetchAndRenderImages();
-        });
-        
-        // --- Lightbox Logic ---
-        const lightbox = document.getElementById('lightbox'); 
-        const lightboxImage = lightbox.querySelector('.lightbox-image'); 
-        const lbCounter = lightbox.querySelector('.lb-counter'); 
-        const lbDownloadLink = document.getElementById('lightbox-download-link'); 
-        let currentImageIndex = 0;
-        let loadingSpinnerTimeout;
-
-        lightboxImage.onload = () => {
-            clearTimeout(loadingSpinnerTimeout);
-            lightbox.classList.remove('is-loading');
-            lightboxImage.classList.add('loaded');
-        };
-        lightboxImage.onerror = () => {
-            clearTimeout(loadingSpinnerTimeout);
-            lightbox.classList.remove('is-loading');
-            console.error("Lightbox image failed to load:", lightboxImage.src);
-        };
-
-        const updateLightboxContent = (item) => {
-            lightboxImage.alt = item.description || item.originalFilename;
-            lbDownloadLink.href = item.src;
-            lbDownloadLink.download = item.originalFilename;
-        };
-        
-        const showImageAtIndex = (index) => {
-            if (index < 0 || index >= allLoadedImages.length) return;
-            currentImageIndex = index;
-            const item = allLoadedImages[index];
-            if (!item) return;
-
-            lightboxImage.classList.remove('loaded');
-            lbCounter.textContent = `${currentImageIndex + 1} / ${allLoadedImages.length}`;
-            updateLightboxContent(item);
-
-            clearTimeout(loadingSpinnerTimeout);
-            loadingSpinnerTimeout = setTimeout(() => {
-                lightbox.classList.add('is-loading');
-            }, 200);
-
-            lightboxImage.src = `/image-proxy/${item.filename}`;
-        };
-        
-        const showNextImage = () => showImageAtIndex((currentImageIndex + 1) % allLoadedImages.length);
-        const showPrevImage = () => showImageAtIndex((currentImageIndex - 1 + allLoadedImages.length) % allLoadedImages.length);
-        const closeLightbox = () => { lightbox.classList.remove('active'); document.body.classList.remove('overflow-hidden'); if(lastFocusedElement) lastFocusedElement.focus(); };
-
-        galleryContainer.addEventListener('click', (e) => { 
-            e.preventDefault(); 
-            const item = e.target.closest('.grid-item'); 
-            if (item) { 
-                lastFocusedElement = document.activeElement; 
-                const newIndex = allLoadedImages.findIndex(img => img.id === item.dataset.id); 
-                if (newIndex === -1) return;
-                
-                lightbox.classList.add('active'); 
-                document.body.classList.add('overflow-hidden');
-                showImageAtIndex(newIndex);
-            } 
-        });
-
-        lightbox.addEventListener('click', (e) => { 
-            const target = e.target; 
-            if (target.matches('.lb-next')) showNextImage(); 
-            else if (target.matches('.lb-prev')) showPrevImage(); 
-            else if (target.matches('.lb-close') || target === lightbox) closeLightbox(); 
-        });
-
-        document.addEventListener('keydown', (e) => { 
-            if (lightbox.classList.contains('active')) { 
-                if (e.key === 'ArrowLeft') showPrevImage(); 
-                else if (e.key === 'ArrowRight') showNextImage(); 
-                else if (e.key === 'Escape') closeLightbox(); 
-            } 
-        });
-        
-        const backToTopBtn = document.querySelector('.back-to-top');
-        backToTopBtn.addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' })); 
-        
-        let lastScrollY = window.scrollY; let ticking = false;
-        function handleScroll() { const currentScrollY = window.scrollY; if (currentScrollY > 300) backToTopBtn.classList.add('visible'); else backToTopBtn.classList.remove('visible'); if (currentScrollY > lastScrollY && currentScrollY > header.offsetHeight) { header.classList.add('is-hidden'); } else { header.classList.remove('is-hidden'); } lastScrollY = currentScrollY <= 0 ? 0 : currentScrollY; if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 500) { fetchAndRenderImages(); } }
-        window.addEventListener('scroll', () => { if (!ticking) { window.requestAnimationFrame(() => { handleScroll(); ticking = false; }); ticking = true; } }); 
-        
-        async function init() { 
-            masonry = new Masonry(galleryContainer, {
-                itemSelector: '.grid-item',
-                percentPosition: false,
-                gutter: 16,
-                transitionDuration: '0.3s'
-            });
-            await createFilterButtons(); 
-            await fetchAndRenderImages(); 
-        }
-        init();
-    });
-    </script>
-</body>
-</html>
-EOF
-
     echo "--> 正在生成后台管理页 public/admin.html..."
 cat << 'EOF' > public/admin.html
 <!DOCTYPE html>
@@ -1172,8 +821,8 @@ cat << 'EOF' > public/admin.html
             <div id="image-list-wrapper">
                 <div id="image-list"></div>
                 <div id="image-loader" class="text-center py-8 text-slate-500 hidden">正在加载...</div>
-                 <div id="maintenance-view" class="hidden p-4"></div>
             </div>
+            <div id="maintenance-view" class="hidden p-4"></div>
             <div id="pagination-container" class="mt-auto flex justify-center items-center gap-4">
                 <div id="items-per-page-container">
                     <select id="items-per-page-select" class="border rounded-md px-2 py-1 text-sm focus:outline-none">
