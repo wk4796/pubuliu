@@ -1,28 +1,24 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v2.0.4)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v2.1.0)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
-#   v2.0.4 更新:
-#   - 重构(后台): 彻底重写了后台管理页面的控件区域布局，采用更简洁健壮的
-#               响应式方案，强制在移动端垂直堆叠控件，确保在任何小屏幕
-#               设备上都有清晰、易用的操作界面。
-#
-#   v2.0.3 更新:
-#   - 优化(后台): 对后台主内容区的控件布局进行响应式优化。
-#
-#   v2.0.2 更新:
-#   - 修复(后台): 修正了 admin.html 的HTML结构错误。
+#   v2.1.0 更新:
+#   - 新增功能(后台): 在“空间清理”中增加了缓存大小的实时显示，可直观了解
+#                  缩略图缓存占用的磁盘空间。
+#   - 优化(UI/UX): 全面优化了前台画廊和后台管理界面的响应式设计，提升了
+#                  在手机、平板和桌面设备上的视觉和操作体验。
+#                  - 后台“列表视图”在移动端将自动垂直堆叠，解决了信息
+#                    拥挤的问题。
+#                  - 后台控制栏增加了 flex-wrap，以适应不同屏幕宽度。
 #
 #   v2.0.1 更新:
-#   - 修复(后台): 修正了 server.js 中的致命 `ReferenceError`。
-#   - 优化(后台): 移除了上传控件的 `accept="image/*"` 属性。
+#   - 修复(后台): 修正了 server.js 中的一个致命 `ReferenceError`。
+#   - 优化(后台): 移除了上传控件的 `accept` 属性以改善移动端兼容性。
 #
 #   v2.0.0 更新:
 #   - 核心升级(后台): 数据库从 JSON 文件迁移至 SQLite。
-#   - 新增功能(后台): 增加了“清理图片缓存”功能。
-#   - 优化(安装): 增强了安装脚本，可自动安装 SQLite 的系统开发依赖库。
 # =================================================================
 
 # --- 配置 ---
@@ -33,7 +29,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 PROMPT_Y="(${GREEN}y${NC}/${RED}n${NC})"
 
-SCRIPT_VERSION="2.0.4"
+SCRIPT_VERSION="2.1.0"
 APP_NAME="image-gallery"
 
 # --- 路径设置 ---
@@ -60,7 +56,7 @@ overwrite_app_files() {
 cat << 'EOF' > package.json
 {
   "name": "image-gallery-pro",
-  "version": "2.0.4",
+  "version": "2.1.0",
   "description": "A high-performance, full-stack image gallery application powered by SQLite.",
   "main": "server.js",
   "scripts": {
@@ -602,6 +598,23 @@ apiAdminRouter.post('/maintenance/delete-orphans', handleApiError(async (req, re
     res.json({ message: `操作完成。成功删除 ${deletedCount} 个文件。`, errors: errors });
 }));
 
+apiAdminRouter.get('/maintenance/cache-info', handleApiError(async (req, res) => {
+    const files = await fsp.readdir(cacheDir);
+    let totalSize = 0;
+    const statPromises = files.map(file => 
+        fsp.stat(path.join(cacheDir, file)).catch(err => {
+            console.error(`无法获取缓存文件信息: ${file}`, err);
+            return null; // 忽略无法访问的文件
+        })
+    );
+    const stats = await Promise.all(statPromises);
+    for (const stat of stats) {
+        if (stat) totalSize += stat.size;
+    }
+    res.json({ totalSize, fileCount: files.length });
+}));
+
+
 apiAdminRouter.post('/maintenance/clear-cache', handleApiError(async (req, res) => {
     const files = await fsp.readdir(cacheDir);
     let clearedCount = 0;
@@ -672,6 +685,364 @@ process.on('SIGINT', () => process.exit());
 process.on('SIGTERM', () => process.exit());
 EOF
 
+    echo "--> 正在生成主画廊 public/index.html..."
+cat << 'EOF' > public/index.html
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>图片画廊</title>
+    <meta name="description" content="一个展示精彩瞬间的瀑布流图片画廊。">
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/masonry-layout@4/dist/masonry.pkgd.min.js"></script>
+    <script src="https://unpkg.com/imagesloaded@5/imagesloaded.pkgd.min.js"></script>
+
+    <style>
+        :root {
+            --bg-color: #f0fdf4; --text-color: #14532d; --header-bg: rgba(240, 253, 244, 0.85);
+            --filter-btn-color: #166534; --filter-btn-hover-bg: #dcfce7; --filter-btn-active-bg: #22c55e;
+            --filter-btn-active-border: #16a34a; --grid-item-bg: #e4e4e7; --shimmer-color: #ffffff4d;
+            --search-bg: #ffffff; --search-placeholder-color: #9ca3af; --divider-color: #dcfce7;
+            --spinner-base-color: #ffffff4d; --spinner-top-color: #ffffffbf;
+        }
+        body.dark {
+            --bg-color: #111827; --text-color: #a7f3d0; --header-bg: rgba(17, 24, 39, 0.85);
+            --filter-btn-color: #a7f3d0; --filter-btn-hover-bg: #1f2937; --filter-btn-active-bg: #16a34a;
+            --filter-btn-active-border: #15803d; --grid-item-bg: #374151; --shimmer-color: #ffffff1a;
+            --search-bg: #1f2937; --search-placeholder-color: #6b7280; --divider-color: #166534;
+            --spinner-base-color: #0000004d; --spinner-top-color: #ffffff80;
+        }
+        
+        html { height: 100%; scroll-behavior: smooth; }
+        body { font-family: 'Inter', 'Noto Sans SC', sans-serif; background-color: var(--bg-color); color: var(--text-color); display: flex; flex-direction: column; min-height: 100%; }
+        main { flex-grow: 1; }
+        body.overflow-hidden { overflow: hidden; }
+
+        .header-sticky { background-color: var(--header-bg); backdrop-filter: blur(8px); position: sticky; top: 0; z-index: 40; box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1); transition: transform 0.3s ease-in-out; will-change: transform; }
+        .header-sticky.is-hidden { transform: translateY(-100%); }
+        
+        #search-overlay { opacity: 0; visibility: hidden; transition: opacity 0.3s ease, visibility 0s 0.3s; background-color: transparent; }
+        #search-overlay.active { opacity: 1; visibility: visible; transition: opacity 0.3s ease, visibility 0s 0s; }
+        #search-box { transform: translateY(-20px) scale(0.98); opacity: 0; transition: transform 0.3s ease, opacity 0.3s ease; background-color: var(--search-bg); color: var(--text-color); box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1); }
+        #search-overlay.active #search-box { transform: translateY(0) scale(1); opacity: 1; }
+        #search-input:focus { outline: none; }
+        
+        .grid-item {
+            margin-bottom: 16px;
+            width: calc(50% - 8px);
+        }
+        .grid-item.grid-item--width2 {
+             width: 100%;
+        }
+        @media (min-width: 640px) {
+            .grid-item { width: calc(33.333% - 11px); } 
+            .grid-item.grid-item--width2 { width: calc(66.666% - 6px); }
+        } 
+        @media (min-width: 768px) {
+            .grid-item { width: calc(25% - 12px); }
+            .grid-item.grid-item--width2 { width: calc(50% - 8px); }
+        } 
+        @media (min-width: 1024px) {
+            .grid-item { width: calc(20% - 12.8px); }
+            .grid-item.grid-item--width2 { width: calc(40% - 9.6px); }
+        } 
+        @media (min-width: 1280px) {
+            .grid-item { width: calc(16.666% - 13.33px); }
+            .grid-item.grid-item--width2 { width: calc(33.333% - 10.67px); }
+        }
+
+        .grid-item > a { display: block; border-radius: 0.5rem; overflow: hidden; cursor: pointer; text-decoration: none; }
+        .grid-item > a:hover img { transform: scale(1.05); }
+        
+        .image-placeholder { position: relative; width: 100%; background-color: var(--grid-item-bg); border-radius: 0.5rem; overflow: hidden; }
+        .image-placeholder::after { content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: linear-gradient(100deg, transparent 20%, var(--shimmer-color) 50%, transparent 80%); animation: shimmer 1.5s infinite linear; background-size: 200% 100%; }
+        @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+        .image-placeholder.item-loaded::after { display: none; }
+
+        .spinner { position: absolute; top: 50%; left: 50%; width: 2.5rem; height: 2.5rem; margin-top: -1.25rem; margin-left: -1.25rem; border: 4px solid var(--spinner-base-color); border-top-color: var(--spinner-top-color); border-radius: 50%; animation: spin 1s linear infinite; transition: opacity 0.3s; z-index: 1; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .image-placeholder.item-loaded .spinner { opacity: 0; }
+        .lightbox .spinner { border-color: rgba(255,255,255,0.2); border-top-color: rgba(255,255,255,0.8); display: none; }
+        .lightbox.is-loading .spinner { display: block; }
+
+        .image-placeholder img { display: block; width: 100%; height: auto; opacity: 0; transition: opacity 0.4s ease-in-out, transform 0.3s ease-in-out; }
+        .image-placeholder img.loaded { opacity: 1; }
+
+        .filter-btn { padding: 0.5rem 1rem; border-radius: 9999px; font-weight: 500; transition: all 0.2s ease; border: 1px solid transparent; cursor: pointer; background-color: transparent; color: var(--filter-btn-color); }
+        .filter-btn:hover { background-color: var(--filter-btn-hover-bg); }
+        .filter-btn.active { background-color: var(--filter-btn-active-bg); color: white; border-color: var(--filter-btn-active-border); }
+        
+        .lightbox { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.9); display: flex; justify-content: center; align-items: center; z-index: 1000; opacity: 0; visibility: hidden; transition: opacity 0.3s ease; }
+        .lightbox.active { opacity: 1; visibility: visible; }
+        .lightbox-image { max-width: 85%; max-height: 85%; display: block; object-fit: contain; opacity: 0; transition: opacity 0.3s ease; }
+        .lightbox.is-loading .lightbox-image { opacity: 0; }
+        .lightbox-image.loaded { opacity: 1; }
+
+        .lightbox-btn { position: absolute; top: 50%; transform: translateY(-50%); background-color: rgba(255,255,255,0.1); color: white; border: none; font-size: 2.5rem; cursor: pointer; padding: 0.5rem 1rem; border-radius: 0.5rem; transition: background-color 0.2s; z-index: 10; }
+        .lightbox-btn:hover { background-color: rgba(255,255,255,0.2); }
+        .lb-prev { left: 1rem; } .lb-next { right: 1rem; } .lb-close { top: 1rem; right: 1rem; font-size: 2rem; }
+        .lb-counter { position: absolute; top: 1.5rem; left: 50%; transform: translateX(-50%); color: white; font-size: 1rem; background-color: rgba(0,0,0,0.3); padding: 0.25rem 0.75rem; border-radius: 9999px; }
+        .lb-download { position: absolute; bottom: 1rem; right: 1rem; background-color: #22c55e; color: white; border: none; padding: 0.5rem 1rem; border-radius: 0.5rem; cursor: pointer; transition: background-color 0.2s; font-size: 1rem; text-decoration: none; }
+        .lb-download:hover { background-color: #16a34a; }
+        .back-to-top { position: fixed; bottom: 2rem; right: 2rem; background-color: #22c55e; color: white; width: 3rem; height: 3rem; border-radius: 9999px; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 8px rgba(0,0,0,0.2); cursor: pointer; opacity: 0; visibility: hidden; transform: translateY(20px); transition: all 0.3s ease; }
+        .back-to-top.visible { opacity: 1; visibility: visible; transform: translateY(0); }
+        
+        @media (max-width: 640px) {
+            .lightbox-btn { font-size: 1.8rem; padding: 0.25rem 0.75rem; }
+            .lb-close { font-size: 1.5rem; }
+        }
+    </style>
+</head>
+<body class="antialiased">
+
+    <header class="text-center header-sticky py-3">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center justify-between h-auto md:h-14 mb-4">
+                <div class="flex-1"></div>
+                <h1 class="text-3xl sm:text-4xl md:text-5xl font-bold text-center whitespace-nowrap">图片画廊</h1>
+                <div class="flex-1 flex items-center justify-end gap-1">
+                    <button id="search-toggle-btn" title="搜索" class="p-2 rounded-full text-[var(--text-color)] hover:bg-gray-500/10"><svg class="w-6 h-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg></button>
+                    <button id="theme-toggle" title="切换主题" class="p-2 rounded-full text-[var(--text-color)] hover:bg-gray-500/10"><svg id="theme-icon-sun" class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" /></svg><svg id="theme-icon-moon" class="w-6 h-6 hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" /></svg></button>
+                </div>
+            </div>
+            <div id="filter-buttons" class="flex justify-center flex-wrap gap-2 px-4"><button class="filter-btn active" data-filter="all">全部</button><button class="filter-btn" data-filter="random">随机</button></div>
+        </div>
+    </header>
+    
+    <div class="border-b-2" style="border-color: var(--divider-color);"></div>
+
+    <main class="max-w-7xl mx-auto w-full px-4 py-8 md:py-10">
+        <div id="gallery-container" class="mx-auto"></div>
+        <div id="loader" class="text-center py-8 hidden">正在加载更多...</div>
+    </main>
+    
+    <footer class="text-center py-6 mt-auto border-t" style="border-color: var(--divider-color);"><p>© 2025 图片画廊</p></footer>
+
+    <div id="search-overlay" class="fixed inset-0 z-50 flex items-start justify-center pt-24 md:pt-32 p-4"><div id="search-box" class="w-full max-w-lg relative rounded-lg"><input type="search" id="search-input" placeholder="输入关键词，按 Enter 搜索..." class="w-full py-4 pl-6 pr-16 text-lg rounded-lg border-0"><button id="search-exec-btn" class="absolute h-full right-0 top-0 text-gray-500 hover:text-green-600 px-5 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" /></svg></button></div></div>
+    <div id="lightbox" class="lightbox"><div class="spinner"></div><span class="lb-counter"></span><button class="lightbox-btn lb-close">&times;</button><button class="lightbox-btn lb-prev">&lsaquo;</button><img class="lightbox-image" alt=""><button class="lightbox-btn lb-next">&rsaquo;</button><a href="#" id="lightbox-download-link" download class="lb-download">下载</a></div>
+    <a class="back-to-top" title="返回顶部"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></a>
+
+    <script>
+    document.addEventListener('DOMContentLoaded', function () {
+        const body = document.body;
+        const galleryContainer = document.getElementById('gallery-container');
+        const loader = document.getElementById('loader');
+        const filterButtonsContainer = document.getElementById('filter-buttons');
+        const header = document.querySelector('.header-sticky');
+        
+        let masonry;
+        let allLoadedImages = []; let currentFilter = 'all'; let currentSearch = ''; let currentPage = 1; let isLoading = false; let hasMoreImages = true; let lastFocusedElement;
+        
+        const searchToggleBtn = document.getElementById('search-toggle-btn');
+        const themeToggleBtn = document.getElementById('theme-toggle');
+        const searchOverlay = document.getElementById('search-overlay');
+        const searchInput = document.getElementById('search-input');
+        const searchExecBtn = document.getElementById('search-exec-btn');
+        
+        const openSearch = () => { searchOverlay.classList.add('active'); body.classList.add('overflow-hidden'); setTimeout(() => searchInput.focus(), 50); };
+        const closeSearch = () => { searchOverlay.classList.remove('active'); body.classList.remove('overflow-hidden'); };
+        searchToggleBtn.addEventListener('click', openSearch);
+        searchOverlay.addEventListener('click', (e) => { if (e.target === searchOverlay) closeSearch(); });
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && searchOverlay.classList.contains('active')) closeSearch(); });
+        
+        const performSearch = () => { const newSearchTerm = searchInput.value.trim(); if (newSearchTerm === currentSearch) { closeSearch(); return; } currentSearch = newSearchTerm; document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active')); filterButtonsContainer.querySelector('[data-filter="all"]').classList.add('active'); currentFilter = 'all'; closeSearch(); resetGallery(); fetchAndRenderImages(); };
+        searchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') performSearch(); });
+        searchExecBtn.addEventListener('click', performSearch);
+        
+        const applyTheme = (theme) => { const isDark = theme === 'dark'; body.classList.toggle('dark', isDark); document.getElementById('theme-icon-sun').classList.toggle('hidden', isDark); document.getElementById('theme-icon-moon').classList.toggle('hidden', !isDark); };
+        themeToggleBtn.addEventListener('click', () => { const newTheme = body.classList.contains('dark') ? 'light' : 'dark'; localStorage.setItem('theme', newTheme); applyTheme(newTheme); });
+        applyTheme(localStorage.getItem('theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+
+        const fetchJSON = async (url) => { const response = await fetch(url); if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`); return response.json(); };
+        const resetGallery = () => { if (masonry) { masonry.remove(Array.from(galleryContainer.children)); masonry.layout(); } allLoadedImages = []; currentPage = 1; hasMoreImages = true; window.scrollTo(0, 0); loader.textContent = '正在加载更多...'; };
+        const fetchAndRenderImages = async () => {
+            if (isLoading || !hasMoreImages) return;
+            isLoading = true;
+            loader.classList.remove('hidden');
+            try {
+                const url = `/api/images?page=${currentPage}&limit=20&category=${currentFilter}&search=${encodeURIComponent(currentSearch)}&sort_by=date_desc`;
+                const data = await fetchJSON(url);
+                if (data.images && data.images.length > 0) {
+                    const itemsFragment = renderItems(data.images);
+                    const newItems = Array.from(itemsFragment.children);
+                    galleryContainer.appendChild(itemsFragment);
+                    masonry.appended(newItems);
+                    imagesLoaded(galleryContainer).on('progress', () => masonry.layout());
+                    allLoadedImages.push(...data.images);
+                    currentPage++;
+                    hasMoreImages = data.hasMore;
+                } else { hasMoreImages = false; if (allLoadedImages.length === 0) loader.textContent = '没有找到符合条件的图片。'; }
+            } catch (error) { console.error('获取图片数据失败:', error); loader.textContent = '加载失败，请刷新页面。'; } 
+            finally { isLoading = false; if (!hasMoreImages) loader.classList.add('hidden'); }
+        };
+
+        const renderItems = (images) => {
+            const fragment = document.createDocumentFragment();
+            images.forEach(image => {
+                const item = document.createElement('div');
+                item.className = 'grid-item';
+                item.dataset.id = image.id;
+                
+                if (image.width && image.height && (image.width / image.height > 1.8)) {
+                    item.classList.add('grid-item--width2');
+                }
+
+                const link = document.createElement('a');
+                link.href = "#"; link.setAttribute('role', 'button'); link.setAttribute('aria-label', image.description || image.originalFilename);
+
+                const placeholder = document.createElement('div');
+                placeholder.className = 'image-placeholder';
+
+                const spinner = document.createElement('div');
+                spinner.className = 'spinner';
+
+                const img = document.createElement('img');
+                img.alt = image.description || image.originalFilename;
+                img.src = `/image-proxy/${image.filename}?w=800`; // Fallback src
+                img.srcset = `/image-proxy/${image.filename}?w=400 400w, /image-proxy/${image.filename}?w=800 800w, /image-proxy/${image.filename}?w=1200 1200w`;
+                img.sizes = '(max-width: 639px) 48vw, (max-width: 767px) 32vw, (max-width: 1023px) 24vw, (max-width: 1279px) 19vw, 16vw';
+
+                img.addEventListener('load', () => {
+                    img.classList.add('loaded');
+                    placeholder.classList.add('item-loaded');
+                    if (masonry) masonry.layout();
+                });
+                img.addEventListener('error', () => {
+                    item.style.display = 'none';
+                    if (masonry) masonry.layout();
+                });
+                
+                placeholder.appendChild(spinner);
+                placeholder.appendChild(img);
+                link.appendChild(placeholder);
+                item.appendChild(link);
+                fragment.appendChild(item);
+            });
+            return fragment;
+        };
+        
+        const createFilterButtons = async () => { try { const categories = await fetchJSON('/api/public/categories'); filterButtonsContainer.querySelectorAll('.dynamic-filter').forEach(btn => btn.remove()); categories.forEach(category => { const button = document.createElement('button'); button.className = 'filter-btn dynamic-filter'; button.dataset.filter = category; button.textContent = category; filterButtonsContainer.appendChild(button); }); } catch (error) { console.error('无法加载分类按钮:', error); } };
+        
+        filterButtonsContainer.addEventListener('click', (e) => {
+            const target = e.target.closest('.filter-btn');
+            if (!target) return;
+            
+            currentFilter = target.dataset.filter;
+            currentSearch = ''; 
+            searchInput.value = '';
+            
+            document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
+            target.classList.add('active');
+            
+            resetGallery();
+            fetchAndRenderImages();
+        });
+        
+        // --- Lightbox Logic ---
+        const lightbox = document.getElementById('lightbox'); 
+        const lightboxImage = lightbox.querySelector('.lightbox-image'); 
+        const lbCounter = lightbox.querySelector('.lb-counter'); 
+        const lbDownloadLink = document.getElementById('lightbox-download-link'); 
+        let currentImageIndex = 0;
+        let loadingSpinnerTimeout;
+
+        lightboxImage.onload = () => {
+            clearTimeout(loadingSpinnerTimeout);
+            lightbox.classList.remove('is-loading');
+            lightboxImage.classList.add('loaded');
+        };
+        lightboxImage.onerror = () => {
+            clearTimeout(loadingSpinnerTimeout);
+            lightbox.classList.remove('is-loading');
+            console.error("Lightbox image failed to load:", lightboxImage.src);
+        };
+
+        const updateLightboxContent = (item) => {
+            lightboxImage.alt = item.description || item.originalFilename;
+            lbDownloadLink.href = item.src;
+            lbDownloadLink.download = item.originalFilename;
+        };
+        
+        const showImageAtIndex = (index) => {
+            if (index < 0 || index >= allLoadedImages.length) return;
+            currentImageIndex = index;
+            const item = allLoadedImages[index];
+            if (!item) return;
+
+            lightboxImage.classList.remove('loaded');
+            lbCounter.textContent = `${currentImageIndex + 1} / ${allLoadedImages.length}`;
+            updateLightboxContent(item);
+
+            clearTimeout(loadingSpinnerTimeout);
+            loadingSpinnerTimeout = setTimeout(() => {
+                lightbox.classList.add('is-loading');
+            }, 200);
+
+            lightboxImage.src = `/image-proxy/${item.filename}`;
+        };
+        
+        const showNextImage = () => showImageAtIndex((currentImageIndex + 1) % allLoadedImages.length);
+        const showPrevImage = () => showImageAtIndex((currentImageIndex - 1 + allLoadedImages.length) % allLoadedImages.length);
+        const closeLightbox = () => { lightbox.classList.remove('active'); document.body.classList.remove('overflow-hidden'); if(lastFocusedElement) lastFocusedElement.focus(); };
+
+        galleryContainer.addEventListener('click', (e) => { 
+            e.preventDefault(); 
+            const item = e.target.closest('.grid-item'); 
+            if (item) { 
+                lastFocusedElement = document.activeElement; 
+                const newIndex = allLoadedImages.findIndex(img => img.id === item.dataset.id); 
+                if (newIndex === -1) return;
+                
+                lightbox.classList.add('active'); 
+                document.body.classList.add('overflow-hidden');
+                showImageAtIndex(newIndex);
+            } 
+        });
+
+        lightbox.addEventListener('click', (e) => { 
+            const target = e.target; 
+            if (target.matches('.lb-next')) showNextImage(); 
+            else if (target.matches('.lb-prev')) showPrevImage(); 
+            else if (target.matches('.lb-close') || target === lightbox) closeLightbox(); 
+        });
+
+        document.addEventListener('keydown', (e) => { 
+            if (lightbox.classList.contains('active')) { 
+                if (e.key === 'ArrowLeft') showPrevImage(); 
+                else if (e.key === 'ArrowRight') showNextImage(); 
+                else if (e.key === 'Escape') closeLightbox(); 
+            } 
+        });
+        
+        const backToTopBtn = document.querySelector('.back-to-top');
+        backToTopBtn.addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' })); 
+        
+        let lastScrollY = window.scrollY; let ticking = false;
+        function handleScroll() { const currentScrollY = window.scrollY; if (currentScrollY > 300) backToTopBtn.classList.add('visible'); else backToTopBtn.classList.remove('visible'); if (currentScrollY > lastScrollY && currentScrollY > header.offsetHeight) { header.classList.add('is-hidden'); } else { header.classList.remove('is-hidden'); } lastScrollY = currentScrollY <= 0 ? 0 : currentScrollY; if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 500) { fetchAndRenderImages(); } }
+        window.addEventListener('scroll', () => { if (!ticking) { window.requestAnimationFrame(() => { handleScroll(); ticking = false; }); ticking = true; } }); 
+        
+        async function init() { 
+            masonry = new Masonry(galleryContainer, {
+                itemSelector: '.grid-item',
+                percentPosition: false,
+                gutter: 16,
+                transitionDuration: '0.3s'
+            });
+            await createFilterButtons(); 
+            await fetchAndRenderImages(); 
+        }
+        init();
+    });
+    </script>
+</body>
+</html>
+EOF
+
     echo "--> 正在生成后台管理页 public/admin.html..."
 cat << 'EOF' > public/admin.html
 <!DOCTYPE html>
@@ -717,11 +1088,26 @@ cat << 'EOF' > public/admin.html
         /* List View Item */
         .admin-image-item.is-list { display: flex; align-items: center; padding: 0.5rem; gap: 1rem; }
         .admin-image-item.is-list .image-preview-container { height: 4rem; width: 4rem; flex-shrink: 0; }
-        .admin-image-item.is-list .image-info-wrapper { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 1rem; flex-grow: 1; align-items: center; }
+        /* List view info wrapper - responsive layout */
+        .admin-image-item.is-list .image-info-wrapper {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+        }
+        @media (min-width: 768px) {
+            .admin-image-item.is-list .image-info-wrapper {
+                display: grid;
+                grid-template-columns: 2fr 1fr 1fr;
+                gap: 1rem;
+                align-items: center;
+            }
+        }
         .admin-image-item.is-list .info-col-1 { overflow: hidden; }
         .admin-image-item.is-list .info-col-2, .admin-image-item.is-list .info-col-3 { font-size: 0.875rem; color: #475569; }
         .admin-image-item.is-list .action-buttons { margin-left: auto; flex-shrink: 0; }
         .admin-image-item.is-list .bulk-checkbox { top: 50%; transform: translateY(-50%); }
+
 
         .image-preview-container { background-color: #f1f5f9; border-radius: 0.25rem; overflow: hidden; display: flex; align-items: center; justify-content: center; cursor: pointer; position: relative; }
         .image-preview-container img { width: 100%; height: 100%; object-fit: contain; opacity: 0; transition: opacity 0.4s ease-in-out; }
@@ -790,48 +1176,43 @@ cat << 'EOF' > public/admin.html
     </header>
     <main class="container mx-auto p-4 md:p-6 grid grid-cols-1 xl:grid-cols-12 gap-8">
         <div class="xl:col-span-4 space-y-8">
-            <section id="upload-section" class="bg-white p-6 rounded-lg shadow-md"><h2 class="text-xl font-semibold mb-4">上传新图片</h2><form id="upload-form" class="space-y-4"><div><label for="image-input" id="drop-zone" class="w-full flex flex-col items-center justify-center p-6 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors"><svg class="w-10 h-10 mb-3 text-gray-400" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 20 16"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 13h3a3 3 0 0 0 0-6h-.025A5.56 5.56 0 0 0 16 6.5 5.5 5.5 0 0 0 5.207 5.021C5.137 5.017 5.071 5 5 5a4 4 0 0 0 0 8h2.167M10 15V6m0 0L8 8m2-2 2 2"/></svg><p class="text-sm text-gray-500"><span class="font-semibold">点击选择</span> 或拖拽多个文件到此处</p><input id="image-input" type="file" class="hidden" multiple/></label></div><div class="space-y-2"><label for="unified-description" class="block text-sm font-medium">统一描述 (可选)</label><textarea id="unified-description" rows="2" class="w-full text-sm border rounded px-2 py-1" placeholder="在此处填写可应用到所有未填写描述的图片"></textarea></div><div id="file-preview-container" class="hidden space-y-2"><div id="upload-summary" class="text-sm font-medium text-slate-600"></div><div id="file-preview-list" class="h-48 border rounded p-2 space-y-3" style="overflow: auto; resize: vertical;"></div></div><div><label for="category-select" class="block text-sm font-medium mb-1">设置分类</label><div class="flex items-center space-x-2"><select name="category" id="category-select" required class="w-full border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-500"></select><button type="button" id="add-category-btn" class="flex-shrink-0 bg-green-500 hover:bg-green-600 text-white font-bold w-9 h-9 rounded-full flex items-center justify-center text-xl" title="添加新分类">+</button></div></div><button type="submit" id="upload-btn" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg transition-colors disabled:bg-gray-400" disabled>上传文件</button></form></section>
+            <section id="upload-section" class="bg-white p-6 rounded-lg shadow-md"><h2 class="text-xl font-semibold mb-4">上传新图片</h2><form id="upload-form" class="space-y-4"><div><label for="image-input" id="drop-zone" class="w-full flex flex-col items-center justify-center p-6 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors"><svg class="w-10 h-10 mb-3 text-gray-400" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 20 16"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 13h3a3 3 0 0 0 0-6h-.025A5.56 5.56 0 0 0 16 6.5 5.5 5.5 0 0 0 5.207 5.021C5.137 5.017 5.071 5 5 5a4 4 0 0 0 0 8h2.167M10 15V6m0 0L8 8m2-2 2 2"/></svg><p class="text-sm text-gray-500"><span class="font-semibold">点击选择</span> 或拖拽多个文件到此处</p><input id="image-input" type="file" class="hidden" multiple/></label></div><div class="space-y-2"><label for="unified-description" class="block text-sm font-medium">统一描述 (可选)</label><textarea id="unified-description" rows="2" class="w-full text-sm border rounded px-2 py-1" placeholder="在此处填写可应用到所有未填写描述的图片"></textarea></div><div id="file-preview-container" class="hidden space-y-2"><div id="upload-summary" class="text-sm font-medium text-slate-600"></div><div id="file-preview-list" class="max-h-48 border rounded p-2 space-y-3 overflow-auto"></div></div><div><label for="category-select" class="block text-sm font-medium mb-1">设置分类</label><div class="flex items-center space-x-2"><select name="category" id="category-select" required class="w-full border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-500"></select><button type="button" id="add-category-btn" class="flex-shrink-0 bg-green-500 hover:bg-green-600 text-white font-bold w-9 h-9 rounded-full flex items-center justify-center text-xl" title="添加新分类">+</button></div></div><button type="submit" id="upload-btn" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg transition-colors disabled:bg-gray-400" disabled>上传文件</button></form></section>
             <section class="bg-white p-6 rounded-lg shadow-md"><h2 class="text-xl font-semibold mb-4">图库</h2><div id="navigation-list" class="space-y-1"><div id="nav-item-all" data-view="all" class="nav-item flex items-center gap-3 p-2 rounded cursor-pointer hover:bg-gray-100 active"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 text-slate-500"><path fill-rule="evenodd" d="M1 5.25A2.25 2.25 0 013.25 3h13.5A2.25 2.25 0 0119 5.25v9.5A2.25 2.25 0 0116.75 17H3.25A2.25 2.25 0 011 14.75v-9.5zm1.5 5.81v3.69c0 .414.336.75.75.75h13.5a.75.75 0 00.75-.75v-3.69l-2.72-2.72a.75.75 0 00-1.06 0L11.5 10l-1.72-1.72a.75.75 0 00-1.06 0l-4 4zM12.5 7a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z" clip-rule="evenodd" /></svg><span class="category-name flex-grow">所有图片</span></div><div id="category-dynamic-list"></div><hr class="my-2"><div id="nav-item-recycle-bin" data-view="recycle_bin" class="nav-item flex items-center gap-3 p-2 rounded cursor-pointer hover:bg-gray-100"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 text-slate-500"><path fill-rule="evenodd" d="M8.75 1A2.75 2.75 0 006 3.75V4.5h8V3.75A2.75 2.75 0 0011.25 1h-2.5zM10 4.5a.75.75 0 00-1.5 0v.75h1.5v-.75zM4.75 6.25A.75.75 0 015.5 5.5h9a.75.75 0 01.75.75v9a.75.75 0 01-.75.75h-9a.75.75 0 01-.75-.75v-9zM5.5 6.25v9h9v-9h-9z" clip-rule="evenodd" /></svg><span class="category-name flex-grow">回收站</span></div><hr class="my-2"><div id="nav-item-maintenance" data-view="maintenance" class="nav-item flex items-center gap-3 p-2 rounded cursor-pointer hover:bg-gray-100"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 text-slate-500"><path d="M10.435 2.222a.75.75 0 0 0-1.026-.816l-6.5 3.25a.75.75 0 0 0 .816 1.026L8 3.91V15.5a.75.75 0 0 0 1.5 0V3.91l4.195 2.097a.75.75 0 0 0 .816-1.026l-4.125-2.065Z"></path><path d="M4.5 15.542a.75.75 0 0 0-1.5 0V17.5h-.5a.75.75 0 0 0 0 1.5h11a.75.75 0 0 0 0-1.5h-.5v-1.958a.75.75 0 0 0-1.5 0v1.208h-6v-1.208Z"></path></svg><span class="category-name flex-grow">空间清理</span></div></div></section>
             <section class="bg-white p-6 rounded-lg shadow-md"><h2 class="text-xl font-semibold mb-4">安全</h2><div id="security-section"></div></section>
         </div>
         <section id="image-list-section" class="bg-white p-6 rounded-lg shadow-md xl:col-span-8">
-            <div id="controls-header" class="flex flex-col gap-4 mb-4">
-                <div>
-                    <h2 id="image-list-header" class="text-xl font-semibold text-slate-900"></h2>
-                </div>
-                <div class="w-full">
-                    <input type="search" id="search-input" placeholder="在当前视图下搜索..." class="w-full border rounded-full px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
-                </div>
-                <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-                    <div class="flex items-center gap-4">
-                        <select id="sort-select" class="border rounded-md px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
-                            <option value="date_desc">日期最新</option>
-                            <option value="date_asc">日期最老</option>
-                            <option value="name_asc">名称 A-Z</option>
-                            <option value="name_desc">名称 Z-A</option>
-                            <option value="size_desc">最大</option>
-                            <option value="size_asc">最小</option>
-                        </select>
-                        <div id="view-toggle" class="flex items-center border rounded-md">
-                            <button data-view="grid" class="p-1.5" title="网格视图"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5"><path fill-rule="evenodd" d="M4.25 2A2.25 2.25 0 002 4.25v2.5A2.25 2.25 0 004.25 9h2.5A2.25 2.25 0 009 6.75v-2.5A2.25 2.25 0 006.75 2h-2.5zm0 9A2.25 2.25 0 002 13.25v2.5A2.25 2.25 0 004.25 18h2.5A2.25 2.25 0 009 15.75v-2.5A2.25 2.25 0 006.75 11h-2.5zm9-9A2.25 2.25 0 0011 4.25v2.5A2.25 2.25 0 0013.25 9h2.5A2.25 2.25 0 0018 6.75v-2.5A2.25 2.25 0 0015.75 2h-2.5zM13.25 11a2.25 2.25 0 00-2.25 2.25v2.5a2.25 2.25 0 002.25 2.25h2.5a2.25 2.25 0 002.25-2.25v-2.5a2.25 2.25 0 00-2.25-2.25h-2.5z" clip-rule="evenodd"></path></svg></button>
-                            <button data-view="list" class="p-1.5" title="列表视图"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5"><path d="M3 4.75A.75.75 0 013.75 4h12.5a.75.75 0 010 1.5H3.75A.75.75 0 013 4.75zM3 9.75A.75.75 0 013.75 9h12.5a.75.75 0 010 1.5H3.75A.75.75 0 013 9.75zM3 14.75A.75.75 0 013.75 14h12.5a.75.75 0 010 1.5H3.75A.75.75 0 013 14.75z"></path></svg></button>
-                        </div>
-                    </div>
+            <div class="flex flex-col md:flex-row justify-between items-center mb-4 gap-4 flex-shrink-0">
+                <h2 id="image-list-header" class="text-xl font-semibold text-slate-900 flex-shrink-0"></h2>
+                <div class="flex-grow flex flex-col sm:flex-row items-center gap-4 w-full">
                     <div id="view-controls" class="flex items-center gap-2">
-                        <button id="bulk-select-btn" title="批量选择" class="flex items-center gap-1.5 px-3 py-1.5 border rounded-md text-sm hover:bg-slate-100"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5"><path fill-rule="evenodd" d="M10 2a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 0110 2zM8.06 4.94a.75.75 0 010-1.06l1.5-1.5a.75.75 0 011.06 0l1.5 1.5a.75.75 0 01-1.06 1.06L10 3.94 8.06 4.94zM5.75 6.75a.75.75 0 01.75-.75h7.5a.75.75 0 010 1.5h-7.5a.75.75 0 01-.75-.75zM5 10a.75.75 0 01.75-.75h4.5a.75.75 0 010 1.5h-4.5A.75.75 0 015 10zm0 3.75a.75.75 0 01.75-.75h4.5a.75.75 0 010 1.5h-4.5a.75.75 0 01-.75-.75zm8.5-4.5a.75.75 0 000 1.5h.01a.75.75 0 000-1.5h-.01zM13.5 13a.75.75 0 000 1.5h.01a.75.75 0 000-1.5h-.01z" clip-rule="evenodd"></path><path fill-rule="evenodd" d="M3.5 1.75C2.672 1.75 2 2.422 2 3.25v13.5C2 17.578 2.672 18.25 3.5 18.25h13c.828 0 1.5-.672 1.5-1.5V3.25c0-.828-.672-1.5-1.5-1.5h-13zM3.5 3.25a.01.01 0 000 .01v13.5c0 .005.004.01.01.01h12.98a.01.01 0 00.01-.01V3.26a.01.01 0 000-.01H3.5z" clip-rule="evenodd"></path></svg><span class="hidden sm:inline">批量选择</span></button>
+                        <button id="bulk-select-btn" title="批量选择" class="flex items-center gap-1.5 px-3 py-1.5 border rounded-md text-sm hover:bg-slate-100"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5"><path fill-rule="evenodd" d="M10 2a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 0110 2zM8.06 4.94a.75.75 0 010-1.06l1.5-1.5a.75.75 0 011.06 0l1.5 1.5a.75.75 0 01-1.06 1.06L10 3.94 8.06 4.94zM5.75 6.75a.75.75 0 01.75-.75h7.5a.75.75 0 010 1.5h-7.5a.75.75 0 01-.75-.75zM5 10a.75.75 0 01.75-.75h4.5a.75.75 0 010 1.5h-4.5A.75.75 0 015 10zm0 3.75a.75.75 0 01.75-.75h4.5a.75.75 0 010 1.5h-4.5a.75.75 0 01-.75-.75zm8.5-4.5a.75.75 0 000 1.5h.01a.75.75 0 000-1.5h-.01zM13.5 13a.75.75 0 000 1.5h.01a.75.75 0 000-1.5h-.01z" clip-rule="evenodd" /><path fill-rule="evenodd" d="M3.5 1.75C2.672 1.75 2 2.422 2 3.25v13.5C2 17.578 2.672 18.25 3.5 18.25h13c.828 0 1.5-.672 1.5-1.5V3.25c0-.828-.672-1.5-1.5-1.5h-13zM3.5 3.25a.01.01 0 000 .01v13.5c0 .005.004.01.01.01h12.98a.01.01 0 00.01-.01V3.26a.01.01 0 000-.01H3.5z" clip-rule="evenodd" /></svg><span class="hidden sm:inline">批量选择</span></button>
                         <button id="bulk-cancel-btn" class="flex items-center gap-1.5 px-3 py-1.5 border rounded-md text-sm bg-red-100 text-red-700 hover:bg-red-200"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5"><path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"></path></svg>取消</button>
                         <div id="select-all-container" class="items-center gap-2 pl-2">
                             <input type="checkbox" id="select-all-checkbox" class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
                             <label for="select-all-checkbox" class="text-sm text-slate-600">全选</label>
                         </div>
                     </div>
+                    <div class="w-full md:w-64 ml-auto">
+                        <input type="search" id="search-input" placeholder="在当前视图下搜索..." class="w-full border rounded-full px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
+                    </div>
+                </div>
+                <div class="flex items-center justify-end gap-4 flex-shrink-0 flex-wrap">
+                    <select id="sort-select" class="border rounded-md px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
+                        <option value="date_desc">日期最新</option><option value="date_asc">日期最老</option>
+                        <option value="name_asc">名称 A-Z</option><option value="name_desc">名称 Z-A</option>
+                        <option value="size_desc">最大</option><option value="size_asc">最小</option>
+                    </select>
+                    <div id="view-toggle" class="flex items-center border rounded-md">
+                        <button data-view="grid" class="p-1.5" title="网格视图"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5"><path fill-rule="evenodd" d="M4.25 2A2.25 2.25 0 002 4.25v2.5A2.25 2.25 0 004.25 9h2.5A2.25 2.25 0 009 6.75v-2.5A2.25 2.25 0 006.75 2h-2.5zm0 9A2.25 2.25 0 002 13.25v2.5A2.25 2.25 0 004.25 18h2.5A2.25 2.25 0 009 15.75v-2.5A2.25 2.25 0 006.75 11h-2.5zm9-9A2.25 2.25 0 0011 4.25v2.5A2.25 2.25 0 0013.25 9h2.5A2.25 2.25 0 0018 6.75v-2.5A2.25 2.25 0 0015.75 2h-2.5zM13.25 11a2.25 2.25 0 00-2.25 2.25v2.5a2.25 2.25 0 002.25 2.25h2.5a2.25 2.25 0 002.25-2.25v-2.5a2.25 2.25 0 00-2.25-2.25h-2.5z" clip-rule="evenodd"></path></svg></button>
+                        <button data-view="list" class="p-1.5" title="列表视图"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5"><path d="M3 4.75A.75.75 0 013.75 4h12.5a.75.75 0 010 1.5H3.75A.75.75 0 013 4.75zM3 9.75A.75.75 0 013.75 9h12.5a.75.75 0 010 1.5H3.75A.75.75 0 013 9.75zM3 14.75A.75.75 0 013.75 14h12.5a.75.75 0 010 1.5H3.75A.75.75 0 013 14.75z"></path></svg></button>
+                    </div>
                 </div>
             </div>
             <div id="image-list-wrapper">
                 <div id="image-list"></div>
                 <div id="image-loader" class="text-center py-8 text-slate-500 hidden">正在加载...</div>
+                 <div id="maintenance-view" class="hidden p-4"></div>
             </div>
-            <div id="maintenance-view" class="hidden p-4"></div>
             <div id="pagination-container" class="mt-auto flex justify-center items-center gap-4">
                 <div id="items-per-page-container">
                     <select id="items-per-page-select" class="border rounded-md px-2 py-1 text-sm focus:outline-none">
@@ -859,12 +1240,12 @@ cat << 'EOF' > public/admin.html
     </div>
     <div id="bulk-action-bar">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
-            <div class="flex items-center justify-between">
+            <div class="flex items-center justify-between flex-wrap gap-y-2">
                 <div class="flex items-center gap-4">
                      <span id="bulk-counter" class="font-medium">已选择 0 张图片</span>
                 </div>
-                <div id="bulk-buttons-container" class="flex items-center gap-3">
-                    </div>
+                <div id="bulk-buttons-container" class="flex items-center gap-3 flex-wrap justify-end">
+                </div>
             </div>
         </div>
     </div>
@@ -884,7 +1265,6 @@ cat << 'EOF' > public/admin.html
             itemsPerPageSelect: document.getElementById('items-per-page-select'),
             sortSelect: document.getElementById('sort-select'), viewToggle: document.getElementById('view-toggle'), viewControls: document.getElementById('view-controls'),
             maintenanceView: document.getElementById('maintenance-view'), imageListWrapper: document.getElementById('image-list-wrapper'),
-            controlsHeader: document.getElementById('controls-header'),
             lightbox: document.getElementById('lightbox'),
             lightboxSpinner: document.querySelector('#lightbox .spinner'),
             lightboxImage: document.querySelector('#lightbox .lightbox-image'),
@@ -1000,10 +1380,9 @@ cat << 'EOF' > public/admin.html
         async function refreshNavigation() { try { const response = await apiRequest('/api/categories'); const categories = await response.json(); DOMElements.categoryDynamicList.innerHTML = ''; categories.forEach(cat => { const isUncategorized = cat === UNCATEGORIZED; const item = document.createElement('div'); item.className = 'nav-item flex items-center justify-between p-2 rounded cursor-pointer hover:bg-gray-100'; item.dataset.view = 'category'; item.dataset.categoryName = cat; item.innerHTML = `<span class="category-name flex-grow">${cat}</span>` + (isUncategorized ? '' : `<div class="space-x-2 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"><button data-name="${cat}" class="rename-cat-btn text-blue-500 hover:text-blue-700 text-sm">重命名</button><button data-name="${cat}" class="delete-cat-btn text-red-500 hover:red-700 text-sm">删除</button></div>`); item.addEventListener('mouseenter', () => item.classList.add('group')); item.addEventListener('mouseleave', () => item.classList.remove('group')); DOMElements.categoryDynamicList.appendChild(item); }); await populateCategorySelects(); } catch (error) { if (error.message !== 'Unauthorized') console.error('加载导航列表失败:', error.message); } }
         
         function switchMainView(viewType) {
-            const isContent = viewType === 'content';
-            DOMElements.imageListWrapper.style.display = isContent ? 'block' : 'none';
-            DOMElements.paginationContainer.style.display = isContent ? 'flex' : 'none';
-            DOMElements.controlsHeader.style.display = isContent ? 'flex' : 'none';
+            DOMElements.imageListWrapper.style.display = viewType === 'content' ? 'block' : 'none';
+            DOMElements.paginationContainer.style.display = viewType === 'content' ? 'flex' : 'none';
+            DOMElements.viewControls.style.display = viewType === 'content' ? 'flex' : 'none';
             DOMElements.maintenanceView.style.display = viewType === 'maintenance' ? 'block' : 'none';
         }
 
@@ -1225,6 +1604,24 @@ cat << 'EOF' > public/admin.html
         async function renderSecuritySection() { try { const response = await apiRequest('/api/admin/2fa/status'); const { enabled } = await response.json(); let content; if (enabled) { content = `<p class="text-sm text-slate-600 mb-3">两步验证 (2FA) 当前已<span class="font-bold text-green-600">启用</span>。</p><button id="disable-tfa-btn" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg">禁用 2FA</button>`; } else { content = `<p class="text-sm text-slate-600 mb-3">通过启用两步验证，为您的账户增加一层额外的安全保障。</p><button id="enable-tfa-btn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg">启用 2FA</button>`; } DOMElements.securitySection.innerHTML = content; } catch (error) { DOMElements.securitySection.innerHTML = `<p class="text-red-500">无法加载安全状态: ${error.message}</p>`; } }
         DOMElements.securitySection.addEventListener('click', async e => { if (e.target.id === 'enable-tfa-btn') { try { const response = await apiRequest('/api/admin/2fa/generate', {method: 'POST'}); const data = await response.json(); DOMElements.tfaModal.querySelector('#tfa-setup-content').innerHTML = `<p class="text-sm mb-4">1. 使用您的 Authenticator 应用扫描二维码。</p><img src="${data.qrCode}" alt="2FA QR Code" class="mx-auto border p-2 bg-white"><p class="text-sm mt-4 mb-2">或手动输入密钥:</p><p class="font-mono bg-gray-100 p-2 rounded text-center text-sm break-all">${data.secret}</p><p class="text-sm mt-6 mb-2">2. 输入应用生成的6位验证码以完成设置：</p><form id="tfa-verify-form" class="flex gap-2"><input type="text" id="tfa-token-input" required maxlength="6" class="w-full border rounded px-3 py-2" placeholder="6位数字码"><button type="submit" class="bg-green-600 hover:bg-green-700 text-white py-2 px-4 rounded">验证并启用</button></form><p id="tfa-error" class="text-red-500 text-sm mt-2 hidden"></p>`; DOMElements.tfaModal.classList.add('active'); document.getElementById('tfa-verify-form').addEventListener('submit', async ev => { ev.preventDefault(); const token = document.getElementById('tfa-token-input').value; try { const response = await apiRequest('/api/admin/2fa/enable', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ secret: data.secret, token })}); const result = await response.json(); showToast(result.message); hideModal(DOMElements.tfaModal); await renderSecuritySection(); } catch (err) { document.getElementById('tfa-error').textContent = err.message; document.getElementById('tfa-error').classList.remove('hidden'); } }); } catch (error) { showToast(error.message, 'error'); } } else if (e.target.id === 'disable-tfa-btn') { const confirmed = await showConfirmationModal('禁用 2FA', `<p>确定要禁用两步验证吗？您的账户安全性将会降低。</p>`, '确认禁用'); if (confirmed) { try { await apiRequest('/api/admin/2fa/disable', {method: 'POST'}); showToast('2FA已禁用'); await renderSecuritySection(); } catch(err) { showToast(err.message, 'error'); } } } });
         
+        async function updateCacheInfo() {
+            const displayEl = document.getElementById('cache-info-display');
+            if (!displayEl) return;
+            displayEl.textContent = '正在计算...';
+            try {
+                const res = await apiRequest('/api/admin/maintenance/cache-info');
+                const data = await res.json();
+                if (data.totalSize > 0) {
+                    displayEl.textContent = `当前占用: ${formatBytes(data.totalSize)} (${data.fileCount}个文件)`;
+                } else {
+                    displayEl.textContent = `缓存已清空`;
+                }
+            } catch (err) {
+                displayEl.textContent = '无法获取缓存大小';
+                console.error('Failed to get cache info:', err);
+            }
+        }
+
         async function loadMaintenanceView() {
             switchMainView('maintenance');
             DOMElements.imageListHeader.textContent = '空间清理';
@@ -1238,8 +1635,12 @@ cat << 'EOF' > public/admin.html
                 <div class="bg-slate-50 p-6 rounded-lg">
                     <h3 class="text-lg font-semibold mb-2">清理图片缓存</h3>
                     <p class="text-sm text-slate-600 mb-4">安全地清空 public/cache 目录下的所有图片缩略图。这些文件在用户访问时会自动重新生成，清理它们可以释放磁盘空间。</p>
-                    <button id="clear-cache-btn" class="bg-orange-500 hover:bg-orange-600 text-white font-bold py-2 px-4 rounded-lg">清理图片缓存</button>
+                    <div class="flex items-center mt-4">
+                        <button id="clear-cache-btn" class="bg-orange-500 hover:bg-orange-600 text-white font-bold py-2 px-4 rounded-lg">清理图片缓存</button>
+                        <span id="cache-info-display" class="ml-4 text-sm text-slate-600"></span>
+                    </div>
                 </div>`;
+            updateCacheInfo();
         }
 
         DOMElements.maintenanceView.addEventListener('click', async e => {
@@ -1279,6 +1680,7 @@ cat << 'EOF' > public/admin.html
                         const res = await apiRequest('/api/admin/maintenance/clear-cache', { method: 'POST' });
                         const result = await res.json();
                         showToast(result.message, 'success');
+                        updateCacheInfo(); // Refresh cache info after clearing
                     } catch (err) {
                         showToast(`清理缓存失败: ${err.message}`, 'error');
                     }
