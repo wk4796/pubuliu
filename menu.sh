@@ -1,22 +1,24 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v2.0.2)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v2.0.3)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
+#   v2.0.3 更新:
+#   - 优化(后台): 重构了后台主内容区的控件布局，实现了移动端优先的
+#               响应式设计。在手机等小屏幕上控件会自动纵向排列，
+#               解决了界面拥挤、难以操作的问题。
+#
 #   v2.0.2 更新:
 #   - 修复(后台): 修正了 admin.html 的HTML结构错误。该错误导致“空间清理”
 #               视图被错误的父容器隐藏，解决了按钮无法显示的根本问题。
 #
 #   v2.0.1 更新:
-#   - 修复(后台): 修正了 server.js 中的一个致命 `ReferenceError`，该错误
-#               导致服务在启动后立即崩溃并陷入无限重启循环。
-#   - 优化(后台): 移除了上传控件的 `accept="image/*"` 属性，以改善在
-#               移动端设备上调用文件管理器的兼容性。
+#   - 修复(后台): 修正了 server.js 中的一个致命 `ReferenceError`。
+#   - 优化(后台): 移除了上传控件的 `accept="image/*"` 属性。
 #
 #   v2.0.0 更新:
-#   - 核心升级(后台): 数据库从 JSON 文件迁移至 SQLite (使用 better-sqlite3)，
-#                  大幅提升了在大数据量下的查询、排序和筛选性能。
+#   - 核心升级(后台): 数据库从 JSON 文件迁移至 SQLite。
 #   - 新增功能(后台): 在“空间清理”中增加了“清理图片缓存”功能。
 #   - 优化(安装): 增强了安装脚本，可自动安装 SQLite 的系统开发依赖库。
 # =================================================================
@@ -29,7 +31,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 PROMPT_Y="(${GREEN}y${NC}/${RED}n${NC})"
 
-SCRIPT_VERSION="2.0.2"
+SCRIPT_VERSION="2.0.3"
 APP_NAME="image-gallery"
 
 # --- 路径设置 ---
@@ -56,7 +58,7 @@ overwrite_app_files() {
 cat << 'EOF' > package.json
 {
   "name": "image-gallery-pro",
-  "version": "2.0.2",
+  "version": "2.0.3",
   "description": "A high-performance, full-stack image gallery application powered by SQLite.",
   "main": "server.js",
   "scripts": {
@@ -791,30 +793,33 @@ cat << 'EOF' > public/admin.html
             <section class="bg-white p-6 rounded-lg shadow-md"><h2 class="text-xl font-semibold mb-4">安全</h2><div id="security-section"></div></section>
         </div>
         <section id="image-list-section" class="bg-white p-6 rounded-lg shadow-md xl:col-span-8">
-            <div class="flex flex-col md:flex-row justify-between items-center mb-4 gap-4 flex-shrink-0">
+            <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-4">
                 <h2 id="image-list-header" class="text-xl font-semibold text-slate-900 flex-shrink-0"></h2>
-                <div class="flex-grow flex flex-col sm:flex-row items-center gap-4 w-full">
+                <div class="flex flex-col sm:flex-row sm:items-center sm:justify-end flex-wrap gap-4 w-full lg:w-auto">
+                    <div class="relative w-full sm:w-auto sm:flex-grow lg:flex-grow-0 lg:w-56">
+                        <input type="search" id="search-input" placeholder="在当前视图下搜索..." class="w-full border rounded-full px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
+                    </div>
+                    <div class="flex items-center justify-between sm:justify-start gap-4">
+                        <select id="sort-select" class="border rounded-md px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
+                            <option value="date_desc">日期最新</option>
+                            <option value="date_asc">日期最老</option>
+                            <option value="name_asc">名称 A-Z</option>
+                            <option value="name_desc">名称 Z-A</option>
+                            <option value="size_desc">最大</option>
+                            <option value="size_asc">最小</option>
+                        </select>
+                        <div id="view-toggle" class="flex items-center border rounded-md">
+                            <button data-view="grid" class="p-1.5" title="网格视图"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5"><path fill-rule="evenodd" d="M4.25 2A2.25 2.25 0 002 4.25v2.5A2.25 2.25 0 004.25 9h2.5A2.25 2.25 0 009 6.75v-2.5A2.25 2.25 0 006.75 2h-2.5zm0 9A2.25 2.25 0 002 13.25v2.5A2.25 2.25 0 004.25 18h2.5A2.25 2.25 0 009 15.75v-2.5A2.25 2.25 0 006.75 11h-2.5zm9-9A2.25 2.25 0 0011 4.25v2.5A2.25 2.25 0 0013.25 9h2.5A2.25 2.25 0 0018 6.75v-2.5A2.25 2.25 0 0015.75 2h-2.5zM13.25 11a2.25 2.25 0 00-2.25 2.25v2.5a2.25 2.25 0 002.25 2.25h2.5a2.25 2.25 0 002.25-2.25v-2.5a2.25 2.25 0 00-2.25-2.25h-2.5z" clip-rule="evenodd"></path></svg></button>
+                            <button data-view="list" class="p-1.5" title="列表视图"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5"><path d="M3 4.75A.75.75 0 013.75 4h12.5a.75.75 0 010 1.5H3.75A.75.75 0 013 4.75zM3 9.75A.75.75 0 013.75 9h12.5a.75.75 0 010 1.5H3.75A.75.75 0 013 9.75zM3 14.75A.75.75 0 013.75 14h12.5a.75.75 0 010 1.5H3.75A.75.75 0 013 14.75z"></path></svg></button>
+                        </div>
+                    </div>
                     <div id="view-controls" class="flex items-center gap-2">
-                        <button id="bulk-select-btn" title="批量选择" class="flex items-center gap-1.5 px-3 py-1.5 border rounded-md text-sm hover:bg-slate-100"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5"><path fill-rule="evenodd" d="M10 2a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 0110 2zM8.06 4.94a.75.75 0 010-1.06l1.5-1.5a.75.75 0 011.06 0l1.5 1.5a.75.75 0 01-1.06 1.06L10 3.94 8.06 4.94zM5.75 6.75a.75.75 0 01.75-.75h7.5a.75.75 0 010 1.5h-7.5a.75.75 0 01-.75-.75zM5 10a.75.75 0 01.75-.75h4.5a.75.75 0 010 1.5h-4.5A.75.75 0 015 10zm0 3.75a.75.75 0 01.75-.75h4.5a.75.75 0 010 1.5h-4.5a.75.75 0 01-.75-.75zm8.5-4.5a.75.75 0 000 1.5h.01a.75.75 0 000-1.5h-.01zM13.5 13a.75.75 0 000 1.5h.01a.75.75 0 000-1.5h-.01z" clip-rule="evenodd" /><path fill-rule="evenodd" d="M3.5 1.75C2.672 1.75 2 2.422 2 3.25v13.5C2 17.578 2.672 18.25 3.5 18.25h13c.828 0 1.5-.672 1.5-1.5V3.25c0-.828-.672-1.5-1.5-1.5h-13zM3.5 3.25a.01.01 0 000 .01v13.5c0 .005.004.01.01.01h12.98a.01.01 0 00.01-.01V3.26a.01.01 0 000-.01H3.5z" clip-rule="evenodd" /></svg><span class="hidden sm:inline">批量选择</span></button>
+                        <button id="bulk-select-btn" title="批量选择" class="flex items-center gap-1.5 px-3 py-1.5 border rounded-md text-sm hover:bg-slate-100"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5"><path fill-rule="evenodd" d="M10 2a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 0110 2zM8.06 4.94a.75.75 0 010-1.06l1.5-1.5a.75.75 0 011.06 0l1.5 1.5a.75.75 0 01-1.06 1.06L10 3.94 8.06 4.94zM5.75 6.75a.75.75 0 01.75-.75h7.5a.75.75 0 010 1.5h-7.5a.75.75 0 01-.75-.75zM5 10a.75.75 0 01.75-.75h4.5a.75.75 0 010 1.5h-4.5A.75.75 0 015 10zm0 3.75a.75.75 0 01.75-.75h4.5a.75.75 0 010 1.5h-4.5a.75.75 0 01-.75-.75zm8.5-4.5a.75.75 0 000 1.5h.01a.75.75 0 000-1.5h-.01zM13.5 13a.75.75 0 000 1.5h.01a.75.75 0 000-1.5h-.01z" clip-rule="evenodd"></path><path fill-rule="evenodd" d="M3.5 1.75C2.672 1.75 2 2.422 2 3.25v13.5C2 17.578 2.672 18.25 3.5 18.25h13c.828 0 1.5-.672 1.5-1.5V3.25c0-.828-.672-1.5-1.5-1.5h-13zM3.5 3.25a.01.01 0 000 .01v13.5c0 .005.004.01.01.01h12.98a.01.01 0 00.01-.01V3.26a.01.01 0 000-.01H3.5z" clip-rule="evenodd"></path></svg><span class="hidden sm:inline">批量选择</span></button>
                         <button id="bulk-cancel-btn" class="flex items-center gap-1.5 px-3 py-1.5 border rounded-md text-sm bg-red-100 text-red-700 hover:bg-red-200"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5"><path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"></path></svg>取消</button>
                         <div id="select-all-container" class="items-center gap-2 pl-2">
                             <input type="checkbox" id="select-all-checkbox" class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
                             <label for="select-all-checkbox" class="text-sm text-slate-600">全选</label>
                         </div>
-                    </div>
-                    <div class="w-full md:w-64 ml-auto">
-                        <input type="search" id="search-input" placeholder="在当前视图下搜索..." class="w-full border rounded-full px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
-                    </div>
-                </div>
-                <div class="flex items-center gap-4 flex-shrink-0">
-                    <select id="sort-select" class="border rounded-md px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
-                        <option value="date_desc">日期最新</option><option value="date_asc">日期最老</option>
-                        <option value="name_asc">名称 A-Z</option><option value="name_desc">名称 Z-A</option>
-                        <option value="size_desc">最大</option><option value="size_asc">最小</option>
-                    </select>
-                    <div id="view-toggle" class="flex items-center border rounded-md">
-                        <button data-view="grid" class="p-1.5" title="网格视图"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5"><path fill-rule="evenodd" d="M4.25 2A2.25 2.25 0 002 4.25v2.5A2.25 2.25 0 004.25 9h2.5A2.25 2.25 0 009 6.75v-2.5A2.25 2.25 0 006.75 2h-2.5zm0 9A2.25 2.25 0 002 13.25v2.5A2.25 2.25 0 004.25 18h2.5A2.25 2.25 0 009 15.75v-2.5A2.25 2.25 0 006.75 11h-2.5zm9-9A2.25 2.25 0 0011 4.25v2.5A2.25 2.25 0 0013.25 9h2.5A2.25 2.25 0 0018 6.75v-2.5A2.25 2.25 0 0015.75 2h-2.5zM13.25 11a2.25 2.25 0 00-2.25 2.25v2.5a2.25 2.25 0 002.25 2.25h2.5a2.25 2.25 0 002.25-2.25v-2.5a2.25 2.25 0 00-2.25-2.25h-2.5z" clip-rule="evenodd"></path></svg></button>
-                        <button data-view="list" class="p-1.5" title="列表视图"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5"><path d="M3 4.75A.75.75 0 013.75 4h12.5a.75.75 0 010 1.5H3.75A.75.75 0 013 4.75zM3 9.75A.75.75 0 013.75 9h12.5a.75.75 0 010 1.5H3.75A.75.75 0 013 9.75zM3 14.75A.75.75 0 013.75 14h12.5a.75.75 0 010 1.5H3.75A.75.75 0 013 14.75z"></path></svg></button>
                     </div>
                 </div>
             </div>
@@ -990,9 +995,10 @@ cat << 'EOF' > public/admin.html
         async function refreshNavigation() { try { const response = await apiRequest('/api/categories'); const categories = await response.json(); DOMElements.categoryDynamicList.innerHTML = ''; categories.forEach(cat => { const isUncategorized = cat === UNCATEGORIZED; const item = document.createElement('div'); item.className = 'nav-item flex items-center justify-between p-2 rounded cursor-pointer hover:bg-gray-100'; item.dataset.view = 'category'; item.dataset.categoryName = cat; item.innerHTML = `<span class="category-name flex-grow">${cat}</span>` + (isUncategorized ? '' : `<div class="space-x-2 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"><button data-name="${cat}" class="rename-cat-btn text-blue-500 hover:text-blue-700 text-sm">重命名</button><button data-name="${cat}" class="delete-cat-btn text-red-500 hover:red-700 text-sm">删除</button></div>`); item.addEventListener('mouseenter', () => item.classList.add('group')); item.addEventListener('mouseleave', () => item.classList.remove('group')); DOMElements.categoryDynamicList.appendChild(item); }); await populateCategorySelects(); } catch (error) { if (error.message !== 'Unauthorized') console.error('加载导航列表失败:', error.message); } }
         
         function switchMainView(viewType) {
-            DOMElements.imageListWrapper.style.display = viewType === 'content' ? 'block' : 'none';
-            DOMElements.paginationContainer.style.display = viewType === 'content' ? 'flex' : 'none';
-            DOMElements.viewControls.style.display = viewType === 'content' ? 'flex' : 'none';
+            const isContent = viewType === 'content';
+            DOMElements.imageListWrapper.style.display = isContent ? 'block' : 'none';
+            DOMElements.paginationContainer.style.display = isContent ? 'flex' : 'none';
+            DOMElements.viewControls.parentElement.parentElement.style.display = isContent ? 'flex' : 'none';
             DOMElements.maintenanceView.style.display = viewType === 'maintenance' ? 'block' : 'none';
         }
 
