@@ -1,25 +1,27 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v2.0.3)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v2.0.4)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
+#   v2.0.4 更新:
+#   - 重构(后台): 彻底重写了后台管理页面的控件区域布局，采用更简洁健壮的
+#               响应式方案，强制在移动端垂直堆叠控件，确保在任何小屏幕
+#               设备上都有清晰、易用的操作界面。
+#
 #   v2.0.3 更新:
-#   - 优化(后台): 重构了后台主内容区的控件布局，实现了移动端优先的
-#               响应式设计。在手机等小屏幕上控件会自动纵向排列，
-#               解决了界面拥挤、难以操作的问题。
+#   - 优化(后台): 对后台主内容区的控件布局进行响应式优化。
 #
 #   v2.0.2 更新:
-#   - 修复(后台): 修正了 admin.html 的HTML结构错误。该错误导致“空间清理”
-#               视图被错误的父容器隐藏，解决了按钮无法显示的根本问题。
+#   - 修复(后台): 修正了 admin.html 的HTML结构错误。
 #
 #   v2.0.1 更新:
-#   - 修复(后台): 修正了 server.js 中的一个致命 `ReferenceError`。
+#   - 修复(后台): 修正了 server.js 中的致命 `ReferenceError`。
 #   - 优化(后台): 移除了上传控件的 `accept="image/*"` 属性。
 #
 #   v2.0.0 更新:
 #   - 核心升级(后台): 数据库从 JSON 文件迁移至 SQLite。
-#   - 新增功能(后台): 在“空间清理”中增加了“清理图片缓存”功能。
+#   - 新增功能(后台): 增加了“清理图片缓存”功能。
 #   - 优化(安装): 增强了安装脚本，可自动安装 SQLite 的系统开发依赖库。
 # =================================================================
 
@@ -31,7 +33,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 PROMPT_Y="(${GREEN}y${NC}/${RED}n${NC})"
 
-SCRIPT_VERSION="2.0.3"
+SCRIPT_VERSION="2.0.4"
 APP_NAME="image-gallery"
 
 # --- 路径设置 ---
@@ -58,7 +60,7 @@ overwrite_app_files() {
 cat << 'EOF' > package.json
 {
   "name": "image-gallery-pro",
-  "version": "2.0.3",
+  "version": "2.0.4",
   "description": "A high-performance, full-stack image gallery application powered by SQLite.",
   "main": "server.js",
   "scripts": {
@@ -793,13 +795,15 @@ cat << 'EOF' > public/admin.html
             <section class="bg-white p-6 rounded-lg shadow-md"><h2 class="text-xl font-semibold mb-4">安全</h2><div id="security-section"></div></section>
         </div>
         <section id="image-list-section" class="bg-white p-6 rounded-lg shadow-md xl:col-span-8">
-            <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-4">
-                <h2 id="image-list-header" class="text-xl font-semibold text-slate-900 flex-shrink-0"></h2>
-                <div class="flex flex-col sm:flex-row sm:items-center sm:justify-end flex-wrap gap-4 w-full lg:w-auto">
-                    <div class="relative w-full sm:w-auto sm:flex-grow lg:flex-grow-0 lg:w-56">
-                        <input type="search" id="search-input" placeholder="在当前视图下搜索..." class="w-full border rounded-full px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
-                    </div>
-                    <div class="flex items-center justify-between sm:justify-start gap-4">
+            <div id="controls-header" class="flex flex-col gap-4 mb-4">
+                <div>
+                    <h2 id="image-list-header" class="text-xl font-semibold text-slate-900"></h2>
+                </div>
+                <div class="w-full">
+                    <input type="search" id="search-input" placeholder="在当前视图下搜索..." class="w-full border rounded-full px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
+                </div>
+                <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+                    <div class="flex items-center gap-4">
                         <select id="sort-select" class="border rounded-md px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
                             <option value="date_desc">日期最新</option>
                             <option value="date_asc">日期最老</option>
@@ -880,6 +884,7 @@ cat << 'EOF' > public/admin.html
             itemsPerPageSelect: document.getElementById('items-per-page-select'),
             sortSelect: document.getElementById('sort-select'), viewToggle: document.getElementById('view-toggle'), viewControls: document.getElementById('view-controls'),
             maintenanceView: document.getElementById('maintenance-view'), imageListWrapper: document.getElementById('image-list-wrapper'),
+            controlsHeader: document.getElementById('controls-header'),
             lightbox: document.getElementById('lightbox'),
             lightboxSpinner: document.querySelector('#lightbox .spinner'),
             lightboxImage: document.querySelector('#lightbox .lightbox-image'),
@@ -998,7 +1003,7 @@ cat << 'EOF' > public/admin.html
             const isContent = viewType === 'content';
             DOMElements.imageListWrapper.style.display = isContent ? 'block' : 'none';
             DOMElements.paginationContainer.style.display = isContent ? 'flex' : 'none';
-            DOMElements.viewControls.parentElement.parentElement.style.display = isContent ? 'flex' : 'none';
+            DOMElements.controlsHeader.style.display = isContent ? 'flex' : 'none';
             DOMElements.maintenanceView.style.display = viewType === 'maintenance' ? 'block' : 'none';
         }
 
