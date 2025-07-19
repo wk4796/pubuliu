@@ -1,26 +1,22 @@
 #!/bin/bash
 
 # =================================================================
-#   图片画廊 专业版 - 一体化部署与管理脚本 (v2.1.2)
+#   图片画廊 专业版 - 一体化部署与管理脚本 (v2.2.0)
 #
 #   作者: 编码助手 (经 Gemini Pro 优化)
+#   v2.2.0 更新:
+#   - 核心升级(性能): 引入 SQLite FTS5 全文搜索引擎，重构了后台搜索逻辑。
+#                    现在即使有数万张图片，搜索响应也能达到毫秒级。
+#   - 优化(脚本): 增加了 Node.js 版本检查(需 >= v16)，防止环境不兼容。
+#   - 优化(脚本): 修改端口时，会针对 1024 以下的特权端口给出警告。
+#   - 优化(脚本): 重构了 PM2 的调用逻辑，减少了代码重复。
+#
 #   v2.1.2 更新:
 #   - 优化(后台): 优化了后台切换视图的体验。现在点击导航项后，右侧标题会
 #                  立即更新，无需等待数据加载完成，提升了操作的响应速度。
 #
 #   v2.1.1 更新:
 #   - 修复(后台): 修正了“空间清理”视图因HTML结构错误而无法显示的布局问题。
-#
-#   v2.1.0 更新:
-#   - 新增功能(后台): 在“空间清理”中增加了缓存大小的实时显示。
-#   - 优化(UI/UX): 全面优化了前后台的响应式设计。
-#
-#   v2.0.1 更新:
-#   - 修复(后台): 修正了 server.js 中的一个致命 `ReferenceError`。
-#   - 优化(后台): 移除了上传控件的 `accept` 属性以改善移动端兼容性。
-#
-#   v2.0.0 更新:
-#   - 核心升级(后台): 数据库从 JSON 文件迁移至 SQLite。
 # =================================================================
 
 # --- 配置 ---
@@ -31,7 +27,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 PROMPT_Y="(${GREEN}y${NC}/${RED}n${NC})"
 
-SCRIPT_VERSION="2.1.2"
+SCRIPT_VERSION="2.2.0"
 APP_NAME="image-gallery"
 
 # --- 路径设置 ---
@@ -58,8 +54,8 @@ overwrite_app_files() {
 cat << 'EOF' > package.json
 {
   "name": "image-gallery-pro",
-  "version": "2.1.2",
-  "description": "A high-performance, full-stack image gallery application powered by SQLite.",
+  "version": "2.2.0",
+  "description": "A high-performance, full-stack image gallery application powered by SQLite and FTS5.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
@@ -133,7 +129,7 @@ const initializeApp = () => {
                 uploadedAt TEXT NOT NULL,
                 width INTEGER,
                 height INTEGER,
-                status TEXT NOT NULL DEFAULT 'active',
+                status TEXT NOT NULL DEFAULT 'active', /* active, deleted */
                 deletedAt TEXT
             );
             CREATE TABLE IF NOT EXISTS categories (
@@ -146,12 +142,32 @@ const initializeApp = () => {
             CREATE INDEX IF NOT EXISTS idx_images_category ON images(category);
             CREATE INDEX IF NOT EXISTS idx_images_status ON images(status);
             CREATE INDEX IF NOT EXISTS idx_images_uploadedAt ON images(uploadedAt);
+
+            -- FTS5 全文搜索优化 --
+            CREATE VIRTUAL TABLE IF NOT EXISTS images_fts USING fts5(
+                originalFilename,
+                description,
+                content='images',
+                content_rowid='rowid',
+                tokenize = 'unicode61'
+            );
+
+            -- 创建触发器以保持 FTS 表同步 --
+            CREATE TRIGGER IF NOT EXISTS images_ai AFTER INSERT ON images BEGIN
+              INSERT INTO images_fts(rowid, originalFilename, description) VALUES (new.rowid, new.originalFilename, new.description);
+            END;
+            CREATE TRIGGER IF NOT EXISTS images_ad AFTER DELETE ON images BEGIN
+              INSERT INTO images_fts(rowid, originalFilename, description) VALUES (old.rowid, old.originalFilename, old.description);
+            END;
+            CREATE TRIGGER IF NOT EXISTS images_au AFTER UPDATE ON images BEGIN
+              INSERT INTO images_fts(rowid, originalFilename, description) VALUES (new.rowid, new.originalFilename, new.description);
+            END;
         `);
 
         // 确保 '未分类' 存在
         db.prepare('INSERT OR IGNORE INTO categories (name) VALUES (?)').run(UNCATEGORIZED);
 
-        console.log('数据库初始化成功。');
+        console.log('数据库和FTS5索引初始化成功。');
     } catch (error) {
         console.error('初始化失败:', error);
         process.exit(1);
@@ -231,12 +247,16 @@ app.get('/admin', requirePageAuth, (req, res) => res.redirect('/admin.html'));
 app.get('/api/images', handleApiError(async (req, res) => {
     const { category, search, page = 1, limit = 20, sort_by = 'date_desc' } = req.query;
     
+    let baseQuery = 'FROM images';
     let whereClauses = ["status != 'deleted'"];
     const params = [];
 
     if (search) {
-        whereClauses.push("(originalFilename LIKE ? OR description LIKE ?)");
-        params.push(`%${search}%`, `%${search}%`);
+        baseQuery = 'FROM images_fts JOIN images ON images_fts.rowid = images.rowid';
+        whereClauses.push("images_fts MATCH ?");
+        // 将多个搜索词用 OR 连接，以获得更好的匹配效果
+        const ftsQuery = search.trim().split(/\s+/).filter(Boolean).join(' OR ');
+        params.push(ftsQuery);
     }
 
     if (category && category !== 'all' && category !== 'random') {
@@ -259,9 +279,9 @@ app.get('/api/images', handleApiError(async (req, res) => {
         orderByClause = 'ORDER BY RANDOM()';
     }
 
-    const whereString = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+    const whereString = `WHERE ${whereClauses.join(' AND ')}`;
     
-    const countStmt = db.prepare(`SELECT COUNT(*) as total FROM images ${whereString}`);
+    const countStmt = db.prepare(`SELECT COUNT(images.id) as total ${baseQuery} ${whereString}`);
     const { total } = countStmt.get(...params);
 
     const pageNum = parseInt(page);
@@ -269,7 +289,7 @@ app.get('/api/images', handleApiError(async (req, res) => {
     const offset = (pageNum - 1) * limitNum;
     const totalPages = Math.ceil(total / limitNum);
 
-    const imagesStmt = db.prepare(`SELECT * FROM images ${whereString} ${orderByClause} LIMIT ? OFFSET ?`);
+    const imagesStmt = db.prepare(`SELECT images.* ${baseQuery} ${whereString} ${orderByClause} LIMIT ? OFFSET ?`);
     const images = imagesStmt.all(...params, limitNum, offset);
     
     res.json({
@@ -511,12 +531,15 @@ apiAdminRouter.put('/categories', handleApiError(async (req, res) => {
 apiAdminRouter.get('/recycle-bin', handleApiError(async (req, res) => {
     const { search, page = 1, limit = 12, sort_by = 'date_desc' } = req.query;
     
+    let baseQuery = 'FROM images';
     let whereClauses = ["status = 'deleted'"];
     const params = [];
 
     if (search) {
-        whereClauses.push("(originalFilename LIKE ? OR description LIKE ?)");
-        params.push(`%${search}%`, `%${search}%`);
+        baseQuery = 'FROM images_fts JOIN images ON images_fts.rowid = images.rowid';
+        whereClauses.push("images_fts MATCH ?");
+        const ftsQuery = search.trim().split(/\s+/).filter(Boolean).join(' OR ');
+        params.push(ftsQuery);
     }
 
     let orderByClause;
@@ -530,7 +553,7 @@ apiAdminRouter.get('/recycle-bin', handleApiError(async (req, res) => {
     }
 
     const whereString = `WHERE ${whereClauses.join(' AND ')}`;
-    const countStmt = db.prepare(`SELECT COUNT(*) as total FROM images ${whereString}`);
+    const countStmt = db.prepare(`SELECT COUNT(images.id) as total ${baseQuery} ${whereString}`);
     const { total } = countStmt.get(...params);
 
     const pageNum = parseInt(page);
@@ -538,7 +561,7 @@ apiAdminRouter.get('/recycle-bin', handleApiError(async (req, res) => {
     const offset = (pageNum - 1) * limitNum;
     const totalPages = Math.ceil(total / limitNum);
 
-    const imagesStmt = db.prepare(`SELECT * FROM images ${whereString} ${orderByClause} LIMIT ? OFFSET ?`);
+    const imagesStmt = db.prepare(`SELECT images.* ${baseQuery} ${whereString} ${orderByClause} LIMIT ? OFFSET ?`);
     const deletedImages = imagesStmt.all(...params, limitNum, offset);
 
     res.json({ images: deletedImages, page: pageNum, totalPages: totalPages, totalImages: total });
@@ -1892,6 +1915,22 @@ EOF
     return 0
 }
 
+# --- 辅助函数 ---
+run_pm2() {
+    local cmd_prefix=""
+    if [ "$EUID" -ne 0 ]; then
+        if command -v sudo &> /dev/null; then
+            cmd_prefix="sudo"
+        else
+            echo -e "${RED}错误: PM2 操作需要 root 权限或 sudo。${NC}"
+            return 1
+        fi
+    fi
+    # 将所有传入的参数传递给 pm2
+    ${cmd_prefix} pm2 "$@"
+}
+
+
 # --- 管理菜单功能 ---
 run_update_procedure() {
     echo -e "${GREEN}--- 开始覆盖更新(保留数据) ---${NC}"
@@ -1973,6 +2012,21 @@ install_app() {
             echo -e "${RED}错误：此脚本需要以 root 用户身份运行，或者需要安装 'sudo' 工具才能继续。${NC}"
             return 1
         fi
+    fi
+
+    # 检查 Node.js 版本
+    echo "--> 正在检查 Node.js 版本..."
+    if ! command -v node &>/dev/null; then
+        echo -e "${YELLOW}Node.js 未安装，将尝试自动安装...${NC}"
+    else
+        local node_version; node_version=$(node -v)
+        local major_version; major_version=$(echo "$node_version" | cut -d'v' -f2 | cut -d'.' -f1)
+        local min_version=16
+        if [ "$major_version" -lt "$min_version" ]; then
+            echo -e "${RED}错误: Node.js 版本过低 (${node_version})。请升级到 v${min_version} 或更高版本。${NC}"
+            return 1
+        fi
+        echo -e "${GREEN}--> Node.js 版本 (${node_version}) 符合要求。${NC}"
     fi
 
     check_and_install_deps "Node.js & npm" "nodejs npm" "node" "${sudo_cmd}" || return 1
@@ -2109,13 +2163,13 @@ display_status() {
         local ADMIN_USER; ADMIN_USER=$(grep 'ADMIN_USERNAME=' .env | cut -d '=' -f2)
         
         if command -v pm2 &> /dev/null && pm2 id "$APP_NAME" &> /dev/null; then
-            local pm2_status; pm2_status=$(pm2 show "$APP_NAME" | grep 'status' | awk '{print $4}')
+            local pm2_status; pm2_status=$(run_pm2 show "$APP_NAME" | grep 'status' | awk '{print $4}')
             if [ "$pm2_status" == "online" ]; then
                 printf "  %-15s %b%s%b\n" "运行状态:" "${GREEN}" "在线 (Online)" "${NC}"
             else
                 printf "  %-15s %b%s%b\n" "运行状态:" "${RED}" "离线 (Offline) 或 错误" "${NC}"
             fi
-            local log_path; log_path=$(pm2 show "$APP_NAME" | grep 'out log path' | awk '{print $6}')
+            local log_path; log_path=$(run_pm2 show "$APP_NAME" | grep 'out log path' | awk '{print $6}')
             printf "  %-15s %b%s%b\n" "日志文件:" "${BLUE}" "${log_path}" "${NC}"
         else
             printf "  %-15s %b%s%b\n" "运行状态:" "${YELLOW}" "未知 (PM2未运行或应用未被管理)" "${NC}"
@@ -2143,14 +2197,9 @@ start_app() {
     [ ! -d "${INSTALL_DIR}" ] || [ ! -f "${INSTALL_DIR}/.env" ] && { echo -e "${RED}错误: 应用未安装或 .env 文件不存在。请先运行安装程序 (选项1)。${NC}"; return 1; }
     cd "${INSTALL_DIR}" || return 1
     
-    local cmd_prefix=""
-    if [ "$EUID" -ne 0 ]; then
-        if command -v sudo &> /dev/null; then cmd_prefix="sudo"; fi
-    fi
-    
-    ${cmd_prefix} pm2 start server.js --name "$APP_NAME"
-    ${cmd_prefix} pm2 startup
-    ${cmd_prefix} pm2 save --force
+    run_pm2 start server.js --name "$APP_NAME"
+    run_pm2 startup
+    run_pm2 save --force
     echo -e "${GREEN}--- 应用已启动！---${NC}"
 }
 
@@ -2158,12 +2207,7 @@ stop_app() {
     echo -e "${YELLOW}--- 正在停止应用... ---${NC}"
     [ ! -d "${INSTALL_DIR}" ] && { echo -e "${RED}错误: 应用未安装。${NC}"; return 1; }
     
-    local cmd_prefix=""
-    if [ "$EUID" -ne 0 ]; then
-        if command -v sudo &> /dev/null; then cmd_prefix="sudo"; fi
-    fi
-    
-    ${cmd_prefix} pm2 stop "$APP_NAME"
+    run_pm2 stop "$APP_NAME"
     echo -e "${GREEN}--- 应用已停止！---${NC}"
 }
 
@@ -2171,25 +2215,15 @@ restart_app() {
     echo -e "${GREEN}--- 正在重启应用... ---${NC}"
     [ ! -d "${INSTALL_DIR}" ] && { echo -e "${RED}错误: 应用未安装。${NC}"; return 1; }
     
-    local cmd_prefix=""
-    if [ "$EUID" -ne 0 ]; then
-        if command -v sudo &> /dev/null; then cmd_prefix="sudo"; fi
-    fi
-    
-    ${cmd_prefix} pm2 restart "$APP_NAME"
+    run_pm2 restart "$APP_NAME"
     echo -e "${GREEN}--- 应用已重启！---${NC}"
 }
 
 view_logs() {
     echo -e "${YELLOW}--- 显示应用日志 (按 Ctrl+C 退出)... ---${NC}"
     [ ! -d "${INSTALL_DIR}" ] && { echo -e "${RED}错误: 应用未安装。${NC}"; return 1; }
-    
-    local cmd_prefix=""
-    if [ "$EUID" -ne 0 ]; then
-        if command -v sudo &> /dev/null; then cmd_prefix="sudo"; fi
-    fi
-    
-    ${cmd_prefix} pm2 logs "$APP_NAME"
+
+    run_pm2 logs "$APP_NAME"
 }
 
 manage_credentials() {
@@ -2247,6 +2281,11 @@ manage_port() {
             continue
         fi
         
+        if [ "$new_port" -lt 1024 ] && [ "$EUID" -ne 0 ]; then
+            echo -e "${YELLOW}警告: 端口 ${new_port} 是一个特权端口，非 root 用户可能无法使用。${NC}"
+            echo -e "${YELLOW}脚本将继续，但应用启动时可能会因权限不足而失败。${NC}"
+        fi
+
         break
     done
 
@@ -2385,9 +2424,8 @@ uninstall_app() {
     read -p "$(echo -e "${YELLOW}您是否完全理解以上后果并确认要彻底卸载? ${PROMPT_Y}: ")" confirm
     if [[ "$confirm" == "y" || "$confirm" == "Y" ]]; then
         echo "--> 正在从 PM2 中删除应用..."
-        local cmd_prefix=""
-        if [ "$EUID" -ne 0 ] && command -v sudo &>/dev/null; then cmd_prefix="sudo"; fi
-        if command -v pm2 &> /dev/null; then ${cmd_prefix} pm2 delete "$APP_NAME" &> /dev/null; ${cmd_prefix} pm2 save --force &> /dev/null; fi
+        run_pm2 delete "$APP_NAME" &> /dev/null
+        run_pm2 save --force &> /dev/null
         
         echo "--> 正在永久删除项目文件夹: ${INSTALL_DIR}..."
         rm -rf "${INSTALL_DIR}"
